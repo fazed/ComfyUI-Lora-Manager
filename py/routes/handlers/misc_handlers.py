@@ -3126,6 +3126,32 @@ class ModelLibraryHandler:
                     "downloadedVersionIds": [],
                 })
 
+            # Models without local files: report their download history, like
+            # check_model_exists does for a single model id. One bulk query per
+            # model type instead of one query per model and type.
+            missing = {
+                item["modelId"]: item for item in results if not item["versions"]
+            }
+            if missing:
+                history_service = await self._get_download_history_service()
+                for candidate_type in (
+                    "lora",
+                    "checkpoint",
+                    "embedding",
+                    "other",
+                    "workflow",
+                ):
+                    if not missing:
+                        break
+                    downloaded = await history_service.get_downloaded_version_ids_bulk(
+                        candidate_type, list(missing)
+                    )
+                    for model_id, version_ids in downloaded.items():
+                        if version_ids and model_id in missing:
+                            missing.pop(model_id)["downloadedVersionIds"] = sorted(
+                                version_ids
+                            )
+
             return web.json_response(
                 {"success": True, "results": results}
             )

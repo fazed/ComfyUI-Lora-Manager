@@ -2529,6 +2529,57 @@ async def test_check_models_exist_resolves_other_ids():
 
 
 @pytest.mark.asyncio
+async def test_check_models_exist_returns_download_history_for_missing_models():
+    """Models without local files report their downloaded version ids."""
+    _set_other_models_enabled(False)
+    _set_workflows_enabled(False)
+    lora_scanner = OtherRecordingScanner(
+        versions_by_model_id={5: [{"versionId": 11, "name": "v1"}]}
+    )
+    history_service = FakeDownloadHistoryService(
+        {
+            "lora": {5: {12}, 6: {61, 60}},
+            "checkpoint": {7: {70}},
+        }
+    )
+
+    async def lora_factory():
+        return lora_scanner
+
+    async def history_factory():
+        return history_service
+
+    handler = ModelLibraryHandler(
+        ServiceRegistryAdapter(
+            get_lora_scanner=lora_factory,
+            get_checkpoint_scanner=fake_scanner_factory,
+            get_embedding_scanner=fake_scanner_factory,
+            get_downloaded_version_history_service=history_factory,
+        ),
+        metadata_provider_factory=fake_metadata_provider_factory,
+    )
+
+    response = await handler.check_models_exist(
+        FakeRequest(query={"modelIds": "5,6,7,8"})  # pyright: ignore[reportArgumentType]
+    )
+    payload = _json_payload(response)
+
+    assert payload["success"] is True
+    results = {item["modelId"]: item for item in payload["results"]}
+    # In the library: unchanged, history is only reported for missing models.
+    assert results[5]["modelType"] == "lora"
+    assert results[5]["downloadedVersionIds"] == []
+    assert results[6] == {
+        "modelId": 6,
+        "modelType": None,
+        "versions": [],
+        "downloadedVersionIds": [60, 61],
+    }
+    assert results[7]["downloadedVersionIds"] == [70]
+    assert results[8]["downloadedVersionIds"] == []
+
+
+@pytest.mark.asyncio
 async def test_check_models_exist_ignores_other_scanner_when_disabled():
     _set_other_models_enabled(False)
     other_scanner = OtherRecordingScanner(versions_by_model_id={5: [{"versionId": 400}]})
