@@ -38,11 +38,13 @@ ui/
                           SearchPage, DownloadsPage, SettingsPage (schema-driven),
                           StatsPage, DoctorPage, NotFoundPage
     components/charts/    dependency-free SVG/CSS charts (series tokens)
-    components/settings/  SettingsField + Backups/MetadataArchive/ExampleImages/About panels
-    config/settingsSchema.ts  settings sections and fields
+    components/settings/  SettingsField (one field row), SettingsTabList (ARIA tab list)
+                          + Backups/MetadataArchive/ExampleImages/About panels
+    config/settingsSchema.ts  settings sections and fields (keys, types, defaults, validation)
+    config/settingsTabs.ts    presentation: which tab and card each field lives in
     config/libraries.ts   per-type config (loras / checkpoints / embeddings)
     config/navigation.ts  top-bar tabs, active state, search route targets
-    themes/               design tokens + themes + registry.ts
+    themes/               design tokens + themes + registry.ts + contrast.ts (WCAG helper)
     styles/main.css       stylesheet entry: Tailwind + tokens.css + app.css
     styles/tokens.css     Tailwind theme mapped onto the design tokens
     styles/app.css        base rules + shared classes (buttons, inputs, chips)
@@ -222,7 +224,10 @@ Tailwind v4 is configured CSS-first, no `tailwind.config.*`:
   focus ring, plus a few rules that give back browser defaults preflight
   removes) and the shared classes in `@layer components`: `lm-btn` (+
   `--primary`, `--danger`, `--ghost`, `--icon`, `--sm`), `lm-input`,
-  `lm-select`, `lm-textarea`, `lm-check`, `lm-label`, `lm-hint`,
+  `lm-select`, `lm-textarea` (all on the field tokens: field background,
+  >= 3:1 outline, hover step, solid focus ring, disabled, placeholder,
+  `aria-invalid`), `lm-check`, `lm-switch` (on/off switch on a
+  `<input type="checkbox" role="switch">`), `lm-label`, `lm-hint`,
   `lm-error-text`, `lm-chip`, `lm-badge` (+ variants), `lm-panel`, `lm-row`
   (selectable rows), `lm-thumb`, `lm-overline`, `lm-toolbar`, `lm-page`,
   `lm-page-header`, `lm-prose` (sanitized HTML). Utilities always win over
@@ -238,6 +243,7 @@ Tailwind v4 is configured CSS-first, no `tailwind.config.*`:
 | `border-border`, `border-border-strong` (+ `hairline`, `hairline-t/r/b/l` for `--lm-border-width`) | `--lm-color-border` / `-border-strong` |
 | `bg-accent`, `text-accent`, `bg-accent-hover`, `bg-accent-soft`, `text-on-accent`, `accent-accent` | `--lm-color-accent`, `-accent-hover`, `-accent-soft`, `--lm-color-on-accent` |
 | `danger`, `danger-soft`, `on-danger`, `success`, `success-soft`, `warning`, `warning-soft` (with any color utility: `text-`, `bg-`, `border-`, `border-l-`, ...) | the matching `--lm-color-*` token |
+| `bg-field`, `bg-field-hover`, `bg-field-disabled`, `border-field-border`, `border-field-border-hover`, `text-placeholder` | `--lm-color-field`, `-field-hover`, `-field-disabled`, `-field-border`, `-field-border-hover`, `--lm-color-placeholder` (with fallbacks for user themes that do not set them) |
 | `bg-overlay`, `backdrop:bg-overlay`, `bg-scrim`, `text-on-scrim`, `bg-skeleton`, `outline-focus` | `--lm-color-overlay`, `-scrim`, `-on-scrim`, `-skeleton`, `-focus` |
 | `bg-scrim-fade` | gradient from `--lm-color-scrim` to transparent (text over card media) |
 | `font-sans`, `font-mono` | `--lm-font-sans` / `--lm-font-mono` |
@@ -298,6 +304,32 @@ To add a built-in theme: create `src/themes/<id>.css`, import it in
 tests check that every built-in theme defines the same color tokens and no
 layout tokens.
 
+**Rule: contrast is tested.** `tests/contrast.test.ts` reads the token values
+of every built-in theme and computes WCAG 2.x contrast ratios
+(`src/themes/contrast.ts`, translucent tints composited on the panel):
+text and muted text on page, panel, dialog and field >= 4.5:1, placeholder
+on field (and field hover) >= 4.5:1, field border (and its hover) against
+panel, dialog and page >= 3:1, focus ring against page, panel, dialog and
+field >= 3:1, accent >= 3:1 (checked switch) and >= 4.5:1 (links), danger
+text, text on accent/danger buttons and every badge (accent, success,
+warning, danger text on its soft tint) >= 4.5:1, and a field background
+that differs from the page. When a pair fails, tune the theme; never lower
+a threshold. Current values (Light / Dark / Midnight): muted on panel
+5.98 / 6.85 / 6.32, placeholder on field 5.23 / 5.76 / 6.20, field border on
+panel 3.67 / 3.75 / 4.08 (on dialogs 3.67 / 3.43 / 3.70), focus ring on field
+4.47 / 7.47 / 9.39. Light success and warning were darkened (`#116b33`,
+`#9a4507`) so their badges reach 4.5:1.
+
+Fields have their own surface: page < panel < field, with an outline that
+alone meets 3:1 (in Light the field is white on a white panel, so the
+outline carries the separation; in the dark themes the field is one step
+lighter than the panel). Default Light sets its field tokens on
+`:root:not([data-theme]), [data-theme='default-light']` (not on plain
+`:root`), so a user theme that predates these tokens never inherits white
+fields; it gets the fallbacks from `tokens.css` instead (field = its
+surface, outline = 75% muted mixed into its surface, placeholder = muted).
+User themes may set the six field tokens to tune this.
+
 ### User themes (no rebuild)
 
 Drop a `.css` file into `<LoRA Manager settings dir>/ui-themes/` (the folder
@@ -349,7 +381,10 @@ Colors (set by every theme):
 | `--lm-color-danger`, `-danger-soft`, `--lm-color-on-danger` | destructive actions, errors |
 | `--lm-color-success`, `-success-soft` | success states |
 | `--lm-color-warning`, `-warning-soft` | warnings, paused queue, favorites star |
-| `--lm-color-focus` | keyboard focus ring |
+| `--lm-color-focus` | keyboard focus ring (also the solid ring of focused fields) |
+| `--lm-color-field` / `-field-hover` / `-field-disabled` | background of inputs, selects, textareas, switch tracks |
+| `--lm-color-field-border` / `-field-border-hover` | field outline (>= 3:1 on panel, dialog and page) |
+| `--lm-color-placeholder` | placeholder text (>= 4.5:1 on the field) |
 | `--lm-color-overlay` | modal/drawer backdrop |
 | `--lm-color-scrim`, `--lm-color-on-scrim` | gradient + text over card media |
 | `--lm-color-skeleton` | loading placeholders |
@@ -825,17 +860,17 @@ the end of this file.
   server's own version (`/version-info`) as `clientVersion`, so the classic
   stale-bundle check stays green for the new UI. The environment panel
   (versions + "Copy environment" as Markdown) is shared with Settings > About.
-* **Settings** (`/settings`): every section of the classic modal (General,
-  Downloads, AI provider, Proxy, Interface, Library, Organization, Example
-  images, Metadata, Backups, About) from one schema
-  (`config/settingsSchema.ts`, `utils/settingsModel.ts`): a section nav on
-  wide screens, a filter box, per-field validation (ranges, steps, folder and
-  file-name templates with their placeholders, proxy port, URLs, priority-tag
-  parentheses, checkpoint/UNet folder overlap) shown inline and after a save
-  attempt, a changed-dot per field and a count per section, **Reset to
-  default** per field (the backend defaults; the classic modal has none),
-  "Classic UI" badges for settings that only affect the classic interface and
-  "Restart" badges. One **Save changes** sends only the changed keys,
+* **Settings** (`/settings/<tab>`): every section of the classic modal
+  (General, Downloads, AI provider, Proxy, Interface, Library, Organization,
+  Example images, Metadata, Backups, About) from one schema
+  (`config/settingsSchema.ts`, `utils/settingsModel.ts`), presented in tabs
+  and cards (see "Settings page UX" below), with per-field validation (ranges,
+  steps, folder and file-name templates with their placeholders, proxy port,
+  URLs, priority-tag parentheses, checkpoint/UNet folder overlap) shown
+  inline under the control while typing and after a save attempt, **Reset**
+  per field (the backend defaults; the classic modal has none),
+  "Classic UI" / "Restart" / "Moves files" / "Moves settings" / "Rescans
+  library" chips next to the label. One **Save changes** sends only the changed keys,
   **server-validated keys first** (a rejected value then saves nothing), asks
   first for side effects (moving recipes, portable mode, restart-only
   folders), re-reads the settings afterwards, and after an error shows the
@@ -853,7 +888,7 @@ the end of this file.
   on read (`sanitizeSettings`). Secrets only travel in the POST body (never
   a URL), the UI never logs them, and `redactPatch` masks them for any
   display. Removing the proxy password sends `__DELETE__`.
-* **Backups** (Settings > Backups): automatic backup toggle and retention,
+* **Backups** (Settings > Backups & maintenance): automatic backup toggle and retention,
   the list of stored snapshots (auto/manual, size, date, folder), **Download
   a backup now** (the export endpoint; the zip goes to the browser, nothing
   stays on the server), **Open backup folder**, and **Restore from a
@@ -862,7 +897,7 @@ the end of this file.
   says ComfyUI must be restarted, and only enables "Overwrite and restore"
   with a `.zip` file chosen and `RESTORE` typed (checked again in
   `useBackups`). There is no delete (no endpoint).
-* **Metadata archive** (Settings > Metadata): status (downloaded / size,
+* **Metadata archive** (Settings > Civitai & metadata): status (downloaded / size,
   enabled), **Download database...** (confirm stating the multi-GB download
   and the overwrite; the request stays open, the panel shows a busy state;
   progress over WebSocket is not ported) and **Remove database...** (danger
@@ -882,6 +917,66 @@ the end of this file.
   Example images holds the folder (validated by the backend) and options plus
   the library-wide **Download all...** (confirm) with progress (polled every
   2 s while running), pause / resume / stop; it uses the **saved** folder.
+
+### Settings page UX
+
+Presentation only: `config/settingsTabs.ts` groups the schema fields into
+tabs and cards, `utils/settingsTabs.ts` holds the pure logic (tested in
+`tests/settingsTabs.test.ts`); the model, validation and save flow are
+unchanged.
+
+* **Tabs** (nine): General (language, content filtering, settings file),
+  Interface (theme/density of this UI, prompts and Send to ComfyUI, classic
+  UI display), Library & folders (roots, other model types, workflows and
+  wildcards, extra folder paths, recipe storage), Downloads (queue, folder
+  and file name templates, sorting rules), Example images, Civitai &
+  metadata (keys, metadata sources, archive database, model updates),
+  Integrations (AI provider, proxy), Backups & maintenance (backups,
+  diagnostics and statistics links), About (version, updates, environment).
+  Every field is in exactly one card and every panel once (tested).
+* **Tab list**: WAI-ARIA `tablist` / `tab` / `tabpanel`, roving tabindex,
+  arrows (both axes), Home/End with automatic activation, `aria-selected`
+  and `aria-controls`. Vertical and sticky on wide screens; below the
+  `tablet:` breakpoint a sticky, horizontally scrolling strip (the active tab
+  is scrolled into view). Each tab shows its number of unsaved changes.
+* **URL**: the active tab is the route param (`/settings/<tab>`, deep
+  linkable, reload safe, `router.replace` so tab switches do not pile up in
+  the history) and is remembered in `localStorage` (`lm-ui.settings.tab`;
+  `/settings` opens the last tab). Legacy links keep working:
+  `#field-<key>` and `#card-<id>` open the right tab, scroll to the field or
+  card, focus it and highlight it briefly; `#set-<section>` maps the old
+  section ids to their card. Scroll position is remembered per tab (a tab
+  not seen yet opens at the top).
+* **Layout**: cards with a heading and short description; field rows in two
+  columns on wide screens (label, chips and help text left, control right)
+  and one column below `tablet:`; toggles are switches; danger cards
+  (settings file, recipe storage) have a danger edge and icon; a changed row
+  gets a thin accent bar on its left edge (plus "(Changed)" for screen
+  readers). Inline errors sit under the control with an icon.
+* **Reset**: a small "Reset" text button at the right edge of the row,
+  rendered only when the value differs from its default (normalised like
+  the save patch; never for secrets or fields without a default), in a
+  fixed-width slot so controls line up (below `tablet:` the slot only takes
+  space when shown). The tab footer has **Reset tab to defaults…** with a
+  confirm listing every change (`label: current → default`); nothing is
+  saved until **Save changes**.
+* **Search**: one box searches every tab (label, help text, key, card
+  title; panels through their title, description and keywords; hidden
+  fields are skipped). Results are grouped by tab with a count, tabs show
+  their match count (tabs without matches are dimmed); Enter opens the first
+  result, Down moves into the list, Escape clears; picking a result opens
+  its tab, scrolls to the field, focuses it and highlights it. No matches
+  shows an empty state with suggestions.
+* **Save bar**: sticky at the bottom of the scroll area, in the flow (so it
+  never hides the last field), only with unsaved changes or a save error:
+  "N unsaved changes", the save error, Discard changes, Save changes. A
+  failed validation opens the tab of the first invalid field.
+* **Loading / errors**: a skeleton while the settings load; a load error is
+  a banner with Retry (also when the re-read after a save fails).
+* **Secrets**: never shown; Configured / Not configured, Change… opens a
+  password input with a show/hide toggle (eye / eye-off), Remove.
+* Motion uses the motion tokens (zero for `prefers-reduced-motion`; the
+  search jump scrolls instantly then).
 
 ### Safety
 
@@ -937,6 +1032,20 @@ the end of this file.
   the settings file backed up first: afterwards byte-identical; one backup
   export (download only): the backup folder kept the same files; the
   diagnostics ran (all checks healthy). Nothing else was changed live.
+
+* Settings UX pass: `tests/settingsTabs.test.ts` (tab model from the schema,
+  URL and legacy hash resolution, search across tabs and counts, per-tab
+  change counts, reset visibility, reset plan and apply, value formatting,
+  roving keyboard) and `tests/contrast.test.ts` (helper + every built-in
+  theme) were written first. Checked in a browser against the mock harness
+  (settings GET read-only from the real backend, saves mocked, a mock
+  "Sunset" user theme without field tokens): every tab in Light, Dark and
+  Midnight at desktop width, phone width (tab strip, single-column rows,
+  save bar, secret entry with show/hide, search and its empty state), search
+  results and the jump with highlight, the changed state with the save bar
+  and the side-effect confirm, Reset buttons, the reset-tab confirm, the
+  load-error banner with Retry, Sunset, and the shared inputs on the
+  library toolbar, Downloads page and download dialog.
 
 ## Roadmap: still in the classic UI
 
