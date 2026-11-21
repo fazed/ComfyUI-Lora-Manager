@@ -229,8 +229,8 @@ Tailwind v4 is configured CSS-first, no `tailwind.config.*`:
   `aria-invalid`), `lm-check`, `lm-switch` (on/off switch on a
   `<input type="checkbox" role="switch">`), `lm-label`, `lm-hint`,
   `lm-error-text`, `lm-chip`, `lm-badge` (+ variants), `lm-panel`, `lm-row`
-  (selectable rows), `lm-thumb`, `lm-overline`, `lm-toolbar`, `lm-page`,
-  `lm-page-header`, `lm-prose` (sanitized HTML). Utilities always win over
+  (selectable rows), `lm-thumb`, `lm-overline`, `lm-toolbar`,
+  `lm-prose` (sanitized HTML). Utilities always win over
   these classes (`lm-btn px-2` works).
 * Theme files stay plain CSS that only set tokens; nothing about writing a
   theme changed.
@@ -402,6 +402,7 @@ Non-color tokens (defaults in `base.css`, any theme may override):
 | Shadows | `--lm-shadow-sm/md/lg` |
 | Motion | `--lm-motion-fast`, `--lm-motion-normal`, `--lm-fade-duration` (media fade-in), `--lm-ease` (durations zeroed for `prefers-reduced-motion`) |
 | Layout | `--lm-topbar-height`, `--lm-drawer-width`, `--lm-control-height`, `--lm-touch-target` (44px minimum hit area on phone / touch layouts), `--lm-border-width`, `--lm-focus-ring-width` |
+| Page | `--lm-page-max-width` (outer width of the centered content pages, default `1180px`, mapped to `max-w-page`) |
 | Cards | `--lm-card-aspect` (e.g. `2 / 3`), `--lm-card-gap` (card width comes from the per-library size slider), `--lm-card-zoom` (hover/focus zoom of card media, default `1.05`, `1` = off; forced to `1` for `prefers-reduced-motion`) |
 
 The virtualised grid reads `--lm-card-aspect` and `--lm-card-gap` at runtime,
@@ -436,6 +437,45 @@ There is no sidebar: the content area uses the full width.
   inside zooms slightly (`lm-zoom-host` / `lm-zoom-media` in `app.css`, factor
   `--lm-card-zoom`), on hover only under `@media (hover: hover)` and on
   keyboard focus; the drawer's example thumbnails use the same classes.
+
+## Page layout
+
+Every routed page declares a **layout kind** in its route meta
+(`meta.layout`, `LAYOUT_KINDS` in `router.ts`; `<main>` carries it as
+`data-layout`):
+
+* `content` (Downloads, Stats, Diagnostics, Settings, Search, Not found):
+  renders inside `components/PageShell.vue`. The shell owns the page scroller
+  (`scrollbar-gutter: stable`, so pages with and without a vertical scrollbar
+  keep identical edges), one container centered with `mx-auto` and
+  `max-w-page` (`--lm-page-max-width`, 1180px including the gutter), the
+  gutter (`p-6`, `p-4` on `phone:`) and one header: the page's only `h1`
+  (`text-2xl`), an optional `description` slot and a right-aligned `actions`
+  slot (wraps under the title on phones), then `gap-5` between the header and
+  every following section. There is no wide variant: Stats charts and the
+  two-column Settings rows fit the single width. The `footer` slot renders
+  after the container inside the scroller (Settings' sticky save bar, which
+  uses the same `max-w-page`); `defineExpose({ scroller })` gives pages the
+  scroll element. Pages never set their own max width, centering or page
+  padding.
+* `grid` (LoRAs, Checkpoints, Embeddings, Recipes): full width, own toolbar
+  and virtualised grid; they do not use the shell.
+
+`tests/pageLayout.test.ts` fails when a routed page has no layout kind, when a
+`content` page does not use `PageShell` (or brings back `lm-page` /
+page-level `max-w-[...]` containers), or when the grid allow-list drifts from
+the routes. On a route-name change `App.vue` moves focus to `<main
+id="main-content">` when it was on the top bar or nowhere (skip-link target;
+tab/query changes inside a page do not move focus).
+
+Measured (1920/1440/1024/768/375px, Light/Dark/Midnight): all content pages
+share container edges (centered, 362.5/122.5/0/0/0px left at the widths above
+for a 15px scrollbar), `max-width` 1180px, padding 24px (16px at 375), h1
+24px/650 at the same top offset, 20px header-to-content gap and the same
+scrollbar gutter. Before: Downloads and Search were full width (edges at the
+24px gutter), Stats was left aligned at 1200px, Diagnostics left aligned at
+980px, Settings centered at 1180px with a 20px gap (Downloads 24px, Stats and
+Diagnostics 16px) and Not found had no h1.
 
 ## Search
 
