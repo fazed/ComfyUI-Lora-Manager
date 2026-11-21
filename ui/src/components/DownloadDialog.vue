@@ -106,11 +106,16 @@ function fileLabel(row: BatchRow, file: CivitaiFile): string {
   return `${file.name ?? `#${file.id}`}${details ? ` (${details})` : ''}${local ? ` (${t('download.badge.inLibrary').toLowerCase()})` : ''}`
 }
 
+const entriesWord = (count: number) => t(count === 1 ? 'download.entryOne' : 'download.entryMany')
+
 const footerStatus = computed(() => {
   const current = b.value
   if (current.submitting.value) return t('download.queuing', current.progress.value)
   if (current.resolving.value) return t('download.batch.resolving', { done: current.resolvedCount.value, total: rows.value.length })
-  if (!current.selectedCount.value && current.readyCount.value && !summary.value) return t('download.batch.nothingSelected')
+  if (summary.value) {
+    return t('download.doneSummary', { queued: summary.value.added, duplicates: summary.value.duplicates, failed: summary.value.failed })
+  }
+  if (!current.selectedCount.value && current.readyCount.value) return t('download.batch.nothingSelected')
   return ''
 })
 
@@ -153,9 +158,9 @@ const control = 'lm-select min-h-control-sm w-auto max-w-full min-w-0 py-0 text-
             </button>
             <p id="download-input-preview" class="text-xs text-muted" aria-live="polite">
               <template v-if="input.trim()">
-                {{ t('download.parsePreview', { count: parsed.entries.length }) }}<template v-if="parsed.invalid.length">
+                {{ t('download.parsePreview', { count: parsed.entries.length, entries: entriesWord(parsed.entries.length) }) }}<template v-if="parsed.invalid.length">
                   · <span class="text-danger">{{ t('download.parseInvalid', { count: parsed.invalid.length }) }}</span></template
-                ><template v-if="parsed.duplicates"> · {{ t('download.parseDuplicates', { count: parsed.duplicates }) }}</template>
+                ><template v-if="parsed.duplicates"> · {{ t('download.parseDuplicates', { count: parsed.duplicates, duplicates: t(parsed.duplicates === 1 ? 'download.duplicateOne' : 'download.duplicateMany') }) }}</template>
               </template>
             </p>
           </div>
@@ -178,7 +183,7 @@ const control = 'lm-select min-h-control-sm w-auto max-w-full min-w-0 py-0 text-
         <section class="flex flex-col gap-2" :aria-label="t('download.batch.entries')">
           <div class="flex flex-wrap items-center gap-2">
             <p class="mr-auto text-sm text-muted" data-testid="batch-counts">
-              {{ t('download.batch.counts', { total: rows.length, ready: b.readyCount.value, selected: b.selectedCount.value }) }}
+              {{ t('download.batch.counts', { total: rows.length, entries: entriesWord(rows.length), ready: b.readyCount.value, selected: b.selectedCount.value }) }}
             </p>
             <button v-if="b.resolving.value" type="button" class="lm-btn lm-btn--sm" @click="b.stop()">
               <AppIcon name="pause" :size="14" />{{ t('download.batch.stop') }}
@@ -234,7 +239,7 @@ const control = 'lm-select min-h-control-sm w-auto max-w-full min-w-0 py-0 text-
                 @change="b.toggle(row.key, ($event.target as HTMLInputElement).checked)"
               />
               <LazyMedia
-                class="h-[52px] w-[40px] flex-none overflow-hidden rounded-sm bg-sunken"
+                class="h-[52px] w-[40px] flex-none overflow-hidden rounded-sm bg-sunken phone:hidden"
                 media-class="size-full object-cover"
                 :src="thumbOf(row)"
                 kind="image"
@@ -396,7 +401,7 @@ const control = 'lm-select min-h-control-sm w-auto max-w-full min-w-0 py-0 text-
           {{
             submitting
               ? t('download.queuing', b.progress.value)
-              : b.selectedCount.value === 1
+              : b.selectedCount.value <= 1
                 ? t('download.queue')
                 : t('download.queueCount', { count: b.selectedCount.value })
           }}

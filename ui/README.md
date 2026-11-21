@@ -552,23 +552,55 @@ delete -> undo; all files hash-identical afterwards).
 Ported from the classic UI (`DownloadManager.js`, `ModelDuplicatesManager.js`,
 `SidebarManager.js` folder actions, `MoveManager.js` default path, the
 context-menu metadata actions). Flows live in
-`composables/useDownloadFlow.ts` and `composables/useModelTools.ts`, pure
+`composables/useBatchDownload.ts` and `composables/useModelTools.ts`, pure
 helpers in `utils/downloads.ts` and `utils/modelTools.ts`. Backend semantics:
 see "Phase B1 discovery" at the end of this file.
 
 * **Download dialog** (`components/DownloadDialog.vue`): library toolbar
   **Tools > Download...**, the **Download...** button on the Downloads page
   (takes the typed URL along) and **Download...** per version in the drawer's
-  Versions tab (model + version preselected). Steps: model type + Civitai
-  URL / model id / download link (`?fileId=` preselects that file) -> versions
-  with In library / Partly in library / Downloaded before / Queued / Early
-  access badges (a version fully in the library or already queued cannot be
-  queued again) and the weight files when a version has several -> library
-  root, "Use the default path template" (remembered per type) or a folder
-  (pick from the root's folders or type a new relative path; validated) with
-  the target preview -> **Add to queue** (one queue row per chosen file). The
-  queue worker downloads them; the dialog never calls the blocking
-  `download-model` endpoint.
+  Versions tab (model + version preselected). It takes **one or many**
+  entries (batch); a single entry is a batch of one. Flow: model type + a
+  textarea (plus **Paste from clipboard**) -> one row per entry -> one shared
+  destination -> **Add N to queue**. The queue worker downloads them; the
+  dialog never calls the blocking `download-model` endpoint. Logic:
+  `utils/batchDownload.ts` (pure) and `composables/useBatchDownload.ts`.
+  * **Input rules** (`parseBatchInput`): entries are separated by new lines
+    (LF, CRLF, CR), spaces, tabs, commas or semicolons. Recognised: model
+    pages on any `civitai.<tld>` host (`.com`, `.red`, `.green`, `www.`, with
+    or without `https://`) incl. `?modelVersionId=`, `/model-versions/<id>`
+    (web and `api/v1`), download links `/api/download/models/<version>`
+    (`?fileId=` preselects that file) and bare numeric model ids. A line that
+    contains links is free text: its links and bare ids count, other words
+    are ignored. On other lines every token must be an entry; a line without
+    any is listed whole under **Could not parse** (one click removes the
+    list). Identical entries (same model / version / file) are dropped and
+    counted; the live preview under the textarea shows found / unparseable /
+    duplicates.
+  * **Rows**: lookups run 2 at a time (abortable with **Stop**; stopped rows
+    become retryable) using the same read-only GETs as before; one
+    `civitai/versions` request per model is shared by its rows, plus one
+    `civitai/model/version` request per model for the model name (download
+    links get it from their own lookup). Each row: thumbnail, model name,
+    version select (URL version, else the newest), file select when the
+    version has several weight files (linked file, else the first missing
+    one of a partly downloaded version, else the primary), badges In library
+    / Partly / File in library / Downloaded before / Queued / Early access,
+    remove button, and on a failed lookup the reason (not found / private /
+    rate limited / type mismatch) with **Retry** (plus "Retry failed
+    lookups"). Rows already in the library, already queued or resolving to
+    the same version + file as another selected row start **deselected**
+    with the reason shown; the checkbox overrides it.
+  * **Destination**: one library root plus "Use the default path template"
+    (remembered per type) or a folder (suggestions from the root's folders or
+    a new relative path; validated) for all rows, with the target preview.
+    No per-row override.
+  * **Submit**: requests go out sequentially with live progress (`x/N`,
+    `aria-live`); the button is disabled while submitting. Added and
+    already-queued rows are locked; failed rows stay selected with their
+    reason, so pressing Add again retries **only** those. A summary (added /
+    already queued / failed with reasons) and **Open downloads** follow. The
+    body scrolls with a sticky footer; at phone width thumbnails are hidden.
 * **Queue destination (backend, fork-only)**: `GET /downloads/queue/add`
   accepts `model_root`, `relative_path`, `use_default_paths`. The root must be
   a configured LoRA / checkpoint / unet / embedding root (extra roots too),
