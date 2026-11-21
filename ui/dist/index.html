@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>LoRA Manager</title>
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <script>
+      /* Pre-paint theme bootstrap (kept tiny; mirrors src/themes/registry.ts).
+         Applies the stored theme/density before the first paint so there is
+         no light/dark flash. Storage keys: lm-ui.theme, lm-ui.theme.user,
+         lm-ui.density. */
+      (function () {
+        var root = document.documentElement
+        function read(key) {
+          try { return window.localStorage.getItem(key) } catch (e) { return null }
+        }
+        var choice = read('lm-ui.theme') || 'system'
+        var dark = false
+        try { dark = window.matchMedia('(prefers-color-scheme: dark)').matches } catch (e) {}
+        var theme = choice === 'system' ? (dark ? 'default-dark' : 'default-light') : choice
+        var user = null
+        try { user = JSON.parse(read('lm-ui.theme.user') || 'null') } catch (e) {}
+        if (user && user.id === theme && typeof user.href === 'string' && /^user-themes\/[\w.-]+\.css$/.test(user.href)) {
+          var link = document.createElement('link')
+          link.rel = 'stylesheet'
+          link.href = user.href
+          link.setAttribute('data-user-theme', user.id)
+          document.head.appendChild(link)
+          root.style.colorScheme = user.scheme === 'dark' ? 'dark' : 'light'
+        }
+        root.setAttribute('data-theme', theme)
+        var density = read('lm-ui.density')
+        root.setAttribute('data-density', density === 'compact' ? 'compact' : 'comfortable')
+      })()
+    </script>
+    <script type="module" crossorigin src="./assets/index-abEuD8bp.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-DYuOxGJb.css">
+  </head>
+  <body>
+    <div id="app"></div>
+    <noscript>The LoRA Manager UI needs JavaScript.</noscript>
+  </body>
+</html>

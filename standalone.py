@@ -388,6 +388,8 @@ class StandaloneLoraManager(LoraManager):
         PendingDeleteRoutes.setup_routes(app)
         ExampleImagesRoutes.setup_routes(app, ws_manager=ws_manager)
         PreviewRoutes.setup_routes(app)
+        # Fork-local modern UI (ui/), served at /lm-ui/ - see py/routes/modern_ui_routes.py
+        from py.routes.modern_ui_routes import ModernUiRoutes; ModernUiRoutes.setup_routes(app)
 
         # Setup WebSocket routes that are shared across all model types
         app.router.add_get("/ws/fetch-progress", ws_manager.handle_connection)

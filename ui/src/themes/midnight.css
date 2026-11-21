@@ -1,0 +1,37 @@
+/*
+ * Midnight: example extra theme proving the mechanism. Deep navy surfaces,
+ * amber accent, rounder corners and a slightly wider card gap; overrides a few
+ * non-color tokens on purpose.
+ */
+[data-theme='midnight'] {
+  color-scheme: dark;
+  --lm-color-bg: #0a0f1f;
+  --lm-color-surface: #10172d;
+  --lm-color-elevated: #16203c;
+  --lm-color-sunken: #070b17;
+  --lm-color-border: #1f2b4d;
+  --lm-color-border-strong: #2d3c66;
+  --lm-color-text: #e7eaf6;
+  --lm-color-muted: #8f99bf;
+  --lm-color-accent: #f5a524;
+  --lm-color-accent-hover: #ffbb4d;
+  --lm-color-accent-soft: rgba(245, 165, 36, 0.16);
+  --lm-color-on-accent: #1b1204;
+  --lm-color-danger: #ff7a85;
+  --lm-color-danger-soft: rgba(255, 122, 133, 0.15);
+  --lm-color-on-danger: #1d0a0c;
+  --lm-color-success: #5eead4;
+  --lm-color-success-soft: rgba(94, 234, 212, 0.14);
+  --lm-color-warning: #fcd34d;
+  --lm-color-warning-soft: rgba(252, 211, 77, 0.14);
+  --lm-color-focus: #ffbb4d;
+  --lm-color-overlay: rgba(3, 6, 15, 0.65);
+  --lm-color-scrim: rgba(5, 8, 20, 0.78);
+  --lm-color-on-scrim: #ffffff;
+  --lm-color-skeleton: #18223f;
+  --lm-color-shadow: rgba(0, 0, 0, 0.5);
+  --lm-radius-sm: 8px;
+  --lm-radius-md: 14px;
+  --lm-radius-lg: 20px;
+  --lm-card-gap: 18px;
+}

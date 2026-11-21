@@ -45,3 +45,6 @@ vue-widgets/dist/
 # HF enrichment validation baseline snapshots (contain potentially
 # NSFW README content fetched from community model repos)
 tests/enrich_hf_validation/baselines/
+
+# Modern UI (ui/) dependencies; ui/dist is committed on purpose
+ui/node_modules/

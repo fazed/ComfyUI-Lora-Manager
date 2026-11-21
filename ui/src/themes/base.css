@@ -1,0 +1,79 @@
+/*
+ * Base (non-color) design tokens shared by every theme.
+ *
+ * Themes (default-light.css, default-dark.css, midnight.css, user themes)
+ * set the color tokens and MAY override any token below. Components consume
+ * tokens only; see ui/README.md "Theming" for the full reference.
+ */
+:root {
+  /* Typography */
+  --lm-font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --lm-font-mono: ui-monospace, SFMono-Regular, 'Cascadia Mono', Consolas, 'Liberation Mono', monospace;
+  --lm-font-size-xs: 0.75rem;
+  --lm-font-size-sm: 0.8125rem;
+  --lm-font-size-md: 0.875rem;
+  --lm-font-size-lg: 1rem;
+  --lm-font-size-xl: 1.25rem;
+  --lm-font-size-2xl: 1.5rem;
+  --lm-font-weight-regular: 400;
+  --lm-font-weight-medium: 500;
+  --lm-font-weight-bold: 650;
+  --lm-line-height: 1.5;
+  --lm-line-height-tight: 1.25;
+
+  /* Radii */
+  --lm-radius-sm: 6px;
+  --lm-radius-md: 10px;
+  --lm-radius-lg: 14px;
+  --lm-radius-pill: 999px;
+
+  /* Spacing scale (comfortable density) */
+  --lm-space-1: 4px;
+  --lm-space-2: 8px;
+  --lm-space-3: 12px;
+  --lm-space-4: 16px;
+  --lm-space-5: 20px;
+  --lm-space-6: 24px;
+  --lm-space-8: 32px;
+
+  /* Controls and layout */
+  --lm-control-height: 36px;
+  --lm-border-width: 1px;
+  --lm-focus-ring-width: 2px;
+  --lm-sidebar-width: 232px;
+  --lm-topbar-height: 60px;
+  --lm-drawer-width: 560px;
+  --lm-card-aspect: 2 / 3;
+  --lm-card-gap: 14px;
+
+  /* Motion */
+  --lm-motion-fast: 120ms;
+  --lm-motion-normal: 200ms;
+  --lm-ease: cubic-bezier(0.2, 0, 0, 1);
+
+  /* Shadows: the color part comes from --lm-color-shadow so themes can tint it */
+  --lm-shadow-sm: 0 1px 2px var(--lm-color-shadow);
+  --lm-shadow-md: 0 4px 14px var(--lm-color-shadow);
+  --lm-shadow-lg: 0 18px 48px var(--lm-color-shadow);
+}
+
+:root[data-density='compact'] {
+  --lm-space-1: 3px;
+  --lm-space-2: 6px;
+  --lm-space-3: 8px;
+  --lm-space-4: 12px;
+  --lm-space-5: 14px;
+  --lm-space-6: 18px;
+  --lm-space-8: 24px;
+  --lm-control-height: 30px;
+  --lm-topbar-height: 52px;
+  --lm-card-gap: 10px;
+  --lm-font-size-md: 0.8125rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --lm-motion-fast: 0ms;
+    --lm-motion-normal: 0ms;
+  }
+}

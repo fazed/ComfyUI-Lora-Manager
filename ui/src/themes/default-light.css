@@ -1,0 +1,30 @@
+/* Default light theme. Also the fallback when no data-theme is set. */
+:root,
+[data-theme='default-light'] {
+  color-scheme: light;
+  --lm-color-bg: #f5f6f8;
+  --lm-color-surface: #ffffff;
+  --lm-color-elevated: #ffffff;
+  --lm-color-sunken: #eceef2;
+  --lm-color-border: #e1e4ea;
+  --lm-color-border-strong: #c9cfd8;
+  --lm-color-text: #14171c;
+  --lm-color-muted: #5b6472;
+  --lm-color-accent: #4f46e5;
+  --lm-color-accent-hover: #4338ca;
+  --lm-color-accent-soft: rgba(79, 70, 229, 0.12);
+  --lm-color-on-accent: #ffffff;
+  --lm-color-danger: #c62828;
+  --lm-color-danger-soft: rgba(198, 40, 40, 0.1);
+  --lm-color-on-danger: #ffffff;
+  --lm-color-success: #15803d;
+  --lm-color-success-soft: rgba(21, 128, 61, 0.12);
+  --lm-color-warning: #b45309;
+  --lm-color-warning-soft: rgba(180, 83, 9, 0.12);
+  --lm-color-focus: #6366f1;
+  --lm-color-overlay: rgba(15, 18, 25, 0.45);
+  --lm-color-scrim: rgba(8, 10, 14, 0.72);
+  --lm-color-on-scrim: #ffffff;
+  --lm-color-skeleton: #e6e9ee;
+  --lm-color-shadow: rgba(16, 24, 40, 0.1);
+}
