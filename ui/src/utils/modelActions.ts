@@ -177,3 +177,24 @@ export function groupOrganizePlan(response: OrganizeResponse): OrganizePlan {
 export function isOrganizeFinished(progress: OrganizeProgress | null | undefined): boolean {
   return !!progress && ['completed', 'error', 'cancelled'].includes(String(progress.status))
 }
+
+/**
+ * Shift-click range selection: the keys between `anchor` and `target`
+ * (inclusive, either order) in the displayed order. Without a usable anchor
+ * (none, or no longer in the list) it is just the target.
+ */
+export function selectRange(keys: string[], anchor: string | null | undefined, target: string): string[] {
+  const to = keys.indexOf(target)
+  if (to < 0) return []
+  const from = anchor ? keys.indexOf(anchor) : -1
+  if (from < 0) return [target]
+  return keys.slice(Math.min(from, to), Math.max(from, to) + 1)
+}
+
+/** Selected keys that are not among the currently loaded keys (hidden by a filter or not loaded yet). */
+export function hiddenSelectedCount(selected: Set<string>, loadedKeys: string[]): number {
+  const loaded = new Set(loadedKeys)
+  let hidden = 0
+  for (const key of selected) if (!loaded.has(key)) hidden += 1
+  return hidden
+}
