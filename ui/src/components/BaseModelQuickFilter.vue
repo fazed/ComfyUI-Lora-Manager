@@ -20,6 +20,7 @@ const row = computed(() => buildBaseModelChips(props.entries, props.selected, pr
 const moreOpen = ref(false)
 const moreButton = ref<HTMLButtonElement | null>(null)
 const popover = ref<HTMLElement | null>(null)
+const scroller = ref<HTMLElement | null>(null)
 const popoverId = computed(() => `${props.idPrefix}-base-more`)
 
 const chipClass = 'lm-chip h-[28px] flex-none px-3 text-sm'
@@ -68,12 +69,27 @@ watch(
   },
 )
 
+// A base model picked from "More" (or the filter panel) joins the end of the row: scroll it into view.
+watch(
+  () => [...props.selected],
+  async (next, previous) => {
+    const added = next.find((name) => !previous?.includes(name))
+    if (!added) return
+    await nextTick()
+    const chip = [...(scroller.value?.querySelectorAll<HTMLElement>('[data-base-model]') ?? [])].find(
+      (element) => element.dataset.baseModel === added,
+    )
+    chip?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+  },
+)
+
 onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocumentPointer))
 </script>
 
 <template>
   <div v-if="row.visible.length || row.overflow.length" class="flex items-center gap-2 px-6 pb-3 phone:px-3">
     <div
+      ref="scroller"
       class="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto py-[2px] [scrollbar-width:thin]"
       role="group"
       :aria-label="t('library.quickFilter')"
@@ -90,6 +106,7 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocumentPoin
         v-for="chip in row.visible"
         :key="chip.name"
         type="button"
+        :data-base-model="chip.name"
         :class="[chipClass, chip.selected && 'lm-chip--active']"
         :aria-pressed="chip.selected"
         :aria-label="label(chip.name, chip.count)"

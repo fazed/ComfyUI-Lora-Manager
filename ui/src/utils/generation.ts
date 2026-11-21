@@ -29,7 +29,7 @@ export interface GenerationView {
 type Meta = Record<string, unknown>
 
 function text(value: unknown): string {
-  if (typeof value === 'string') return value.trim()
+  if (typeof value === 'string') return value.replace(/\r\n?/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
   if (typeof value === 'number' && Number.isFinite(value)) return String(value)
   return ''
 }

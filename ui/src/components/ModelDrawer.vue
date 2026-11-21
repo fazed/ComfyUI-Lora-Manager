@@ -226,8 +226,8 @@ function copySyntax(): void {
 }
 
 function onKey(event: KeyboardEvent): void {
-  // The lightbox (modal <dialog>) handles its own keys.
-  if (lightboxIndex.value !== null) return
+  // Modal dialogs on top (lightbox, node picker) handle their own keys.
+  if (lightboxIndex.value !== null || document.querySelector('dialog[open]')) return
   if (event.key === 'Escape') emit('close')
   if (event.key === 'Tab' && panel.value) {
     // Keep focus inside the drawer while it is open.

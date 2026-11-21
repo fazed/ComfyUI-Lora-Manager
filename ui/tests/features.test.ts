@@ -93,7 +93,7 @@ describe('generation data view model', () => {
       steps: 31,
       width: 1024,
       height: 1536,
-      prompt: '\nbest quality, masterpiece\n',
+      prompt: '\r\nbest quality, masterpiece\n\n\n\n1girl\n',
       denoise: 1,
       sampler: 'dpmpp_2m_sde_gpu',
       cfgScale: 4,
@@ -101,7 +101,7 @@ describe('generation data view model', () => {
       negativePrompt: 'worst quality',
       additionalResources: [{ name: 'urn:air:sdxl:lora:civitai:282420@317904', type: 'lora', strength: 0.8, strengthClip: 1 }],
     })
-    expect(view?.prompt).toBe('best quality, masterpiece')
+    expect(view?.prompt).toBe('best quality, masterpiece\n\n1girl')
     expect(view?.negativePrompt).toBe('worst quality')
     expect(Object.fromEntries(view!.params.map((param) => [param.key, param.value]))).toEqual({
       model: 'anima-base-v1.0',
