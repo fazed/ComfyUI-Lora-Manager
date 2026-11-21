@@ -5,6 +5,7 @@ import AppSidebar from '@/components/AppSidebar.vue'
 import TopBar from '@/components/TopBar.vue'
 import ToastHost from '@/components/ToastHost.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import NodePickerDialog from '@/components/NodePickerDialog.vue'
 import { useTheme } from '@/composables/useTheme'
 import { useSearch } from '@/composables/useSearch'
 import { t } from '@/i18n'
@@ -65,4 +66,5 @@ watch(
   </div>
   <ToastHost />
   <ConfirmDialog />
+  <NodePickerDialog />
 </template>

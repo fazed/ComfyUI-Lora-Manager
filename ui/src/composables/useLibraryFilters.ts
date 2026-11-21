@@ -54,6 +54,15 @@ export function useLibraryFilters(config: LibraryConfig) {
     state[list] = current.includes(value) ? current.filter((entry) => entry !== value) : [...current, value]
   }
 
+  /** Adds a value if missing (drawer tag click); never removes. */
+  function include(list: 'baseModels' | 'tags', value: string): void {
+    if (!state[list].includes(value)) state[list] = [...state[list], value]
+  }
+
+  function clearList(list: 'baseModels' | 'tags'): void {
+    state[list] = []
+  }
+
   function clear(): void {
     state.folder = ''
     state.baseModels = []
@@ -80,5 +89,5 @@ export function useLibraryFilters(config: LibraryConfig) {
     JSON.stringify([sort.value, state.folder, state.baseModels, state.tags, state.favoritesOnly, state.updatesOnly]),
   )
 
-  return { sort, cardSize, state, toggle, clear, chips, panelCount, signature }
+  return { sort, cardSize, state, toggle, include, clearList, clear, chips, panelCount, signature }
 }

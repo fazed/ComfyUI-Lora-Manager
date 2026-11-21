@@ -20,7 +20,9 @@ import type {
   RecipeItem,
   SettingsMap,
   TagEntry,
+  WorkflowRegistry,
 } from './types'
+import type { UpdateLoraCodeBody } from '@/utils/workflow'
 
 export interface ModelListQuery {
   page: number
@@ -131,4 +133,11 @@ export const recipesApi = {
 
 export const themesApi = {
   list: () => request<{ themes: unknown[]; directory?: string }>('ui/themes'),
+}
+
+/** ComfyUI workflow bridge (classic "send to workflow"). */
+export const workflowApi = {
+  registry: () => request<{ data: WorkflowRegistry }>('get-registry').then((r) => r.data ?? { nodes: {} }),
+  updateLoraCode: (body: UpdateLoraCodeBody) =>
+    request<{ success: boolean; results?: unknown[] }>('update-lora-code', { method: 'POST', body }),
 }

@@ -31,6 +31,8 @@ export interface ModelItem {
   from_civitai?: boolean
   usage_count?: number
   notes?: string
+  /** JSON string such as '{"strength": 0.8}' (LoRAs). */
+  usage_tips?: string
   favorite?: boolean
   update_available?: boolean
   sub_type?: string
@@ -63,10 +65,13 @@ export interface FolderTree {
 
 export interface CivitaiImage {
   url: string
+  id?: number | string
   type?: string
   nsfwLevel?: number
   width?: number
   height?: number
+  /** Free-form generation data (prompt, sampler, resources, ...); see utils/generation.ts. */
+  meta?: Record<string, unknown> | null
 }
 
 export interface ModelMetadata {
@@ -179,4 +184,10 @@ export interface RecipeItem {
   loras?: unknown[]
   created_date?: number
   modified?: number
+}
+
+export interface WorkflowRegistry {
+  nodes: Record<string, import('@/utils/workflow').RegistryNode>
+  node_count?: number
+  tab_count?: number
 }

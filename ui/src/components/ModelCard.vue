@@ -11,12 +11,16 @@ const props = defineProps<{
   selectionMode: boolean
   selected: boolean
   blurMature: boolean
+  /** Show the "Send to ComfyUI" button (LoRAs). */
+  canSend?: boolean
 }>()
 
 const emit = defineEmits<{
   open: [item: ModelItem]
   'toggle-select': [item: ModelItem]
   'toggle-favorite': [item: ModelItem]
+  /** replace = Shift+click (replace the node's LoRAs instead of appending). */
+  send: [item: ModelItem, replace: boolean]
 }>()
 
 const failed = ref(false)
@@ -33,6 +37,8 @@ const pillClass =
   'inline-flex max-w-[60%] items-center gap-[2px] overflow-hidden rounded-pill px-2 py-px text-xs font-medium text-ellipsis whitespace-nowrap'
 /** Round 28px button/indicator in the top-right corner (favorite star, selection check). */
 const roundClass = 'inline-grid size-[28px] cursor-pointer place-items-center rounded-pill'
+/** Hover-revealed corner buttons: always visible on touch devices and while focused. */
+const revealClass = 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 touch:opacity-100'
 
 function activate(): void {
   if (props.selectionMode) emit('toggle-select', props.item)
@@ -102,12 +108,22 @@ function pause(): void {
         <AppIcon v-if="selected" name="check" :size="14" />
       </span>
       <button
-        v-else
+        v-if="!selectionMode && canSend"
+        type="button"
+        :class="[roundClass, 'pointer-events-auto bg-scrim text-on-scrim transition-opacity hover:bg-accent hover:text-on-accent', revealClass]"
+        :aria-label="t('card.sendToComfy')"
+        :title="t('card.sendHint')"
+        @click.stop="emit('send', item, $event.shiftKey)"
+      >
+        <AppIcon name="send" :size="15" />
+      </button>
+      <button
+        v-if="!selectionMode"
         type="button"
         :class="[
           roundClass,
           'pointer-events-auto bg-scrim transition-opacity',
-          item.favorite ? 'text-warning' : 'text-on-scrim opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
+          item.favorite ? 'text-warning' : ['text-on-scrim', revealClass],
         ]"
         :aria-label="t('detail.toggleFavorite')"
         :aria-pressed="!!item.favorite"

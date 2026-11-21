@@ -9,6 +9,7 @@ const { toasts, dismiss } = useToasts()
 const KIND: Record<ToastKind, { border: string; icon: IconName; iconClass: string }> = {
   info: { border: 'border-l-accent', icon: 'sparkle', iconClass: '' },
   success: { border: 'border-l-success', icon: 'check', iconClass: 'text-success' },
+  warning: { border: 'border-l-warning', icon: 'alert', iconClass: 'text-warning' },
   error: { border: 'border-l-danger', icon: 'alert', iconClass: 'text-danger' },
 }
 </script>
@@ -33,6 +34,14 @@ const KIND: Record<ToastKind, { border: string; icon: IconName; iconClass: strin
       >
         <AppIcon :name="KIND[toast.kind].icon" :class="KIND[toast.kind].iconClass" />
         <span class="flex-1">{{ toast.message }}</span>
+        <button
+          v-if="toast.action"
+          type="button"
+          class="lm-btn lm-btn--sm"
+          @click="toast.action.run(); dismiss(toast.id)"
+        >
+          {{ toast.action.label }}
+        </button>
         <button type="button" class="lm-btn lm-btn--ghost lm-btn--icon lm-btn--sm" :aria-label="t('common.close')" @click="dismiss(toast.id)">
           <AppIcon name="close" :size="14" />
         </button>

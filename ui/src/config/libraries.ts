@@ -16,6 +16,10 @@ export interface LibraryConfig {
   defaultSort: string
   sortOptions: SortOption[]
   supportsUpdates: boolean
+  /** Base-model chip row under the toolbar (0 disables it; N = chips before "More"). */
+  quickBaseModels: number
+  /** "Send to ComfyUI" / "Copy LoRA syntax" on cards and in the drawer. */
+  sendToComfy: boolean
 }
 
 const COMMON_SORTS: SortOption[] = [
@@ -36,6 +40,8 @@ export const LIBRARIES: Record<ModelPrefix, LibraryConfig> = {
     defaultSort: 'name:asc',
     sortOptions: COMMON_SORTS,
     supportsUpdates: true,
+    quickBaseModels: 8,
+    sendToComfy: true,
   },
   checkpoints: {
     prefix: 'checkpoints',
@@ -44,6 +50,8 @@ export const LIBRARIES: Record<ModelPrefix, LibraryConfig> = {
     defaultSort: 'name:asc',
     sortOptions: COMMON_SORTS,
     supportsUpdates: true,
+    quickBaseModels: 8,
+    sendToComfy: false,
   },
   embeddings: {
     prefix: 'embeddings',
@@ -52,5 +60,7 @@ export const LIBRARIES: Record<ModelPrefix, LibraryConfig> = {
     defaultSort: 'name:asc',
     sortOptions: COMMON_SORTS,
     supportsUpdates: true,
+    quickBaseModels: 0,
+    sendToComfy: false,
   },
 }

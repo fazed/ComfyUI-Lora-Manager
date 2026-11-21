@@ -5,6 +5,7 @@
  */
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import AppIcon from '@/components/AppIcon.vue'
+import BaseModelQuickFilter from '@/components/BaseModelQuickFilter.vue'
 import FolderTree from '@/components/FolderTree.vue'
 import ModelCard from '@/components/ModelCard.vue'
 import ModelDrawer from '@/components/ModelDrawer.vue'
@@ -18,6 +19,8 @@ import { copyText, useToasts } from '@/composables/useFeedback'
 import { useInfiniteList } from '@/composables/useInfiniteList'
 import { CARD_SIZE_MAX, CARD_SIZE_MIN, useLibraryFilters } from '@/composables/useLibraryFilters'
 import { useSearch } from '@/composables/useSearch'
+import { useSendToWorkflow } from '@/composables/useSendToWorkflow'
+import { sortBaseModels } from '@/utils/baseModelChips'
 import { withMountPrefix } from '@/utils/basePath'
 import { t, type MessageKey } from '@/i18n'
 
@@ -32,6 +35,7 @@ const { debounced: search } = useSearch()
 const { settings, load: loadSettings } = useAppSettings()
 const filters = useLibraryFilters(config)
 const { state } = filters
+const workflow = useSendToWorkflow()
 
 const list = useInfiniteList<ModelItem>((page, signal) =>
   api.list(
@@ -65,7 +69,7 @@ const civitaiHost = computed(() => String(settings.value?.civitai_host || 'civit
 
 /** The two chip groups of the filter panel. */
 const filterGroups = computed(() => [
-  { field: 'baseModels' as const, title: 'library.baseModels' as MessageKey, entries: baseModels.value },
+  { field: 'baseModels' as const, title: 'library.baseModels' as MessageKey, entries: sortBaseModels(baseModels.value) },
   {
     field: 'tags' as const,
     title: 'library.tags' as MessageKey,
@@ -84,7 +88,7 @@ onMounted(() => {
   void list.reset()
   void loadSettings()
   api.folderTree().then((value) => (tree.value = value)).catch(() => undefined)
-  api.baseModels(30).then((value) => (baseModels.value = value)).catch(() => undefined)
+  api.baseModels(100).then((value) => (baseModels.value = value)).catch(() => undefined)
   api.topTags(40).then((value) => (topTags.value = value)).catch(() => undefined)
 })
 
@@ -107,6 +111,15 @@ async function toggleFavorite(item: ModelItem): Promise<void> {
   } catch (error) {
     toasts.error((error as Error).message)
   }
+}
+
+function filterByTag(tag: string): void {
+  filters.include('tags', tag)
+  openItem.value = null
+}
+
+function sendToComfy(item: ModelItem, replace: boolean): void {
+  void workflow.sendLora(item, { mode: replace ? 'replace' : 'append' })
 }
 
 function toggleSelect(item: ModelItem): void {
@@ -200,6 +213,16 @@ async function copySelectedNames(): Promise<void> {
         </div>
       </div>
 
+      <BaseModelQuickFilter
+        v-if="config.quickBaseModels > 0"
+        :entries="baseModels"
+        :selected="state.baseModels"
+        :limit="config.quickBaseModels"
+        :id-prefix="prefix"
+        @toggle="filters.toggle('baseModels', $event)"
+        @clear="filters.clearList('baseModels')"
+      />
+
       <div v-if="showFilters" id="library-filters" class="lm-panel mx-6 mb-3 grid gap-4 p-4 phone:mx-3">
         <div v-for="group in filterGroups" :key="group.field">
           <h3 class="lm-overline mb-2">{{ t(group.title) }}</h3>
@@ -275,7 +298,9 @@ async function copySelectedNames(): Promise<void> {
             :selection-mode="selectionMode"
             :selected="selected.has(item.file_path)"
             :blur-mature="blurMature"
+            :can-send="config.sendToComfy"
             @open="openItem = $event"
+            @send="sendToComfy"
             @toggle-select="toggleSelect"
             @toggle-favorite="toggleFavorite"
           />
@@ -298,7 +323,9 @@ async function copySelectedNames(): Promise<void> {
       :api="api"
       :classic-url="classicUrl"
       :civitai-host="civitaiHost"
+      :can-send="config.sendToComfy"
       @close="openItem = null"
+      @filter-tag="filterByTag"
       @updated="onUpdated"
     />
   </div>

@@ -137,6 +137,8 @@
 @custom-variant narrow (@media (max-width: 1100px));
 @custom-variant tablet (@media (max-width: 900px));
 @custom-variant phone (@media (max-width: 720px));
+/* Devices without hover (touch): hover-only controls stay visible there. */
+@custom-variant touch (@media (hover: none));
 
 /* Theme-aware variants: theming itself only flows through tokens, never `dark:`. */
 @custom-variant compact (&:where([data-density='compact'], [data-density='compact'] *));

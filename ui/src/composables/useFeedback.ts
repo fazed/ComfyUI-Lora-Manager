@@ -3,12 +3,18 @@
 import { ref } from 'vue'
 import { t } from '@/i18n'
 
-export type ToastKind = 'info' | 'success' | 'error'
+export type ToastKind = 'info' | 'success' | 'warning' | 'error'
+
+export interface ToastAction {
+  label: string
+  run: () => void
+}
 
 export interface Toast {
   id: number
   kind: ToastKind
   message: string
+  action?: ToastAction
 }
 
 const toasts = ref<Toast[]>([])
@@ -28,9 +34,14 @@ export function useToasts() {
   function dismiss(id: number): void {
     toasts.value = toasts.value.filter((toast) => toast.id !== id)
   }
-  function push(message: string, kind: ToastKind = 'info', timeoutMs = kind === 'error' ? 7000 : 3500): void {
+  function push(
+    message: string,
+    kind: ToastKind = 'info',
+    timeoutMs = kind === 'error' || kind === 'warning' ? 7000 : 3500,
+    action?: ToastAction,
+  ): void {
     const id = toastId++
-    toasts.value = [...toasts.value.slice(-4), { id, kind, message }]
+    toasts.value = [...toasts.value.slice(-4), action ? { id, kind, message, action } : { id, kind, message }]
     setTimeout(() => dismiss(id), timeoutMs)
   }
   return {
@@ -38,6 +49,7 @@ export function useToasts() {
     dismiss,
     push,
     success: (message: string) => push(message, 'success'),
+    warning: (message: string, action?: ToastAction) => push(message, 'warning', action ? 10000 : 7000, action),
     error: (message: string) => push(message, 'error'),
   }
 }
