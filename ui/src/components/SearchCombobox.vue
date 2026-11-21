@@ -204,51 +204,54 @@ defineExpose({
 </script>
 
 <template>
+  <!-- The root positions the dropdown (a parent may make it static to anchor the panel elsewhere); the inner box positions the icons. -->
   <div class="relative" @focusout="onFocusOut">
-    <AppIcon name="search" class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted" />
-    <label class="sr-only" :for="id">{{ label }}</label>
-    <input
-      :id="id"
-      ref="input"
-      :value="modelValue"
-      class="lm-input pr-[calc(var(--lm-space-3)+56px)] pl-[calc(var(--lm-space-3)*2+18px)]"
-      :class="inputClass"
-      type="text"
-      role="combobox"
-      autocomplete="off"
-      spellcheck="false"
-      enterkeyhint="search"
-      aria-autocomplete="list"
-      :aria-expanded="expanded"
-      :aria-controls="listboxId"
-      :aria-activedescendant="activeId"
-      :placeholder="placeholder"
-      @input="onInput"
-      @keydown="onKeydown"
-      @click="reopen"
-    />
-    <div class="absolute inset-y-0 right-2 flex items-center gap-1">
-      <span
-        v-if="suggestions.loading.value && open"
-        class="size-[14px] animate-spinner rounded-pill border-2 border-border border-t-accent"
-        role="status"
-        :aria-label="t('suggest.loading')"
-      ></span>
-      <button
-        v-if="modelValue"
-        type="button"
-        class="lm-btn lm-btn--ghost lm-btn--icon lm-btn--sm"
-        :aria-label="t('suggest.clear')"
-        :title="t('suggest.clear')"
-        @click="clearText(), input?.focus()"
-      >
-        <AppIcon name="close" :size="14" />
-      </button>
-      <kbd
-        v-else-if="shortcutHint"
-        class="rounded-sm hairline border-border px-1 font-mono text-xs text-muted phone:hidden"
-        aria-hidden="true"
-      >{{ shortcutHint }}</kbd>
+    <div class="relative">
+      <AppIcon name="search" class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted" />
+      <label class="sr-only" :for="id">{{ label }}</label>
+      <input
+        :id="id"
+        ref="input"
+        :value="modelValue"
+        class="lm-input pl-[calc(var(--lm-space-3)*2+18px)]"
+        :class="[inputClass, modelValue ? 'pr-[64px]' : shortcutHint ? 'pr-[36px] phone:pr-3' : 'pr-3']"
+        type="text"
+        role="combobox"
+        autocomplete="off"
+        spellcheck="false"
+        enterkeyhint="search"
+        aria-autocomplete="list"
+        :aria-expanded="expanded"
+        :aria-controls="listboxId"
+        :aria-activedescendant="activeId"
+        :placeholder="placeholder"
+        @input="onInput"
+        @keydown="onKeydown"
+        @click="reopen"
+      />
+      <div class="absolute inset-y-0 right-2 flex items-center gap-1">
+        <span
+          v-if="suggestions.loading.value && open"
+          class="size-[14px] animate-spinner rounded-pill border-2 border-border border-t-accent"
+          role="status"
+          :aria-label="t('suggest.loading')"
+        ></span>
+        <button
+          v-if="modelValue"
+          type="button"
+          class="lm-btn lm-btn--ghost lm-btn--icon lm-btn--sm"
+          :aria-label="t('suggest.clear')"
+          :title="t('suggest.clear')"
+          @click="clearText(), input?.focus()"
+        >
+          <AppIcon name="close" :size="14" />
+        </button>
+        <kbd
+          v-else-if="shortcutHint"
+          class="rounded-sm hairline border-border px-1 font-mono text-xs text-muted phone:hidden"
+          aria-hidden="true"
+        >{{ shortcutHint }}</kbd>
+      </div>
     </div>
 
     <div
@@ -300,7 +303,12 @@ defineExpose({
               <span
                 v-if="option.item.secondary && option.item.secondary !== option.item.name"
                 class="truncate text-xs text-muted"
-              >{{ option.item.secondary }}</span>
+              >
+                <template v-for="(part, index) in splitHighlight(option.item.secondary, modelValue)" :key="index">
+                  <mark v-if="part.match" class="bg-transparent font-medium text-fg">{{ part.text }}</mark>
+                  <template v-else>{{ part.text }}</template>
+                </template>
+              </span>
             </span>
             <span v-if="option.item.badge" class="lm-badge max-w-[40%] flex-none truncate">{{ option.item.badge }}</span>
             <AppIcon v-if="mode === 'global'" :name="scopeIcon(option.group)" :size="14" class="flex-none text-muted" />

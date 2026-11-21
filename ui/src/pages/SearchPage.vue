@@ -114,7 +114,12 @@ onBeforeUnmount(() => controller?.abort())
                   <template v-else>{{ part.text }}</template>
                 </template>
               </span>
-              <span v-if="item.secondary && item.secondary !== item.name" class="truncate text-xs text-muted">{{ item.secondary }}</span>
+              <span v-if="item.secondary && item.secondary !== item.name" class="truncate text-xs text-muted">
+                <template v-for="(part, index) in splitHighlight(item.secondary, query)" :key="index">
+                  <mark v-if="part.match" class="bg-transparent font-medium text-fg">{{ part.text }}</mark>
+                  <template v-else>{{ part.text }}</template>
+                </template>
+              </span>
             </span>
             <span v-if="item.badge" class="lm-badge max-w-[40%] flex-none truncate">{{ item.badge }}</span>
           </button>

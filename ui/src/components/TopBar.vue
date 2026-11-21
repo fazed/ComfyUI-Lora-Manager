@@ -42,11 +42,12 @@ const queueLabel = computed(() =>
 const onDownloads = computed(() => isNavActive('/downloads', route.path))
 const onSettings = computed(() => isNavActive('/settings', route.path))
 
-// The results page owns the text while it is open.
+// The results page owns the text while it is open; leaving it empties the box.
 watch(
   () => (route.path === '/search' ? queryParam(route.query.q) : null),
-  (q) => {
+  (q, previous) => {
     if (q !== null) text.value = q
+    else if (previous !== null && previous !== undefined) text.value = ''
   },
   { immediate: true },
 )
