@@ -111,7 +111,7 @@ describe('useLibraryFilters', () => {
     filters.toggle('tags', 'style')
     filters.state.favoritesOnly = true
     await nextTick()
-    expect(filters.chips.value.map((chip) => chip.label)).toEqual(['Anima/style', 'Illustrious', '#style', 'Favorites only'])
+    expect(filters.chips.value.map((chip) => chip.label)).toEqual(['Folder: Anima/style', 'Illustrious', '#style', 'Favorites only'])
     expect(filters.panelCount.value).toBe(3)
 
     filters.chips.value[1].remove()

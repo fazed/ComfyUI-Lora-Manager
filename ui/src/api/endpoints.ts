@@ -61,6 +61,9 @@ export function createModelApi(prefix: ModelPrefix) {
       request<{ base_models: CountEntry[] }>(`${prefix}/base-models`, { query: { limit } }).then((r) => r.base_models ?? []),
     topTags: (limit = 40) =>
       request<{ tags: TagEntry[] }>(`${prefix}/top-tags`, { query: { limit } }).then((r) => r.tags ?? []),
+    /** Tag autocomplete: case-insensitive substring match, sorted by count. */
+    searchTags: (q: string, limit = 8, signal?: AbortSignal) =>
+      request<{ tags: TagEntry[] }>(`${prefix}/search-tags`, { query: { q, limit }, signal }).then((r) => r.tags ?? []),
     roots: () => request<{ roots: string[] }>(`${prefix}/roots`).then((r) => r.roots ?? []),
     folderTree: () =>
       request<{ tree: FolderTree }>(`${prefix}/unified-folder-tree`).then((r) => r.tree ?? {}),
@@ -129,6 +132,8 @@ export const recipesApi = {
       query: { page: query.page, page_size: query.pageSize, sort_by: query.sortBy, search: query.search?.trim() || undefined },
       signal,
     }),
+  searchTags: (q: string, limit = 8, signal?: AbortSignal) =>
+    request<{ tags: TagEntry[] }>('recipes/search-tags', { query: { q, limit }, signal }).then((r) => r.tags ?? []),
 }
 
 export const themesApi = {

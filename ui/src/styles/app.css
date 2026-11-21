@@ -221,7 +221,7 @@
   }
 
   /*
-   * Selectable row (sidebar links, folder tree, "all folders", theme options).
+   * Selectable row (menu links, folder tree, "all folders", theme options).
    * .is-selected comes last so a selected row keeps its colors on hover.
    */
   .lm-row {

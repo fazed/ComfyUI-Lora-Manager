@@ -78,7 +78,6 @@
   --spacing-control: var(--lm-control-height);
   --spacing-control-sm: calc(var(--lm-control-height) - 8px);
   --spacing-topbar: var(--lm-topbar-height);
-  --spacing-sidebar: var(--lm-sidebar-width);
   --spacing-drawer: var(--lm-drawer-width);
   --spacing-card: var(--lm-card-gap);
   --aspect-card: var(--lm-card-aspect);

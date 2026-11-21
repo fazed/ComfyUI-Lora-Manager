@@ -5,8 +5,6 @@ import type { MessageKey } from '@/i18n'
 declare module 'vue-router' {
   interface RouteMeta {
     title?: MessageKey
-    /** Section name used in the global search placeholder; absent = no search. */
-    searchable?: boolean
   }
 }
 
@@ -17,27 +15,33 @@ export const routes: RouteRecordRaw[] = [
     name: 'loras',
     component: () => import('@/pages/LibraryPage.vue'),
     props: { prefix: 'loras' },
-    meta: { title: 'nav.loras', searchable: true },
+    meta: { title: 'nav.loras' },
   },
   {
     path: '/checkpoints',
     name: 'checkpoints',
     component: () => import('@/pages/LibraryPage.vue'),
     props: { prefix: 'checkpoints' },
-    meta: { title: 'nav.checkpoints', searchable: true },
+    meta: { title: 'nav.checkpoints' },
   },
   {
     path: '/embeddings',
     name: 'embeddings',
     component: () => import('@/pages/LibraryPage.vue'),
     props: { prefix: 'embeddings' },
-    meta: { title: 'nav.embeddings', searchable: true },
+    meta: { title: 'nav.embeddings' },
   },
   {
     path: '/recipes',
     name: 'recipes',
     component: () => import('@/pages/RecipesPage.vue'),
-    meta: { title: 'nav.recipes', searchable: true },
+    meta: { title: 'nav.recipes' },
+  },
+  {
+    path: '/search',
+    name: 'search',
+    component: () => import('@/pages/SearchPage.vue'),
+    meta: { title: 'search.title' },
   },
   {
     path: '/downloads',

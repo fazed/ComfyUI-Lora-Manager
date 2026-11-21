@@ -1,19 +1,61 @@
 <script setup lang="ts">
 /** Phase-1 recipes view: a read-only grid; details live in the classic UI. */
-import { onMounted, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import StateBlock from '@/components/StateBlock.vue'
 import VirtualGrid from '@/components/VirtualGrid.vue'
 import AppIcon from '@/components/AppIcon.vue'
+import SearchCombobox from '@/components/SearchCombobox.vue'
+import { LOCAL_PER_GROUP, MAX_TAGS } from '@/api/suggestSource'
+import { queryParam } from '@/config/navigation'
+import type { SuggestOption } from '@/utils/suggest'
 import { recipesApi } from '@/api/endpoints'
 import type { RecipeItem } from '@/api/types'
 import { useInfiniteList } from '@/composables/useInfiniteList'
-import { useSearch } from '@/composables/useSearch'
 import { withMountPrefix } from '@/utils/basePath'
 import { isVideoUrl } from '@/utils/format'
 import { t } from '@/i18n'
 
 const classicUrl = withMountPrefix('/loras/recipes')
-const { debounced: search } = useSearch()
+const route = useRoute()
+const router = useRouter()
+/** Applied search (list endpoint `search`); `searchText` is the box, applied after a pause or on Enter. */
+const search = ref('')
+const searchText = ref('')
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+
+function commitSearch(value: string): void {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = null
+  searchText.value = value
+  search.value = value.trim()
+}
+
+watch(searchText, (value) => {
+  if (searchTimer) clearTimeout(searchTimer)
+  if (value.trim() === search.value) return
+  searchTimer = setTimeout(() => {
+    searchTimer = null
+    search.value = value.trim()
+  }, 250)
+})
+onBeforeUnmount(() => searchTimer && clearTimeout(searchTimer))
+
+function onSearchChoose(option: SuggestOption): void {
+  if (option.kind === 'item') commitSearch(option.item.name)
+  else if (option.kind === 'tag') commitSearch(option.tag.tag)
+}
+
+// ?q= (from the global search) prefills the box and is then dropped from the URL.
+watch(
+  () => route.query.q,
+  (q) => {
+    if (q === undefined) return
+    commitSearch(queryParam(q))
+    void router.replace({ query: { ...route.query, q: undefined } })
+  },
+  { immediate: true },
+)
 const sort = ref('date:desc')
 const grid = ref<InstanceType<typeof VirtualGrid> | null>(null)
 
@@ -35,7 +77,20 @@ onMounted(() => void list.reset())
         <h1>{{ t('recipes.title') }}</h1>
         <span class="lm-muted">{{ list.total.value.toLocaleString() }}</span>
       </div>
-      <div class="flex gap-2">
+      <div class="flex flex-wrap items-center gap-2 phone:w-full">
+        <SearchCombobox
+          id="recipe-search"
+          v-model="searchText"
+          scope="recipes"
+          class="w-[260px] narrow:w-[200px] phone:w-full"
+          :label="t('library.search', { section: t('nav.recipes') })"
+          :placeholder="t('library.searchPlaceholder', { section: t('nav.recipes') })"
+          :max-per-group="LOCAL_PER_GROUP"
+          :max-tags="MAX_TAGS"
+          panel-class="left-0 top-[calc(100%+var(--lm-space-1))] w-[min(420px,calc(100vw-24px))] phone:right-0 phone:w-auto"
+          @commit="commitSearch"
+          @choose="onSearchChoose"
+        />
         <label class="sr-only" for="recipe-sort">{{ t('library.sort') }}</label>
         <select id="recipe-sort" v-model="sort" class="lm-select w-auto">
           <option value="date:desc">{{ t('library.sort.dateDesc') }}</option>

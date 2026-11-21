@@ -1,39 +1,92 @@
-/** Global search box state, shared by the top bar and the active page. */
+/**
+ * Search plumbing shared by the global top-bar search, the local library
+ * search boxes and the pages:
+ *
+ * - `useSuggestions(scope)`: debounced (150 ms), abortable autocomplete
+ *   lookups with a shared LRU cache (one suggester per box, cache shared).
+ * - `stashItem` / `takeStashedItem`: a model picked in the global search is
+ *   handed to its library page so the drawer opens without refetching; the
+ *   route (`?open=<file_path>`) stays the source of truth for reloads.
+ */
 
-import { ref, watch, type Ref } from 'vue'
+import { ref, shallowRef, type Ref } from 'vue'
+import { apiSuggestSource } from '@/api/suggestSource'
+import {
+  createSuggester,
+  LruCache,
+  SUGGEST_DEBOUNCE_MS,
+  SUGGEST_MIN_CHARS,
+  suggestCacheKey,
+  type SuggestResult,
+  type SuggestSource,
+} from '@/utils/suggest'
 
-const query = ref('')
-const debounced = ref('')
-let timer: ReturnType<typeof setTimeout> | null = null
+let stashed: { key: string; item: unknown } | null = null
 
-watch(query, (value) => {
-  if (timer) clearTimeout(timer)
-  timer = setTimeout(() => {
-    debounced.value = value.trim()
-  }, 250)
-})
-
-export function useSearch(): { query: Ref<string>; debounced: Ref<string>; clear: () => void } {
-  return {
-    query,
-    debounced,
-    clear() {
-      if (timer) clearTimeout(timer)
-      query.value = ''
-      debounced.value = ''
-    },
-  }
+export function stashItem(key: string, item: unknown): void {
+  stashed = { key, item }
 }
 
-/** Debounce helper for any ref. */
-export function debounceRef<T>(source: Ref<T>, delayMs: number): Ref<T> {
-  const out = ref(source.value) as Ref<T>
-  let handle: ReturnType<typeof setTimeout> | null = null
-  watch(source, (value) => {
-    if (handle) clearTimeout(handle)
-    handle = setTimeout(() => {
-      out.value = value
-    }, delayMs)
-  })
-  return out
+/** Returns the stashed item when it matches `key` (and forgets it). */
+export function takeStashedItem<T>(key: string): T | null {
+  if (!stashed || stashed.key !== key) return null
+  const { item } = stashed
+  stashed = null
+  return item as T
+}
+
+const sharedCache = new LruCache<string, SuggestResult>(60)
+
+export interface Suggestions {
+  result: Ref<SuggestResult | null>
+  loading: Ref<boolean>
+  /** Schedules a lookup for `text` (debounced); shorter than the minimum clears. */
+  request: (text: string) => void
+  /** Cancels pending/in-flight lookups and clears the result. */
+  reset: () => void
+}
+
+export function useSuggestions(scope: () => string, source: SuggestSource = apiSuggestSource): Suggestions {
+  const suggester = createSuggester(source, sharedCache)
+  const result = shallowRef<SuggestResult | null>(null)
+  const loading = ref(false)
+  let timer: ReturnType<typeof setTimeout> | null = null
+  let seq = 0
+
+  function stop(): void {
+    if (timer) clearTimeout(timer)
+    timer = null
+    suggester.cancel()
+    seq++
+  }
+
+  function reset(): void {
+    stop()
+    result.value = null
+    loading.value = false
+  }
+
+  function request(text: string): void {
+    const query = text.trim()
+    if (query.length < SUGGEST_MIN_CHARS) return reset()
+    stop()
+    const cached = sharedCache.get(suggestCacheKey(scope(), query))
+    if (cached) {
+      result.value = cached
+      loading.value = false
+      return
+    }
+    loading.value = true
+    const ticket = ++seq
+    timer = setTimeout(() => {
+      timer = null
+      void suggester.suggest(scope(), query).then((value) => {
+        if (value === null || ticket !== seq) return
+        result.value = value
+        loading.value = false
+      })
+    }, SUGGEST_DEBOUNCE_MS)
+  }
+
+  return { result, loading, request, reset }
 }

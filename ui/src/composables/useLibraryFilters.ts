@@ -38,6 +38,8 @@ export function useLibraryFilters(config: LibraryConfig) {
   )
   const cardSize = ref(clampCardSize(stored.cardSize ?? CARD_SIZE_DEFAULT))
   const state = reactive({
+    /** Local (library-scoped) text search, sent as the list endpoint's `search`. */
+    search: '',
     folder: '',
     baseModels: [] as string[],
     tags: [] as string[],
@@ -64,6 +66,7 @@ export function useLibraryFilters(config: LibraryConfig) {
   }
 
   function clear(): void {
+    state.search = ''
     state.folder = ''
     state.baseModels = []
     state.tags = []
@@ -72,21 +75,27 @@ export function useLibraryFilters(config: LibraryConfig) {
   }
 
   const chips = computed<FilterChip[]>(() => [
-    ...(state.folder ? [{ key: 'folder', label: state.folder, remove: () => (state.folder = '') }] : []),
+    ...(state.search
+      ? [{ key: 'search', label: t('library.searchChip', { query: state.search }), remove: () => (state.search = '') }]
+      : []),
+    // Always shown, so a folder filter stays visible while the folder panel is hidden.
+    ...(state.folder
+      ? [{ key: 'folder', label: t('library.folderChip', { name: state.folder }), remove: () => (state.folder = '') }]
+      : []),
     ...state.baseModels.map((value) => ({ key: `base:${value}`, label: value, remove: () => toggle('baseModels', value) })),
     ...state.tags.map((value) => ({ key: `tag:${value}`, label: `#${value}`, remove: () => toggle('tags', value) })),
     ...(state.favoritesOnly ? [{ key: 'fav', label: t('library.favoritesOnly'), remove: () => (state.favoritesOnly = false) }] : []),
     ...(state.updatesOnly ? [{ key: 'upd', label: t('library.updatesOnly'), remove: () => (state.updatesOnly = false) }] : []),
   ])
 
-  /** Number of filters inside the filter panel (folder excluded). */
+  /** Number of filters inside the filter panel (search and folder excluded). */
   const panelCount = computed(
     () => state.baseModels.length + state.tags.length + (state.favoritesOnly ? 1 : 0) + (state.updatesOnly ? 1 : 0),
   )
 
   /** Stable key that changes whenever the result set must be reloaded. */
   const signature = computed(() =>
-    JSON.stringify([sort.value, state.folder, state.baseModels, state.tags, state.favoritesOnly, state.updatesOnly]),
+    JSON.stringify([sort.value, state.search, state.folder, state.baseModels, state.tags, state.favoritesOnly, state.updatesOnly]),
   )
 
   return { sort, cardSize, state, toggle, include, clearList, clear, chips, panelCount, signature }
