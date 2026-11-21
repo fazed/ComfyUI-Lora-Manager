@@ -35,7 +35,6 @@ import type {
   PagedResponse,
   QueueItem,
   QueueResponse,
-  RecipeItem,
   SettingsMap,
   TagEntry,
   WorkflowRegistry,
@@ -336,22 +335,8 @@ export const settingsApi = {
   update: (changes: SettingsMap) => request<{ success: boolean }>('settings', { method: 'POST', body: changes }),
 }
 
-export interface RecipeListQuery {
-  page: number
-  pageSize: number
-  sortBy?: string
-  search?: string
-}
-
-export const recipesApi = {
-  list: (query: RecipeListQuery, signal?: AbortSignal) =>
-    request<PagedResponse<RecipeItem>>('recipes', {
-      query: { page: query.page, page_size: query.pageSize, sort_by: query.sortBy, search: query.search?.trim() || undefined },
-      signal,
-    }),
-  searchTags: (q: string, limit = 8, signal?: AbortSignal) =>
-    request<{ tags: TagEntry[] }>('recipes/search-tags', { query: { q, limit }, signal }).then((r) => r.tags ?? []),
-}
+// Recipes live in ./recipes (phase B2a); re-exported for existing imports.
+export { recipesApi, type RecipeListQuery } from './recipes'
 
 export const themesApi = {
   list: () => request<{ themes: unknown[]; directory?: string }>('ui/themes'),

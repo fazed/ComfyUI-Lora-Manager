@@ -57,7 +57,7 @@ const PARAMS: { key: string; label: MessageKey; keys: string[]; numeric?: boolea
   { key: 'seed', label: 'generation.seed', keys: ['seed', 'Seed'] },
   { key: 'size', label: 'generation.size', keys: [] },
   { key: 'clipSkip', label: 'generation.clipSkip', keys: ['clipSkip', 'Clip skip', 'clip_skip'], numeric: true },
-  { key: 'denoise', label: 'generation.denoise', keys: ['denoise', 'Denoising strength'], numeric: true },
+  { key: 'denoise', label: 'generation.denoise', keys: ['denoise', 'Denoising strength', 'denoising_strength'], numeric: true },
   { key: 'vae', label: 'generation.vae', keys: ['VAE', 'vae'] },
 ]
 

@@ -8,10 +8,10 @@
  */
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import AppIcon from './AppIcon.vue'
+import GenerationDetails from './GenerationDetails.vue'
 import LazyMedia from './LazyMedia.vue'
 import type { CivitaiImage } from '@/api/types'
 import { useDismissLayer } from '@/composables/useDismiss'
-import { copyText, useToasts } from '@/composables/useFeedback'
 import { isVideoUrl } from '@/utils/format'
 import { toGenerationView } from '@/utils/generation'
 import { t } from '@/i18n'
@@ -19,7 +19,6 @@ import { t } from '@/i18n'
 const props = defineProps<{ images: CivitaiImage[]; index: number }>()
 const emit = defineEmits<{ close: []; 'update:index': [index: number] }>()
 
-const toasts = useToasts()
 const dialog = ref<HTMLDialogElement | null>(null)
 const closeButton = ref<HTMLButtonElement | null>(null)
 // Escape arrives as the native `cancel` event; the layer keeps the drawer below from reacting.
@@ -31,8 +30,6 @@ const isVideo = computed(() => !!image.value && (image.value.type === 'video' ||
 const view = computed(() => toGenerationView(image.value?.meta))
 const position = computed(() => ({ index: props.index + 1, count: count.value }))
 
-const blockTitle = 'lm-overline flex items-center justify-between gap-2'
-const textBlock = 'mt-1 max-h-[220px] overflow-y-auto rounded-sm bg-sunken p-3 font-mono text-xs leading-normal whitespace-pre-wrap wrap-anywhere'
 const navButton =
   'absolute top-1/2 z-2 inline-grid size-[40px] -translate-y-1/2 cursor-pointer place-items-center rounded-pill bg-scrim text-on-scrim hover:bg-accent hover:text-on-accent disabled:cursor-default disabled:opacity-0'
 
@@ -51,11 +48,6 @@ function onKey(event: KeyboardEvent): void {
     event.preventDefault()
     go(1)
   }
-}
-
-async function copy(value: string): Promise<void> {
-  if (await copyText(value)) toasts.success(t('common.copied'))
-  else toasts.error(t('common.copyFailed'))
 }
 
 onMounted(async () => {
@@ -123,55 +115,15 @@ watch(
       </header>
 
       <div class="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
-        <template v-if="view">
-          <section v-if="view.prompt">
-            <h3 :class="blockTitle">
-              {{ t('generation.prompt') }}
-              <button type="button" class="lm-btn lm-btn--sm normal-case" :aria-label="t('generation.copyPrompt')" @click="copy(view.prompt)">
-                <AppIcon name="copy" :size="14" />{{ t('common.copy') }}
-              </button>
-            </h3>
-            <p :class="textBlock">{{ view.prompt }}</p>
-          </section>
-          <section v-if="view.negativePrompt">
-            <h3 :class="blockTitle">
-              {{ t('generation.negativePrompt') }}
-              <button
-                type="button"
-                class="lm-btn lm-btn--sm normal-case"
-                :aria-label="t('generation.copyNegative')"
-                @click="copy(view.negativePrompt)"
-              >
-                <AppIcon name="copy" :size="14" />{{ t('common.copy') }}
-              </button>
-            </h3>
-            <p :class="textBlock">{{ view.negativePrompt }}</p>
-          </section>
-          <section v-if="view.params.length">
-            <h3 class="lm-overline mb-2">{{ t('generation.parameters') }}</h3>
-            <ul class="flex flex-wrap gap-1">
-              <li v-for="param in view.params" :key="param.key" class="lm-chip max-w-full whitespace-normal">
-                <span class="text-muted">{{ t(param.label) }}</span>
-                <span class="font-medium wrap-anywhere">{{ param.value }}</span>
-              </li>
-            </ul>
-          </section>
-          <section v-if="view.resources.length">
-            <h3 class="lm-overline mb-2">{{ t('generation.resources') }}</h3>
-            <ul class="flex flex-col gap-1 text-sm">
-              <li v-for="resource in view.resources" :key="`${resource.type}|${resource.name}`" class="flex items-baseline gap-2">
-                <span class="lm-badge flex-none">{{ resource.type }}</span>
-                <span class="min-w-0 flex-1 wrap-anywhere">{{ resource.name }}</span>
-                <span v-if="resource.weight" class="text-xs text-muted tabular-nums">{{ resource.weight }}</span>
-              </li>
-            </ul>
-          </section>
-        </template>
-        <div v-else class="flex flex-col items-center gap-2 py-8 text-center text-muted">
-          <AppIcon name="text" :size="28" />
-          <p class="font-medium text-fg">{{ t('generation.none') }}</p>
-          <p class="text-sm">{{ t('generation.noneHint') }}</p>
-        </div>
+        <GenerationDetails :view="view">
+          <template #empty>
+            <div class="flex flex-col items-center gap-2 py-8 text-center text-muted">
+              <AppIcon name="text" :size="28" />
+              <p class="font-medium text-fg">{{ t('generation.none') }}</p>
+              <p class="text-sm">{{ t('generation.noneHint') }}</p>
+            </div>
+          </template>
+        </GenerationDetails>
       </div>
     </aside>
   </dialog>

@@ -4,6 +4,7 @@
  * on the library page, positioned at a viewport point and kept inside the
  * viewport. WAI-ARIA menu: arrow keys / Home / End move, Escape or an outside
  * pointerdown closes (focus goes back to the opener), Tab closes.
+ * `items` replaces the model actions (the recipes page passes its own list).
  */
 import { computed, nextTick, onMounted, ref } from 'vue'
 import AppIcon, { type IconName } from './AppIcon.vue'
@@ -21,10 +22,17 @@ export type ModelAction =
   | 'exclude'
   | 'delete'
 
-const props = defineProps<{ x: number; y: number; label: string }>()
-const emit = defineEmits<{ select: [action: ModelAction]; close: [reason: 'escape' | 'outside' | 'select'] }>()
+export interface ActionMenuItem {
+  action: string
+  label: string
+  icon: IconName
+  danger?: boolean
+}
 
-const ITEMS: { action: ModelAction; label: MessageKey; icon: IconName; danger?: boolean }[] = [
+const props = defineProps<{ x: number; y: number; label: string; items?: ActionMenuItem[] }>()
+const emit = defineEmits<{ select: [action: string]; close: [reason: 'escape' | 'outside' | 'select'] }>()
+
+const MODEL_ITEMS: { action: ModelAction; label: MessageKey; icon: IconName; danger?: boolean }[] = [
   { action: 'move', label: 'actions.move', icon: 'folderMove' },
   { action: 'rename', label: 'actions.rename', icon: 'pencil' },
   { action: 'template', label: 'tools.template.open', icon: 'type' },
@@ -36,7 +44,7 @@ const ITEMS: { action: ModelAction; label: MessageKey; icon: IconName; danger?: 
   { action: 'delete', label: 'actions.delete', icon: 'trash', danger: true },
 ]
 const MENU_WIDTH = 240
-const MENU_HEIGHT = ITEMS.length * 36 + 16
+const entries = computed<ActionMenuItem[]>(() => props.items ?? MODEL_ITEMS.map((entry) => ({ ...entry, label: t(entry.label) })))
 
 const menu = ref<HTMLElement | null>(null)
 const style = computed(() => {
@@ -44,7 +52,7 @@ const style = computed(() => {
   const height = typeof window === 'undefined' ? 768 : window.innerHeight
   return {
     left: `${Math.max(8, Math.min(props.x, width - MENU_WIDTH - 8))}px`,
-    top: `${Math.max(8, Math.min(props.y, height - MENU_HEIGHT - 8))}px`,
+    top: `${Math.max(8, Math.min(props.y, height - (entries.value.length * 36 + 16) - 8))}px`,
     width: `${MENU_WIDTH}px`,
   }
 })
@@ -84,7 +92,7 @@ onMounted(async () => {
     @keydown="onKey"
   >
     <button
-      v-for="entry in ITEMS"
+      v-for="entry in entries"
       :key="entry.action"
       type="button"
       role="menuitem"
@@ -92,7 +100,7 @@ onMounted(async () => {
       :class="entry.danger ? 'text-danger' : ''"
       @click="emit('select', entry.action); emit('close', 'select')"
     >
-      <AppIcon :name="entry.icon" :size="16" />{{ t(entry.label) }}
+      <AppIcon :name="entry.icon" :size="16" />{{ entry.label }}
     </button>
   </div>
 </template>

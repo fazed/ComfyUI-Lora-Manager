@@ -23,7 +23,8 @@ export function clampCardSize(value: number): number {
   return Math.min(CARD_SIZE_MAX, Math.max(CARD_SIZE_MIN, Math.round(value)))
 }
 
-export function useLibraryFilters(config: LibraryConfig) {
+/** Model libraries pass their LibraryConfig; the recipes page passes its own prefix and sorts. */
+export function useLibraryFilters(config: Pick<LibraryConfig, 'sortOptions' | 'defaultSort'> & { prefix: string }) {
   const storageKey = `lm-ui.library.${config.prefix}`
   const stored = (() => {
     try {

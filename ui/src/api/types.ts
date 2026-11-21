@@ -176,16 +176,161 @@ export interface HistoryResponse {
 
 export type SettingsMap = Record<string, unknown>
 
+/** One LoRA of a stored recipe (`<id>.recipe.json`), enriched on read with inLibrary/localPath/preview_url. */
+export interface RecipeLora {
+  file_name?: string
+  hash?: string
+  strength?: number
+  modelVersionId?: number | null
+  modelName?: string
+  modelVersionName?: string
+  isDeleted?: boolean
+  hashInvalid?: boolean
+  exclude?: boolean
+  inLibrary?: boolean
+  localPath?: string | null
+  preview_url?: string
+  folder?: string
+  reconnectSnapshot?: Record<string, unknown> | null
+}
+
+export interface RecipeCheckpoint {
+  type?: string
+  name?: string
+  file_name?: string
+  hash?: string
+  id?: number | null
+  modelId?: number | null
+  modelVersionId?: number | null
+  modelName?: string
+  modelVersionName?: string
+  version?: string
+  baseModel?: string
+  inLibrary?: boolean
+  existsLocally?: boolean
+  isDeleted?: boolean
+  hashInvalid?: boolean
+  localPath?: string | null
+  preview_url?: string
+  thumbnailUrl?: string
+  reconnectSnapshot?: Record<string, unknown> | null
+}
+
 export interface RecipeItem {
   id: string
   title?: string
   file_url?: string
+  file_path?: string
+  folder?: string
   base_model?: string
   tags?: string[]
   favorite?: boolean
-  loras?: unknown[]
+  loras?: RecipeLora[]
+  checkpoint?: RecipeCheckpoint | null
+  gen_params?: Record<string, unknown>
+  source_path?: string
+  fingerprint?: string
+  has_workflow?: boolean
+  preview_nsfw_level?: number
+  width?: number
+  height?: number
+  recipe_json_path?: string
   created_date?: number
   modified?: number
+}
+
+/** A LoRA detected by the analyze endpoints (parser output). */
+export interface AnalysisLora {
+  name?: string
+  version?: string
+  file_name?: string
+  hash?: string
+  weight?: number
+  strength?: number
+  id?: number | null
+  modelId?: number | null
+  existsLocally?: boolean
+  inLibrary?: boolean
+  localPath?: string | null
+  thumbnailUrl?: string
+  baseModel?: string
+  isDeleted?: boolean
+  hashInvalid?: boolean
+  isEarlyAccess?: boolean
+  size?: number
+  type?: string
+}
+
+export interface MatchingRecipe {
+  id: string
+  title?: string
+  file_url?: string
+  modified?: number
+  created_date?: number
+  lora_count?: number
+}
+
+/** POST /recipes/analyze-image | analyze-local-image. `error` with HTTP 200 = no usable metadata. */
+export interface RecipeAnalysis {
+  error?: string
+  loras?: AnalysisLora[]
+  checkpoint?: RecipeCheckpoint | null
+  model?: RecipeCheckpoint | null
+  gen_params?: Record<string, unknown>
+  base_model?: string
+  raw_metadata?: Record<string, unknown>
+  image_base64?: string
+  extension?: string
+  is_video?: boolean
+  fingerprint?: string
+  matching_recipes?: MatchingRecipe[]
+  diagnostics?: Record<string, unknown>
+  workflow?: unknown
+  preview_nsfw_level?: number
+  parser?: string
+}
+
+export interface ReconnectSuggestion {
+  file_name: string
+  file_path?: string
+  model_name?: string
+  base_model?: string
+  preview_url?: string
+  hash?: string
+  score?: number
+  match_reason?: string
+  target_name: string
+}
+
+export interface RecipeDuplicateGroup {
+  type?: string
+  key: string
+  fingerprint?: string
+  count?: number
+  recipes: MatchingRecipe[]
+}
+
+export interface BatchImportItemProgress {
+  id?: string
+  source: string
+  item_type?: string
+  status: string
+  error_message?: string | null
+  recipe_name?: string | null
+  recipe_id?: string | null
+}
+
+export interface BatchImportProgress {
+  operation_id?: string
+  total: number
+  completed: number
+  success: number
+  failed: number
+  skipped: number
+  current_item?: string
+  status: string
+  progress_percent?: number
+  items?: BatchImportItemProgress[]
 }
 
 /** Undo handles of a staged (pending) delete: one merged batch, or several on a merge failure. */

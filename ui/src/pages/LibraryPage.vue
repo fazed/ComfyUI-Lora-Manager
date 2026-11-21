@@ -742,7 +742,7 @@ function bulkSend(event: MouseEvent): void {
       :x="menu.x"
       :y="menu.y"
       :label="t('actions.menu', { name: menu.item.model_name || menu.item.file_name })"
-      @select="runAction($event, menu!.item)"
+      @select="runAction($event as ModelAction, menu!.item)"
       @close="closeMenu"
     />
     <InputDialog

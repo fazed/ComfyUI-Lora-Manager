@@ -122,5 +122,5 @@ export function useSendToWorkflow() {
     )
   }
 
-  return { sendLora, sendLoras, copyLora, syntaxFor }
+  return { sendLora, sendLoras, copyLora, syntaxFor, sendCode }
 }
