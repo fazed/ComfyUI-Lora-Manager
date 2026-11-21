@@ -17,6 +17,7 @@ import { usePersistentToggle } from '@/composables/usePersistentToggle'
 import { useSendToWorkflow } from '@/composables/useSendToWorkflow'
 import { withMountPrefix } from '@/utils/basePath'
 import { formatBytes, formatDate, isVideoUrl } from '@/utils/format'
+import { isBlurred } from '@/utils/mature'
 import { promptHint } from '@/utils/generation'
 import { sanitizeHtml } from '@/utils/sanitize'
 import { collapseTags } from '@/utils/tags'
@@ -24,8 +25,8 @@ import { loraStrengths, type SendMode } from '@/utils/workflow'
 import { t, type MessageKey } from '@/i18n'
 
 const props = withDefaults(
-  defineProps<{ item: ModelItem; api: ModelApi; classicUrl: string; civitaiHost?: string; canSend?: boolean }>(),
-  { civitaiHost: 'civitai.com', canSend: false },
+  defineProps<{ item: ModelItem; api: ModelApi; classicUrl: string; civitaiHost?: string; canSend?: boolean; blurMature?: boolean }>(),
+  { civitaiHost: 'civitai.com', canSend: false, blurMature: false },
 )
 const emit = defineEmits<{
   close: []
@@ -99,6 +100,9 @@ const images = computed(() =>
   })),
 )
 const localImages = computed(() => examples.localCount.value)
+// Same rule and look as the library card; the lightbox reveals per image.
+const blurClass = 'scale-110 blur-[18px]'
+const coverBlurred = computed(() => isBlurred(props.item.preview_nsfw_level, props.blurMature))
 const imageHints = computed(() => images.value.map((image) => promptHint(image.meta)))
 const shownTags = computed(() => collapseTags(tags.value, tagsExpanded.value))
 const fileType = computed(() => {
@@ -364,7 +368,7 @@ useEventListener(document, 'keydown', onKey)
                 <!-- Fixed-height box: the cover never shifts the layout while it loads. -->
                 <LazyMedia
                   class="h-[min(420px,70vw)] w-full"
-                  media-class="size-full object-contain"
+                  :media-class="['size-full object-contain', coverBlurred && blurClass]"
                   :src="previewUrl"
                   loading="eager"
                   fetchpriority="high"
@@ -405,7 +409,7 @@ useEventListener(document, 'keydown', onKey)
                     >
                       <LazyMedia
                         class="size-full"
-                        media-class="lm-zoom-media size-full object-cover"
+                        :media-class="['lm-zoom-media size-full object-cover', isBlurred(image.nsfwLevel, blurMature) && blurClass]"
                         :src="image.url"
                         :kind="image.type === 'video' || isVideoUrl(image.url) ? 'video' : 'image'"
                         :icon-size="20"
@@ -718,6 +722,7 @@ useEventListener(document, 'keydown', onKey)
       v-if="lightboxIndex !== null && images.length"
       v-model:index="lightboxIndex"
       :images="images"
+      :blur-mature="blurMature"
       @close="closeLightbox"
     />
   </div>

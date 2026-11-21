@@ -730,6 +730,7 @@ function bulkSend(event: MouseEvent): void {
       :classic-url="classicUrl"
       :civitai-host="civitaiHost"
       :can-send="config.sendToComfy"
+      :blur-mature="blurMature"
       @close="openItem = null"
       @filter-tag="filterByTag"
       @updated="onUpdated"

@@ -173,3 +173,32 @@ export function nodeLabel(node: RegistryNode): string {
   const graph = node.graph_name ? ` (${node.graph_name})` : ''
   return `#${node.id}${graph} ${node.title || node.comfy_class || node.type_name || ''}`.trim()
 }
+
+export interface UsageTipEntry {
+  key: string
+  /** Displayed text, e.g. "strength 0.8". */
+  text: string
+  /** The strength a click applies (only for the `strength` tip). */
+  strength: number | null
+}
+
+const MAX_TIP_LENGTH = 40
+
+/** Read-only usage tips of a model as chips: strength, clip, then other scalar tips. */
+export function usageTipEntries(usageTips: unknown): UsageTipEntry[] {
+  const tips = parseUsageTips(usageTips)
+  const entries: UsageTipEntry[] = []
+  const strength = tipNumber(tips.strength)
+  if (strength !== null) entries.push({ key: 'strength', text: `strength ${formatStrength(strength)}`, strength })
+  const clip = tipNumber(tips.clip_strength ?? tips.clipStrength)
+  if (clip !== null) entries.push({ key: 'clip', text: `clip ${formatStrength(clip)}`, strength: null })
+  for (const [key, value] of Object.entries(tips)) {
+    if (['strength', 'clip_strength', 'clipStrength'].includes(key)) continue
+    if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') continue
+    const shown = String(value).trim()
+    if (!shown) continue
+    const text = `${key} ${shown}`
+    entries.push({ key, text: text.length > MAX_TIP_LENGTH ? `${text.slice(0, MAX_TIP_LENGTH - 1)}…` : text, strength: null })
+  }
+  return entries
+}

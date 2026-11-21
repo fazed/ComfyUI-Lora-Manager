@@ -13,10 +13,11 @@ import LazyMedia from './LazyMedia.vue'
 import type { CivitaiImage } from '@/api/types'
 import { useDismissLayer } from '@/composables/useDismiss'
 import { isVideoUrl } from '@/utils/format'
+import { isBlurred } from '@/utils/mature'
 import { toGenerationView } from '@/utils/generation'
 import { t } from '@/i18n'
 
-const props = defineProps<{ images: CivitaiImage[]; index: number }>()
+const props = withDefaults(defineProps<{ images: CivitaiImage[]; index: number; blurMature?: boolean }>(), { blurMature: false })
 const emit = defineEmits<{ close: []; 'update:index': [index: number] }>()
 
 const dialog = ref<HTMLDialogElement | null>(null)
@@ -28,6 +29,16 @@ const count = computed(() => props.images.length)
 const image = computed(() => props.images[props.index])
 const isVideo = computed(() => !!image.value && (image.value.type === 'video' || isVideoUrl(image.value.url)))
 const view = computed(() => toGenerationView(image.value?.meta))
+// Blurred images stay blurred until "Show" is pressed; revealing is per image and not persisted.
+const revealed = ref(new Set<number>())
+const blurred = computed(() => isBlurred(image.value?.nsfwLevel, props.blurMature) && !revealed.value.has(props.index))
+
+async function reveal(): Promise<void> {
+  revealed.value = new Set(revealed.value).add(props.index)
+  await nextTick()
+  if (!dialog.value?.contains(document.activeElement)) closeButton.value?.focus()
+}
+
 const position = computed(() => ({ index: props.index + 1, count: count.value }))
 
 const navButton =
@@ -80,18 +91,29 @@ watch(
       <LazyMedia
         v-if="image"
         class="size-full"
-        media-class="size-full object-contain"
+        :media-class="['size-full object-contain', blurred && 'scale-110 blur-[24px]']"
         :src="image.url"
         :kind="isVideo ? 'video' : 'image'"
         :alt="t('lightbox.label', position)"
         loading="eager"
         fetchpriority="high"
-        controls
+        :controls="!blurred"
         autoplay
         loop
         retry
         :icon-size="40"
       />
+      <button
+        v-if="blurred"
+        type="button"
+        class="absolute inset-0 z-1 grid cursor-pointer place-items-center bg-transparent"
+        :aria-label="`${t('lightbox.matureHint')}. ${t('lightbox.showMature')}`"
+        @click="reveal"
+      >
+        <span class="inline-flex min-h-control items-center gap-2 rounded-pill bg-scrim px-4 text-on-scrim">
+          <AppIcon name="eye" :size="18" />{{ t('lightbox.showMature') }}
+        </span>
+      </button>
       <span class="absolute top-3 left-3 z-2 rounded-pill bg-scrim px-2 py-px text-xs text-on-scrim tabular-nums" aria-hidden="true">
         {{ t('lightbox.counter', position) }}
       </span>

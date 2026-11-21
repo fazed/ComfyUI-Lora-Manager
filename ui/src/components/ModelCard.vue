@@ -4,6 +4,7 @@ import AppIcon from './AppIcon.vue'
 import LazyMedia from './LazyMedia.vue'
 import type { ModelItem } from '@/api/types'
 import { withMountPrefix } from '@/utils/basePath'
+import { isBlurred } from '@/utils/mature'
 import { t } from '@/i18n'
 
 const props = defineProps<{
@@ -41,8 +42,7 @@ const media = ref<InstanceType<typeof LazyMedia> | null>(null)
 const video = computed(() => (media.value?.element instanceof HTMLVideoElement ? media.value.element : null))
 const previewUrl = computed(() => (props.item.preview_url ? withMountPrefix(props.item.preview_url) : ''))
 const displayName = computed(() => props.item.model_name || props.item.file_name)
-// Civitai NSFW levels: 1 PG, 2 PG-13, 4 R, 8 X, 16 XXX.
-const blurred = computed(() => props.blurMature && (props.item.preview_nsfw_level ?? 0) >= 4)
+const blurred = computed(() => isBlurred(props.item.preview_nsfw_level, props.blurMature))
 const tags = computed(() => (props.item.tags ?? []).slice(0, 3))
 // Blurred media keeps its own fixed scale (the utility wins over the hover zoom).
 const mediaClass = computed(() => ['lm-zoom-media size-full object-cover', blurred.value && 'scale-110 blur-[18px]'])
