@@ -2,7 +2,12 @@
 
 import pytest
 
-from py.utils.civitai_utils import build_civitai_media_url, rewrite_preview_url
+from py.utils.civitai_utils import (
+    build_civitai_media_url,
+    build_civitai_thumbnail_url,
+    build_civitai_video_still_url,
+    rewrite_preview_url,
+)
 
 
 class TestRewritePreviewUrl:
@@ -217,3 +222,48 @@ class TestBuildCivitaiMediaUrl:
     def test_optimize_false_returns_source_url(self):
         url = "https://image.civitai.com/xG1nk/uuid/original=true/1.jpeg"
         assert build_civitai_media_url(url, "image", optimize=False) == url
+
+
+class TestBuildCivitaiThumbnailUrl:
+    """Thumbnails for queue/history rows, picked from a version's images."""
+
+    def test_first_image_gets_optimized_rendition(self):
+        images = [
+            {"url": "https://image.civitai.com/xG1nk/uuid/original=true/1.jpeg", "type": "image"},
+            {"url": "https://image.civitai.com/xG1nk/uuid/original=true/2.jpeg", "type": "image"},
+        ]
+        assert (
+            build_civitai_thumbnail_url(images)
+            == "https://image.civitai.com/xG1nk/uuid/width=450,optimized=true/1.jpeg"
+        )
+
+    def test_video_becomes_jpeg_still(self):
+        images = [
+            {"url": "https://image.civitai.com/xG1nk/uuid/original=true/75044257.mp4", "type": "video"}
+        ]
+        assert (
+            build_civitai_thumbnail_url(images)
+            == "https://image.civitai.com/xG1nk/uuid/anim=false,transcode=true,width=450,optimized=true/75044257.jpeg"
+        )
+
+    def test_video_detected_by_extension_without_type(self):
+        images = [{"url": "https://image.civitai.com/xG1nk/uuid/original=true/7.webm"}]
+        assert build_civitai_thumbnail_url(images) == (
+            "https://image.civitai.com/xG1nk/uuid/anim=false,transcode=true,width=450,optimized=true/7.jpeg"
+        )
+
+    def test_non_civitai_video_is_skipped_for_next_entry(self):
+        images = [
+            {"url": "https://example.com/clip.mp4", "type": "video"},
+            {"url": "https://example.com/still.png", "type": "image"},
+        ]
+        assert build_civitai_thumbnail_url(images) == "https://example.com/still.png"
+
+    @pytest.mark.parametrize("images", [None, [], "nope", [{"url": ""}, {"type": "image"}, "x"]])
+    def test_nothing_usable_returns_none(self, images):
+        assert build_civitai_thumbnail_url(images) is None
+
+
+def test_video_still_url_rejects_non_civitai_hosts():
+    assert build_civitai_video_still_url("https://example.com/original=true/a.mp4") is None
+    assert build_civitai_video_still_url(None) is None

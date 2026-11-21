@@ -294,6 +294,115 @@ async def test_card_then_model_page_creates_one_queue_item(
     assert json.loads(queue[0]["file_params"])["id"] == 1001
 
 
+def _resolving_handler(resolved: dict) -> ModelDownloadHandler:
+    return ModelDownloadHandler(
+        ws_manager=None,  # pyright: ignore[reportArgumentType]
+        logger=logging.getLogger("test-download-queue-thumbnail"),
+        download_use_case=None,  # pyright: ignore[reportArgumentType]
+        download_coordinator=SimpleNamespace(  # pyright: ignore[reportArgumentType]
+            resolve_download_target=AsyncMock(return_value=resolved)
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_add_fills_empty_thumbnail_from_resolved_version(
+    queue_service: DownloadQueueService,
+) -> None:
+    handler = _resolving_handler({
+        "model_id": 1,
+        "model_version_id": 100,
+        "model_name": "Model",
+        "version_name": "V1",
+        "file_params": {"id": 1001},
+        "thumbnail_url": "https://image.civitai.com/x/u/width=450,optimized=true/1.jpeg",
+    })
+
+    response = await handler.add_to_download_queue(
+        _queue_request("/api/lm/downloads/queue/add", {"download_id": "dl-t", "model_id": "1"})
+    )
+
+    item = json.loads(response.text)["item"]
+    assert item["thumbnail_url"] == "https://image.civitai.com/x/u/width=450,optimized=true/1.jpeg"
+    assert item["model_name"] == "Model"
+    assert item["version_name"] == "V1"
+
+
+@pytest.mark.asyncio
+async def test_add_keeps_caller_provided_thumbnail(
+    queue_service: DownloadQueueService,
+) -> None:
+    handler = _resolving_handler({
+        "model_id": 1,
+        "model_version_id": 100,
+        "file_params": {"id": 1001},
+        "thumbnail_url": "https://image.civitai.com/x/u/width=450,optimized=true/1.jpeg",
+    })
+
+    response = await handler.add_to_download_queue(
+        _queue_request(
+            "/api/lm/downloads/queue/add",
+            {"download_id": "dl-own", "model_id": "1", "thumbnail_url": "https://example.com/mine.jpg"},
+        )
+    )
+
+    assert json.loads(response.text)["item"]["thumbnail_url"] == "https://example.com/mine.jpg"
+
+
+@pytest.mark.asyncio
+async def test_resolve_download_target_derives_video_still_thumbnail(
+    queue_service: DownloadQueueService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = SimpleNamespace(
+        get_model_version=AsyncMock(return_value={
+            "id": 100,
+            "name": "V1",
+            "modelId": 1,
+            "model": {"id": 1, "name": "Model", "type": "LoRA"},
+            "images": [{
+                "url": "https://image.civitai.com/xG1nk/uuid/original=true/75044257.mp4",
+                "type": "video",
+            }],
+            "files": [{
+                "id": 1001,
+                "type": "Model",
+                "primary": True,
+                "name": "model.safetensors",
+                "metadata": {"format": "SafeTensor"},
+            }],
+        })
+    )
+    monkeypatch.setattr(
+        download_manager_module,
+        "get_default_metadata_provider",
+        AsyncMock(return_value=provider),
+    )
+    coordinator = DownloadCoordinator(
+        ws_manager=None,
+        download_manager_factory=AsyncMock(return_value=DownloadManager()),
+    )
+    handler = ModelDownloadHandler(
+        ws_manager=None,  # pyright: ignore[reportArgumentType]
+        logger=logging.getLogger("test-download-queue-video-thumb"),
+        download_use_case=None,  # pyright: ignore[reportArgumentType]
+        download_coordinator=coordinator,
+    )
+
+    response = await handler.add_to_download_queue(
+        _queue_request(
+            "/api/lm/downloads/queue/add",
+            {"download_id": "dl-v", "model_id": "1", "model_version_id": "100"},
+        )
+    )
+
+    assert json.loads(response.text)["item"]["thumbnail_url"] == (
+        "https://image.civitai.com/xG1nk/uuid/anim=false,transcode=true,width=450,optimized=true/75044257.jpeg"
+    )
+    # The thumbnail comes from the one lookup resolve already made.
+    provider.get_model_version.assert_awaited_once()
+
+
 # ----------------------------------------------------------------------
 # Structured 429 rate-limit responses (download queue contract)
 # ----------------------------------------------------------------------

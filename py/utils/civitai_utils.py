@@ -501,9 +501,82 @@ def build_civitai_media_url(
     return urlunparse(parsed._replace(path="/" + "/".join(segments)))
 
 
+_VIDEO_EXTENSIONS = (".mp4", ".webm", ".mov", ".m4v")
+
+
+def build_civitai_video_still_url(
+    source_url: str | None, *, width: int | None = 450
+) -> str | None:
+    """Return a JPEG first-frame URL for a Civitai video, or ``None``.
+
+    The image cacher serves a still when the rendition segment carries
+    ``anim=false``; the ``.jpeg`` filename selects the output format, e.g.
+    ``.../anim=false,transcode=true,width=450,optimized=true/<name>.jpeg``.
+    Non-Civitai URLs return ``None``: a video URL is not usable as an image.
+    """
+
+    rendition = build_civitai_media_url(source_url, "video", width=width)
+    if not rendition:
+        return None
+    try:
+        parsed = urlparse(rendition)
+    except ValueError:
+        return None
+    hostname = (parsed.hostname or "").lower()
+    if hostname == "civitai.com" or not hostname.endswith(".civitai.com"):
+        return None
+
+    params = _media_rendition_params("video", width)
+    segments = [segment for segment in parsed.path.split("/") if segment]
+    if params not in segments:
+        return None
+    index = segments.index(params)
+    segments[index] = f"anim=false,{params}"
+    if index == len(segments) - 1:
+        segments.append("preview.jpeg")
+    else:
+        stem, _ext = posixpath.splitext(segments[-1])
+        segments[-1] = f"{stem or 'preview'}.jpeg"
+    return urlunparse(parsed._replace(path="/" + "/".join(segments)))
+
+
+def build_civitai_thumbnail_url(
+    images: Any, *, width: int | None = 450
+) -> str | None:
+    """Pick a small thumbnail URL from a Civitai version's ``images`` list.
+
+    Uses the first entry that yields a usable URL: images get the optimized
+    rendition, videos a JPEG still (``anim=false``). Returns ``None`` when the
+    list has nothing usable. Makes no network calls.
+    """
+
+    if not isinstance(images, (list, tuple)):
+        return None
+    for entry in images:
+        if not isinstance(entry, Mapping):
+            continue
+        url = entry.get("url")
+        if not isinstance(url, str) or not url:
+            continue
+        media_type = str(entry.get("type") or "").lower()
+        is_video = media_type == "video" or (
+            not media_type
+            and posixpath.splitext(urlparse(url).path)[1].lower() in _VIDEO_EXTENSIONS
+        )
+        if is_video:
+            still = build_civitai_video_still_url(url, width=width)
+            if still:
+                return still
+            continue
+        return build_civitai_media_url(url, "image", width=width) or url
+    return None
+
+
 __all__ = [
     "build_civitai_image_page_url",
     "build_civitai_media_url",
+    "build_civitai_thumbnail_url",
+    "build_civitai_video_still_url",
     "build_license_flags",
     "extract_civitai_image_id",
     "extract_civitai_image_id_from_cdn_url",
