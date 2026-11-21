@@ -29,7 +29,9 @@ ui/
                           a backdrop click needs pointerdown + click on the backdrop)
     components/           TopBar, AppMenu/ThemeOptions, SearchCombobox, VirtualGrid,
                           ModelCard, ModelDrawer, ExampleLightbox,
-                          BaseModelQuickFilter, NodePickerDialog, FolderTree, ...
+                          BaseModelQuickFilter, NodePickerDialog, FolderTree,
+                          ModelActionMenu, ModalShell, InputDialog, MoveDialog,
+                          OrganizeDialog, ...
     pages/                LibraryPage (generic, per model type), RecipesPage,
                           SearchPage, DownloadsPage, SettingsPage, NotFoundPage
     config/libraries.ts   per-type config (loras / checkpoints / embeddings)
@@ -477,6 +479,74 @@ read-only endpoints (`api/suggestSource.ts`):
   found, a warning toast offers "Copy syntax" instead. Checkpoint/embedding
   "send to workflow" is still classic-UI only.
 
+## Model management actions (phase A)
+
+Ported from the classic UI (`BulkManager.js`, `MoveManager.js`, the card
+context menu and the model modal). Everything below goes through
+`composables/useModelActions.ts` (flows), `utils/modelActions.ts` (pure
+helpers) and the typed calls in `api/endpoints.ts`.
+
+* **Card menu** ("..." button on every card, or right-click): Move...,
+  Rename file..., Exclude from library..., Delete... (WAI-ARIA menu: arrow
+  keys, Home/End, Escape returns focus to the button). The **drawer** has the
+  same four actions under the Civitai links.
+* **Selection mode** toolbar: count, Select all loaded (also Ctrl/Cmd+A while
+  selection mode is on and focus is not in a field), Select none, Invert, then
+  Move..., Add tags..., Send to ComfyUI (LoRAs; all selected LoRAs as one
+  `, `-joined code, Shift+click replaces), Copy names and Delete... .
+* **Organize...** (library toolbar) opens the auto-organize dialog.
+
+### What the backend does (discovery, pinned by tests)
+
+| Action | Endpoint | Behaviour |
+| --- | --- | --- |
+| Delete | `POST /api/lm/{prefix}/delete {file_path}` | Not a recycle bin: the model file, its `.metadata.json`, the workflow document and every preview (`PREVIEW_EXTENSIONS`, e.g. `.jpeg`, `.preview.png`, `.webp`, `.mp4`) are **renamed into `<model folder>/.lm-pending-delete/<batch_id>/`** with a `manifest.json` (`expires_at` = now + `PENDING_DELETE_TTL_SECONDS` = **20 s**). After the window a timer (or the next stage/undo/startup sweep) deletes the batch **permanently**. The response carries `batch_id`; it is `null` when staging was impossible (no root found, rename error) and the backend fell back to a **direct hard delete**: the UI then says "deleted permanently" and offers no Undo. A third-party `.civitai.info` is **not** touched (it stays where the model was). |
+| Bulk delete | `POST /api/lm/{prefix}/bulk-delete {file_paths}` | Stages every file the same way and merges the batches into **one** `batch_id` (fallback: `batch_ids[]`, undone one by one). `success` is false only when nothing was deleted; per-file `results[]`. |
+| Undo | `POST /api/lm/undo-delete {batch_id}` | Renames every staged file back, re-adds the cache entries from the manifest snapshot and removes the staging folder. `404` with "Undo window expired", "Unknown batch id" or "Target path occupied" (a new file took the name). |
+| Rename | `POST /api/lm/{prefix}/rename {file_path, new_file_name}` | `new_file_name` is the stem; the extension is kept. Renames the model, `.metadata.json` (+`.bak`), workflow document and previews in place; rewrites `file_name` / `file_path` / `preview_url` in the metadata and records `original_file_name`; LoRA recipes referencing the hash are re-pointed. `400` for any of `/ \ : * ? " < > \|` or an existing target ("A file with this name already exists"). **Not** renamed: `.civitai.info`. |
+| Move | `POST /api/lm/{prefix}/move_model {file_path, target_path}` | `target_path` is an absolute folder inside a library root; it is **created** when missing. Moves the model and **every file sharing its base name** (`<stem>.*`, including `.civitai.info`) and rewrites the metadata paths. A same-named file in the target is never overwritten: the moved file gets a hash suffix (read `new_file_path`). Same folder = successful no-op; outside the roots = error. |
+| Bulk move | `POST /api/lm/{prefix}/move_models_bulk {file_paths, target_path}` | Per-file `results[]` (`success`, `new_file_path`, `message`), `success_count` / `failure_count`; HTTP 200 even when some fail. |
+| Exclude | `POST /api/lm/{prefix}/exclude` / `unexclude` | Sets `exclude: true` in the metadata and drops the cache entry; the file stays. Undo in the toast calls `unexclude`. |
+| Add tags | `POST /api/lm/{prefix}/add-tags {file_path, tags}` | One request per model (no bulk endpoint); `409` when the file vanished. |
+| Auto-organize | `GET /api/lm/{prefix}/auto-organize?dry_run=true` (preview), `POST /api/lm/{prefix}/auto-organize {}` (real run), `GET .../auto-organize-progress` | Only folders change (download path template of the type; flat when empty); file names stay. The dry run returns `planned_moves[]` and every `results[]` entry (`status` skipped/issue + `reason` code). The real run is one long request that moves files of the **whole type** and afterwards **removes empty folders below the roots**; progress is a global snapshot (`404` when idle); `409` when a run is active. **A GET without `dry_run=true` runs for real**: the UI only ever sends the preview as a GET. |
+
+Folder pickers use `GET /{prefix}/roots` and
+`GET /{prefix}/folder-tree?model_root=..&include_empty=true` (one root, empty
+folders included); a typed "new subfolder" is created by the move itself (no
+separate `create-folder` call, like the classic move modal).
+
+### UI semantics and safety
+
+* Delete (single and bulk) and exclude always ask first (danger confirm that
+  states the 20 s window; bulk shows the count). The cards disappear at once;
+  the toast offers **Undo for 18 s** (`UNDO_TOAST_MS`, 2 s under the backend
+  window so a late click never races the purge). An expired undo says so.
+* Rename validates locally (characters above, trailing dot/space, length,
+  unchanged name) and shows backend errors in the dialog. An open drawer
+  follows a renamed or moved model.
+* Move dialog: root, filterable folder list (current folder preselected),
+  optional new subfolder (validated: no `..`, drive letters or illegal
+  characters), destination preview; Move is disabled when nothing would
+  change. After a partial bulk move the failures stay listed and Move retries
+  only those. The grid and folder tree reload afterwards.
+* Auto-organize: model type (current library preselected), then **Preview
+  (dry run)** (planned moves, already in place, skipped, would fail), then
+  **Start organizing...**, enabled only after a preview with moves, asks an
+  explicit danger confirm naming the type, the number of files that WILL be
+  moved, the template, the empty-folder cleanup and that there is no undo.
+  Progress is polled every second; the final summary shows moved / skipped /
+  failed.
+
+Tests: `tests/modelActions.test.ts` (request builders, helpers, confirm /
+undo / rename / move / exclude / tags flows against a mocked backend, written
+before the UI) and the backend contract tests
+`tests/services/test_model_actions_contract.py` (real temp files: which
+sidecars travel with rename / move / delete, delete -> undo and rename / move
+round trips byte-identical, expired and occupied undo, bulk move conflict
+suffix). The flows were also verified once against a running backend on one
+small LoRA, with a verified backup taken first (rename -> back, move -> back,
+delete -> undo; all files hash-identical afterwards).
+
 ## Phase 1 scope and roadmap
 
 Covered in phase 1:
@@ -489,8 +559,7 @@ Covered in phase 1:
   with autocomplete, sort, base-model and tag
   filters with active-filter chips and a base-model quick filter,
   favorites/updates toggles, card-size
-  slider, selection mode (copy file names; bulk actions link to classic UI),
-  favorite toggle on cards.
+  slider, selection mode, favorite toggle on cards.
 * Detail drawer: preview with example thumbnails and a lightbox with
   generation data, trigger words with copy, tags editor, notes, collapsible
   specifications, Civitai link, versions with in-library badges and "queue
@@ -505,9 +574,13 @@ Covered in phase 1:
 
 Left to the classic UI for now (linked from the new UI):
 
-* Destructive or file-moving actions: delete, move, rename, bulk delete/move,
-  auto-organize, exclude, duplicate finder, relink/refresh Civitai metadata,
-  replace preview, folder create/rename/delete.
+* Phase A (done, see "Model management actions") moved delete with undo,
+  rename, move, bulk delete/move, exclude, bulk add-tags, bulk send and
+  auto-organize to the new UI. Still classic-only from that area: the
+  excluded-models list (unexclude outside the Undo toast), duplicate finder,
+  relink/refresh Civitai metadata, replace preview, set NSFW level, bulk set
+  base model / favorite / content rating, apply filename template, move with
+  "use default path", folder create/rename/delete in the sidebar.
 * Download modal with version/file/root selection (the new form always uses
   the default root and path template).
 * Recipe details, import (image/URL/batch), editing and LoRA reconnect.
