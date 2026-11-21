@@ -42,7 +42,7 @@ onBeforeUnmount(close)
 </script>
 
 <template>
-  <div ref="root" class="theme-menu">
+  <div ref="root" class="relative">
     <button
       type="button"
       class="lm-btn lm-btn--ghost lm-btn--icon"
@@ -54,27 +54,14 @@ onBeforeUnmount(close)
     >
       <AppIcon :name="icon" />
     </button>
-    <div v-if="open" ref="panel" class="theme-menu__panel" role="dialog" :aria-label="t('theme.label')">
-      <ThemeOptions compact />
+    <div
+      v-if="open"
+      ref="panel"
+      class="absolute top-[calc(100%+var(--lm-space-2))] right-0 z-50 w-[260px] rounded-md hairline border-border bg-elevated p-3 shadow-lg"
+      role="dialog"
+      :aria-label="t('theme.label')"
+    >
+      <ThemeOptions />
     </div>
   </div>
 </template>
-
-<style scoped>
-.theme-menu {
-  position: relative;
-}
-
-.theme-menu__panel {
-  position: absolute;
-  right: 0;
-  top: calc(100% + var(--lm-space-2));
-  z-index: 50;
-  width: 260px;
-  padding: var(--lm-space-3);
-  border: var(--lm-border-width) solid var(--lm-color-border);
-  border-radius: var(--lm-radius-md);
-  background: var(--lm-color-elevated);
-  box-shadow: var(--lm-shadow-lg);
-}
-</style>

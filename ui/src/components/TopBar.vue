@@ -27,10 +27,10 @@ const queueLabel = computed(() =>
 </script>
 
 <template>
-  <header class="topbar">
+  <header class="flex h-topbar flex-none items-center gap-3 hairline-b border-border bg-surface px-6 tablet:px-3">
     <button
       type="button"
-      class="lm-btn lm-btn--ghost lm-btn--icon topbar__nav-toggle"
+      class="lm-btn lm-btn--ghost lm-btn--icon hidden tablet:inline-flex"
       :aria-label="t('nav.toggle')"
       :aria-expanded="navOpen"
       @click="$emit('toggle-nav')"
@@ -38,13 +38,13 @@ const queueLabel = computed(() =>
       <AppIcon name="menu" />
     </button>
 
-    <div class="topbar__search" role="search">
-      <AppIcon name="search" class="topbar__search-icon" />
-      <label class="visually-hidden" for="global-search">{{ t('topbar.search') }}</label>
+    <div class="relative max-w-[560px] flex-1" role="search">
+      <AppIcon name="search" class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted" />
+      <label class="sr-only" for="global-search">{{ t('topbar.search') }}</label>
       <input
         id="global-search"
         v-model="query"
-        class="lm-input topbar__search-input"
+        class="lm-input border-transparent bg-sunken pl-[calc(var(--lm-space-3)*2+18px)] disabled:opacity-60"
         type="search"
         autocomplete="off"
         :placeholder="searchable ? placeholder : t('topbar.search')"
@@ -52,96 +52,19 @@ const queueLabel = computed(() =>
       />
     </div>
 
-    <div class="topbar__actions">
+    <div class="ml-auto flex items-center gap-1">
       <RouterLink
         to="/downloads"
-        class="lm-btn lm-btn--ghost topbar__queue"
-        :class="{ 'topbar__queue--busy': busy, 'topbar__queue--paused': paused }"
+        class="lm-btn lm-btn--ghost relative"
+        :class="paused ? 'text-warning' : busy ? 'text-accent' : 'text-muted'"
         :aria-label="queueLabel"
         :title="queueLabel"
       >
         <AppIcon :name="paused ? 'pause' : 'download'" />
-        <span v-if="busy" class="topbar__queue-count">{{ active.length }}/{{ active.length + waiting.length }}</span>
+        <span v-if="busy" class="text-xs tabular-nums">{{ active.length }}/{{ active.length + waiting.length }}</span>
         <span v-if="worker?.rate_limited" class="lm-badge lm-badge--warning">!</span>
       </RouterLink>
       <ThemeMenu />
     </div>
   </header>
 </template>
-
-<style scoped>
-.topbar {
-  display: flex;
-  align-items: center;
-  gap: var(--lm-space-3);
-  height: var(--lm-topbar-height);
-  padding: 0 var(--lm-space-6);
-  border-bottom: var(--lm-border-width) solid var(--lm-color-border);
-  background: var(--lm-color-surface);
-  flex: none;
-}
-
-.topbar__nav-toggle {
-  display: none;
-}
-
-.topbar__search {
-  position: relative;
-  flex: 1;
-  max-width: 560px;
-}
-
-.topbar__search-icon {
-  position: absolute;
-  left: var(--lm-space-3);
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--lm-color-muted);
-  pointer-events: none;
-}
-
-.topbar__search-input {
-  padding-left: calc(var(--lm-space-3) * 2 + 18px);
-  background: var(--lm-color-sunken);
-  border-color: transparent;
-}
-
-.topbar__search-input:disabled {
-  opacity: 0.6;
-}
-
-.topbar__actions {
-  display: flex;
-  align-items: center;
-  gap: var(--lm-space-1);
-  margin-left: auto;
-}
-
-.topbar__queue {
-  position: relative;
-  color: var(--lm-color-muted);
-}
-
-.topbar__queue--busy {
-  color: var(--lm-color-accent);
-}
-
-.topbar__queue--paused {
-  color: var(--lm-color-warning);
-}
-
-.topbar__queue-count {
-  font-size: var(--lm-font-size-xs);
-  font-variant-numeric: tabular-nums;
-}
-
-@media (max-width: 900px) {
-  .topbar {
-    padding: 0 var(--lm-space-3);
-  }
-
-  .topbar__nav-toggle {
-    display: inline-flex;
-  }
-}
-</style>

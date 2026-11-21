@@ -11,3 +11,9 @@
 /* Scan only the app sources (dist/ is committed and must never feed back in). */
 @source '../../index.html';
 @source '../**/*.{vue,ts}';
+
+/*
+ * Plain words in comments and strings ("border", "table", ...) also match
+ * utility names; none of these are used as classes, so never generate them.
+ */
+@source not inline('{border,container,filter,inline,table,transform,visible}');

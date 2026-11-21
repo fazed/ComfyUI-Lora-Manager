@@ -2,7 +2,7 @@
 
 A fork-local, single-page replacement for the classic LoRA Manager web UI.
 It is built with Vue 3 + Vite + TypeScript (same toolchain versions as
-`vue-widgets/`), talks to the same `/api/lm/...` endpoints as the classic UI,
+`vue-widgets/`) and styled with Tailwind CSS v4 on top of design tokens, talks to the same `/api/lm/...` endpoints as the classic UI,
 and is served by the backend at **`/lm-ui/`**. The classic UI
 (`templates/` + `static/`) is untouched and keeps working at `/loras`.
 
@@ -30,7 +30,9 @@ ui/
                           DownloadsPage, SettingsPage, NotFoundPage
     config/libraries.ts   per-type config (loras / checkpoints / embeddings)
     themes/               design tokens + themes + registry.ts
-    styles/app.css        global primitives (buttons, inputs, chips), tokens only
+    styles/main.css       stylesheet entry: Tailwind + tokens.css + app.css
+    styles/tokens.css     Tailwind theme mapped onto the design tokens
+    styles/app.css        base rules + shared classes (buttons, inputs, chips)
     i18n/index.ts         all English UI strings in one table, t(key, params)
     utils/                basePath, format, civitai URL parsing, query builder,
                           HTML sanitizer, settings form helpers
@@ -41,6 +43,8 @@ ui/
 
 Runtime dependencies: `vue`, `vue-router` only. No UI kit, no CDN, no
 runtime-fetched assets; icons are inline SVG paths using `currentColor`.
+Tailwind (`tailwindcss` + `@tailwindcss/vite`, pinned 4.3.5) is a build-time
+dev dependency only: the compiled, purged CSS ends up in `ui/dist`.
 
 ### Backend route and prefix handling
 
@@ -120,10 +124,85 @@ still exist (`py/routes/model_route_registrar.py`, `misc_route_registrar.py`,
 ## Theming
 
 All visual styling goes through CSS custom properties (design tokens).
-Component CSS may only reference tokens: `tests/styleTokens.test.ts` fails on
-raw hex/rgb/hsl/named colors, raw `border-radius`, `font-family` or
-`box-shadow` values anywhere in `src/` outside `src/themes/`. Icons use
+Components are styled with Tailwind utility classes, and every utility
+resolves to a token (see "Tailwind and the tokens" below), so themes, density
+and user themes change the whole UI without touching a component. Icons use
 `currentColor`, so they follow the text color of any theme.
+
+**Rule: no raw colors, no default palette.** `tests/styleTokens.test.ts`
+fails, anywhere in `src/` outside `src/themes/` and `src/styles/tokens.css`, on:
+
+* raw hex/rgb/hsl/oklch/named colors, raw `border-radius`, `font-family` or
+  `box-shadow` values in CSS (`.css` files, `<style>` blocks);
+* raw color literals in templates and scripts, and arbitrary-value utilities
+  with raw values (`bg-[#fff]`, `text-[rgb(...)]`, `bg-[color:red]`,
+  `rounded-[12px]`, `shadow-[...]`, `font-['Arial']`);
+* Tailwind default-palette utilities (`bg-red-500`, `text-white`,
+  `border-slate-200/50`, ...) - they do not even compile, because the default
+  palette is reset, but the test keeps them out of the source too;
+* the `dark:` variant: light/dark is a theme (`data-theme`), not a variant.
+
+Arbitrary values are fine when they use tokens or plain geometry, e.g.
+`w-[min(var(--lm-drawer-width),100vw)]` or `size-[28px]`.
+
+### Tailwind and the tokens
+
+Tailwind v4 is configured CSS-first, no `tailwind.config.*`:
+
+* `src/styles/main.css` imports Tailwind (preflight + utilities),
+  `tokens.css` and `app.css`, and limits source scanning to `index.html` and
+  `src/**/*.{vue,ts}` (the committed `dist/` never feeds back in).
+* `src/styles/tokens.css` is the only place utilities are defined. Its
+  `@theme inline` block resets Tailwind's default colors, fonts, text sizes,
+  radii, shadows, breakpoints, ... (`--color-*: initial`, etc.) and maps every
+  remaining theme key to a `--lm-*` token. `inline` makes the utility emit
+  `var(--lm-...)` directly, so it resolves on the element itself; that is
+  what lets the theme-picker swatches (which carry their own `data-theme`)
+  show another theme's colors.
+* `src/styles/app.css` holds the base rules (body font, headings, links,
+  focus ring, plus a few rules that give back browser defaults preflight
+  removes) and the shared classes in `@layer components`: `lm-btn` (+
+  `--primary`, `--danger`, `--ghost`, `--icon`, `--sm`), `lm-input`,
+  `lm-select`, `lm-textarea`, `lm-check`, `lm-label`, `lm-hint`,
+  `lm-error-text`, `lm-chip`, `lm-badge` (+ variants), `lm-panel`, `lm-row`
+  (selectable rows), `lm-thumb`, `lm-overline`, `lm-toolbar`, `lm-page`,
+  `lm-page-header`, `lm-prose` (sanitized HTML). Utilities always win over
+  these classes (`lm-btn px-2` works).
+* Theme files stay plain CSS that only set tokens; nothing about writing a
+  theme changed.
+
+| Utility | Resolves to |
+| --- | --- |
+| `bg-page` | `--lm-color-bg` |
+| `bg-surface`, `bg-elevated`, `bg-sunken` | `--lm-color-surface` / `-elevated` / `-sunken` |
+| `text-fg`, `text-muted` | `--lm-color-text` / `--lm-color-muted` |
+| `border-border`, `border-border-strong` (+ `hairline`, `hairline-t/r/b/l` for `--lm-border-width`) | `--lm-color-border` / `-border-strong` |
+| `bg-accent`, `text-accent`, `bg-accent-hover`, `bg-accent-soft`, `text-on-accent`, `accent-accent` | `--lm-color-accent`, `-accent-hover`, `-accent-soft`, `--lm-color-on-accent` |
+| `danger`, `danger-soft`, `on-danger`, `success`, `success-soft`, `warning`, `warning-soft` (with any color utility: `text-`, `bg-`, `border-`, `border-l-`, ...) | the matching `--lm-color-*` token |
+| `bg-overlay`, `backdrop:bg-overlay`, `bg-scrim`, `text-on-scrim`, `bg-skeleton`, `outline-focus` | `--lm-color-overlay`, `-scrim`, `-on-scrim`, `-skeleton`, `-focus` |
+| `bg-scrim-fade` | gradient from `--lm-color-scrim` to transparent (text over card media) |
+| `font-sans`, `font-mono` | `--lm-font-sans` / `--lm-font-mono` |
+| `text-xs` ... `text-2xl` (also `text-md`) | `--lm-font-size-xs` ... `-2xl` |
+| `font-regular`, `font-medium`, `font-bold` | `--lm-font-weight-*` |
+| `leading-normal`, `leading-tight` | `--lm-line-height`, `--lm-line-height-tight` |
+| `p-1` ... `p-6`, `p-8` (also `m-`, `gap-`, `inset-`, `w-`, `h-`, ...) | `--lm-space-1` ... `--lm-space-8` (density aware) |
+| `h-control`, `min-h-control`, `w-control`, `*-control-sm`, `h-topbar` | `--lm-control-height` (`-8px` for `-sm`), `--lm-topbar-height` |
+| `gap-card`, `aspect-card` | `--lm-card-gap`, `--lm-card-aspect` |
+| `rounded-sm`, `rounded-md`, `rounded-lg`, `rounded-pill` | `--lm-radius-*` |
+| `shadow-sm`, `shadow-md`, `shadow-lg` | `--lm-shadow-*` (plain `box-shadow`) |
+| `ring-selected`, `focus-ring` | accent ring / focus outline built from `--lm-focus-ring-width` |
+| `transition-*` defaults, `ease-standard` | `--lm-motion-fast`, `--lm-ease`; use `duration-(--lm-motion-normal)` for the slower step |
+| `animate-skeleton`, `animate-spinner`, `animate-fade-in`, `animate-slide-in` | app keyframes timed with the motion tokens |
+
+Only the spacing steps above exist (there is no `--spacing` multiplier, so
+`p-7` or `gap-0.5` do not compile); fixed geometry such as icon boxes and
+thumbnails uses arbitrary px values (`size-[28px]`).
+
+Responsive variants are desktop-first and keep the original breakpoints:
+`narrow:` (max-width 1100px), `tablet:` (900px), `phone:` (720px). Tailwind's
+`sm:`/`md:`/`lg:` are not available. A `compact:` variant
+(`[data-density='compact']`) exists for the rare case where density needs more
+than the spacing tokens; there is deliberately no `dark:` variant.
 
 ### How a theme is selected
 

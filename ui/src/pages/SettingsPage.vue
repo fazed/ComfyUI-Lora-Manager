@@ -90,34 +90,36 @@ onMounted(() => {
       .catch(() => undefined)
   }
 })
+
+const cardClass = 'lm-panel flex flex-col gap-3 p-5'
 </script>
 
 <template>
-  <div class="settings-scroll">
-    <div class="lm-page settings">
-      <header class="lm-page-header">
+  <div class="min-h-0 flex-1 overflow-y-auto">
+    <div class="lm-page flex w-full max-w-[980px] flex-col gap-4">
+      <header class="lm-page-header mb-0">
         <div>
           <h1>{{ t('settings.title') }}</h1>
-          <p class="lm-muted settings__intro">
+          <p class="mt-2 text-muted">
             {{ t('settings.intro') }}
             <a :href="classicUrl">{{ t('common.openClassic') }} <AppIcon name="external" :size="12" /></a>
           </p>
         </div>
       </header>
 
-      <section class="settings__card lm-panel" aria-labelledby="set-appearance">
-        <h2 id="set-appearance">{{ t('settings.appearance') }}</h2>
+      <section :class="cardClass" aria-labelledby="set-appearance">
+        <h2 id="set-appearance" class="text-lg">{{ t('settings.appearance') }}</h2>
         <ThemeOptions />
         <p class="lm-hint">{{ t('settings.userThemesHint', { dir: userThemesDir || '<settings dir>/ui-themes' }) }}</p>
       </section>
 
       <StateBlock v-if="error && !draft" kind="error" :title="t('settings.loadError')" :message="error" @retry="init(true)" />
       <StateBlock v-else-if="!draft" kind="loading" />
-      <form v-else class="settings__form" novalidate @submit.prevent="save">
-        <section class="settings__card lm-panel" aria-labelledby="set-roots">
-          <h2 id="set-roots">{{ t('settings.defaultRoots') }}</h2>
-          <div class="settings__grid">
-            <div v-for="root in ROOT_KEYS" :key="root.key" class="settings__field">
+      <form v-else class="flex flex-col gap-4" novalidate @submit.prevent="save">
+        <section :class="cardClass" aria-labelledby="set-roots">
+          <h2 id="set-roots" class="text-lg">{{ t('settings.defaultRoots') }}</h2>
+          <div class="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-4">
+            <div v-for="root in ROOT_KEYS" :key="root.key" class="min-w-0">
               <label class="lm-label" :for="root.key">{{ t(`settings.${root.key}` as MessageKey) }}</label>
               <select :id="root.key" v-model="draft.roots[root.key]" class="lm-select">
                 <option value="">{{ t('common.none') }}</option>
@@ -127,17 +129,17 @@ onMounted(() => {
           </div>
         </section>
 
-        <section class="settings__card lm-panel" aria-labelledby="set-templates">
-          <h2 id="set-templates">{{ t('settings.templates') }}</h2>
-          <div class="settings__grid settings__grid--pairs">
+        <section :class="cardClass" aria-labelledby="set-templates">
+          <h2 id="set-templates" class="text-lg">{{ t('settings.templates') }}</h2>
+          <div class="grid grid-cols-2 gap-4 phone:grid-cols-1">
             <template v-for="type in TEMPLATE_TYPES" :key="type">
-              <div class="settings__field">
+              <div class="min-w-0">
                 <label class="lm-label" :for="`fn-${type}`">{{ t('settings.download_filename_templates', { type }) }}</label>
-                <input :id="`fn-${type}`" v-model="draft.filenameTemplates[type]" class="lm-input lm-mono-input" spellcheck="false" />
+                <input :id="`fn-${type}`" v-model="draft.filenameTemplates[type]" class="lm-input font-mono text-xs" spellcheck="false" />
               </div>
-              <div class="settings__field">
+              <div class="min-w-0">
                 <label class="lm-label" :for="`path-${type}`">{{ t('settings.download_path_templates', { type }) }}</label>
-                <input :id="`path-${type}`" v-model="draft.pathTemplates[type]" class="lm-input lm-mono-input" spellcheck="false" />
+                <input :id="`path-${type}`" v-model="draft.pathTemplates[type]" class="lm-input font-mono text-xs" spellcheck="false" />
               </div>
             </template>
           </div>
@@ -145,9 +147,9 @@ onMounted(() => {
           <p class="lm-hint">{{ t('settings.download_path_templates.hint') }}</p>
         </section>
 
-        <section class="settings__card lm-panel" aria-labelledby="set-downloads">
-          <h2 id="set-downloads">{{ t('settings.downloads') }}</h2>
-          <div class="settings__field settings__field--narrow">
+        <section :class="cardClass" aria-labelledby="set-downloads">
+          <h2 id="set-downloads" class="text-lg">{{ t('settings.downloads') }}</h2>
+          <div class="max-w-[220px] min-w-0">
             <label class="lm-label" for="concurrency">{{ t('settings.download_queue_max_concurrent') }}</label>
             <input
               id="concurrency"
@@ -165,22 +167,25 @@ onMounted(() => {
               {{ t('settings.download_queue_max_concurrent.hint', { min: MIN_CONCURRENCY, max: MAX_CONCURRENCY }) }}
             </p>
           </div>
-          <label class="settings__toggle">
+          <label class="lm-check">
             <input v-model="draft.toggles.skip_previously_downloaded_model_versions" type="checkbox" />
             {{ t('settings.skip_previously_downloaded_model_versions') }}
           </label>
         </section>
 
-        <section class="settings__card lm-panel" aria-labelledby="set-library">
-          <h2 id="set-library">{{ t('settings.library') }}</h2>
-          <label v-for="key in TOGGLE_KEYS.filter((k) => k !== 'skip_previously_downloaded_model_versions')" :key="key" class="settings__toggle">
+        <section :class="cardClass" aria-labelledby="set-library">
+          <h2 id="set-library" class="text-lg">{{ t('settings.library') }}</h2>
+          <label v-for="key in TOGGLE_KEYS.filter((k) => k !== 'skip_previously_downloaded_model_versions')" :key="key" class="lm-check">
             <input v-model="draft.toggles[key]" type="checkbox" />
             {{ t(`settings.${key}` as MessageKey) }}
           </label>
         </section>
 
-        <div class="settings__bar" :class="{ 'settings__bar--dirty': dirty }">
-          <span class="lm-muted" aria-live="polite">{{ dirty ? t('settings.unsaved') : t('settings.noChanges') }}</span>
+        <div
+          class="sticky bottom-0 flex flex-wrap items-center justify-end gap-2 rounded-md hairline bg-elevated px-4 py-3 shadow-md"
+          :class="dirty ? 'border-accent' : 'border-border'"
+        >
+          <span class="mr-auto text-muted" aria-live="polite">{{ dirty ? t('settings.unsaved') : t('settings.noChanges') }}</span>
           <p v-if="saveError" class="lm-error-text" role="alert">{{ saveError }}</p>
           <button type="button" class="lm-btn" :disabled="!dirty || saving" @click="reset">{{ t('settings.reset') }}</button>
           <button type="submit" class="lm-btn lm-btn--primary" :disabled="!dirty || saving">{{ t('settings.saveAll') }}</button>
@@ -189,107 +194,3 @@ onMounted(() => {
     </div>
   </div>
 </template>
-
-<style scoped>
-.settings-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-}
-
-.settings {
-  display: flex;
-  flex-direction: column;
-  gap: var(--lm-space-4);
-  max-width: 980px;
-  width: 100%;
-}
-
-.settings .lm-page-header {
-  margin-bottom: 0;
-}
-
-.settings__intro {
-  margin: var(--lm-space-2) 0 0;
-}
-
-.settings__form {
-  display: flex;
-  flex-direction: column;
-  gap: var(--lm-space-4);
-}
-
-.settings__card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--lm-space-3);
-  padding: var(--lm-space-5);
-}
-
-.settings__card h2 {
-  font-size: var(--lm-font-size-lg);
-}
-
-.settings__grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: var(--lm-space-4);
-}
-
-.settings__grid--pairs {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.settings__field {
-  min-width: 0;
-}
-
-@media (max-width: 720px) {
-  .settings__grid--pairs {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
-
-.settings__field--narrow {
-  max-width: 220px;
-}
-
-.lm-mono-input {
-  font-family: var(--lm-font-mono);
-  font-size: var(--lm-font-size-xs);
-}
-
-.settings__toggle {
-  display: flex;
-  align-items: center;
-  gap: var(--lm-space-2);
-  cursor: pointer;
-}
-
-.settings__toggle input {
-  accent-color: var(--lm-color-accent);
-}
-
-.settings__bar {
-  position: sticky;
-  bottom: 0;
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: var(--lm-space-2);
-  padding: var(--lm-space-3) var(--lm-space-4);
-  border: var(--lm-border-width) solid var(--lm-color-border);
-  border-radius: var(--lm-radius-md);
-  background: var(--lm-color-elevated);
-  box-shadow: var(--lm-shadow-md);
-}
-
-.settings__bar > .lm-muted {
-  margin-right: auto;
-}
-
-.settings__bar--dirty {
-  border-color: var(--lm-color-accent);
-}
-</style>

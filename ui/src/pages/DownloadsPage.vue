@@ -12,6 +12,19 @@ import { t, type MessageKey } from '@/i18n'
 
 const toasts = useToasts()
 const { confirm } = useConfirm()
+
+/** Layout classes shared by the active / waiting / history lists. */
+const ui = {
+  section: 'flex flex-col gap-3',
+  empty: 'my-[1em] text-muted',
+  list: 'flex flex-col gap-2',
+  item: 'lm-panel flex items-center gap-3 p-3 phone:flex-wrap',
+  thumb: 'lm-thumb h-[64px] w-[48px]',
+  thumbSm: 'lm-thumb h-[48px] w-[36px]',
+  main: 'flex min-w-0 flex-1 flex-col gap-1',
+  meta: 'flex flex-wrap items-center gap-2 text-xs text-muted tabular-nums',
+  actions: 'flex items-center gap-1 phone:ml-auto',
+}
 // Fast cadence only while this page is mounted (and the tab visible).
 const queue = useDownloadQueue(1500)
 
@@ -138,11 +151,11 @@ watch(finishedCount, (value) => {
 </script>
 
 <template>
-  <div class="lm-page downloads">
-    <header class="lm-page-header">
+  <div class="lm-page flex flex-1 flex-col gap-6 overflow-y-auto">
+    <header class="lm-page-header mb-0">
       <div>
         <h1>{{ t('downloads.title') }}</h1>
-        <p v-if="queue.worker.value" class="lm-muted downloads__status">
+        <p v-if="queue.worker.value" class="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted">
           <span class="lm-badge" :class="queue.paused.value ? 'lm-badge--warning' : 'lm-badge--success'">
             {{ queue.paused.value ? t('downloads.paused') : t('downloads.running') }}
           </span>
@@ -162,11 +175,13 @@ watch(finishedCount, (value) => {
       </button>
     </header>
 
-    <p v-if="queue.loaded.value && !queue.queueWorker.value && !queue.error.value" class="downloads__notice lm-panel">{{ t('downloads.workerOff') }}</p>
+    <p v-if="queue.loaded.value && !queue.queueWorker.value && !queue.error.value" class="lm-panel px-4 py-3 text-muted">
+      {{ t('downloads.workerOff') }}
+    </p>
 
-    <form class="downloads__add lm-panel" @submit.prevent="addDownload">
+    <form class="lm-panel p-4" @submit.prevent="addDownload">
       <label class="lm-label" for="add-download">{{ t('downloads.add') }}</label>
-      <div class="downloads__add-row">
+      <div class="flex gap-2">
         <input
           id="add-download"
           v-model="addInput"
@@ -189,26 +204,29 @@ watch(finishedCount, (value) => {
     <template v-else>
       <p v-if="queue.error.value" class="lm-error-text" role="alert">{{ queue.error.value }}</p>
 
-      <section class="downloads__section" aria-labelledby="dl-active">
-        <h2 id="dl-active">{{ t('downloads.active') }} <span class="lm-muted">{{ queue.active.value.length }}</span></h2>
-        <p v-if="!queue.active.value.length" class="lm-muted">{{ t('downloads.noActive') }}</p>
-        <ul v-else class="downloads__list">
-          <li v-for="item in queue.active.value" :key="item.download_id" class="downloads__item lm-panel">
-            <img v-if="item.thumbnail_url" class="downloads__thumb" :src="item.thumbnail_url" alt="" loading="lazy" />
-            <div v-else class="downloads__thumb"></div>
-            <div class="downloads__main">
-              <strong class="downloads__name">{{ itemName(item) }}</strong>
+      <section :class="ui.section" aria-labelledby="dl-active">
+        <h2 id="dl-active" class="text-lg">{{ t('downloads.active') }} <span class="lm-muted">{{ queue.active.value.length }}</span></h2>
+        <p v-if="!queue.active.value.length" :class="ui.empty">{{ t('downloads.noActive') }}</p>
+        <ul v-else :class="ui.list">
+          <li v-for="item in queue.active.value" :key="item.download_id" :class="ui.item">
+            <img v-if="item.thumbnail_url" :class="ui.thumb" :src="item.thumbnail_url" alt="" loading="lazy" />
+            <div v-else :class="ui.thumb"></div>
+            <div :class="ui.main">
+              <strong class="truncate">{{ itemName(item) }}</strong>
               <div
-                class="downloads__bar"
+                class="h-[6px] overflow-hidden rounded-pill bg-sunken"
                 role="progressbar"
                 :aria-valuenow="Math.round(progressPercent(item.progress, item.bytes_downloaded, item.total_bytes))"
                 aria-valuemin="0"
                 aria-valuemax="100"
                 :aria-label="itemName(item)"
               >
-                <span :style="{ width: `${progressPercent(item.progress, item.bytes_downloaded, item.total_bytes)}%` }"></span>
+                <span
+                  class="block h-full rounded-[inherit] bg-accent transition-[width] duration-(--lm-motion-normal)"
+                  :style="{ width: `${progressPercent(item.progress, item.bytes_downloaded, item.total_bytes)}%` }"
+                ></span>
               </div>
-              <div class="downloads__meta">
+              <div :class="ui.meta">
                 <span>{{ Math.round(progressPercent(item.progress, item.bytes_downloaded, item.total_bytes)) }}%</span>
                 <span v-if="item.total_bytes">{{ formatBytes(item.bytes_downloaded) }} / {{ formatBytes(item.total_bytes) }}</span>
                 <span v-if="item.bytes_per_second">{{ formatSpeed(item.bytes_per_second) }}</span>
@@ -218,28 +236,49 @@ watch(finishedCount, (value) => {
         </ul>
       </section>
 
-      <section class="downloads__section" aria-labelledby="dl-waiting">
-        <h2 id="dl-waiting">{{ t('downloads.waiting') }} <span class="lm-muted">{{ queue.waiting.value.length }}</span></h2>
-        <p v-if="!queue.waiting.value.length" class="lm-muted">{{ t('downloads.noWaiting') }}</p>
-        <ul v-else class="downloads__list">
-          <li v-for="(item, index) in queue.waiting.value" :key="item.download_id" class="downloads__item lm-panel">
-            <img v-if="item.thumbnail_url" class="downloads__thumb" :src="item.thumbnail_url" alt="" loading="lazy" />
-            <div v-else class="downloads__thumb"></div>
-            <div class="downloads__main">
-              <strong class="downloads__name">{{ itemName(item) }}</strong>
-              <div class="downloads__meta">
+      <section :class="ui.section" aria-labelledby="dl-waiting">
+        <h2 id="dl-waiting" class="text-lg">{{ t('downloads.waiting') }} <span class="lm-muted">{{ queue.waiting.value.length }}</span></h2>
+        <p v-if="!queue.waiting.value.length" :class="ui.empty">{{ t('downloads.noWaiting') }}</p>
+        <ul v-else :class="ui.list">
+          <li v-for="(item, index) in queue.waiting.value" :key="item.download_id" :class="ui.item">
+            <img v-if="item.thumbnail_url" :class="ui.thumb" :src="item.thumbnail_url" alt="" loading="lazy" />
+            <div v-else :class="ui.thumb"></div>
+            <div :class="ui.main">
+              <strong class="truncate">{{ itemName(item) }}</strong>
+              <div :class="ui.meta">
                 <span class="lm-badge" :class="statusClass(item.status)">{{ statusLabel(item.status) }}</span>
                 <span>{{ formatDateTime(item.added_at) }}</span>
               </div>
             </div>
-            <div class="downloads__actions">
-              <button type="button" class="lm-btn lm-btn--ghost lm-btn--icon lm-btn--sm" :aria-label="t('downloads.moveTop')" :title="t('downloads.moveTop')" :disabled="index === 0 || busy === item.download_id" @click="run(item.download_id, () => downloadsApi.moveToTop(item.download_id))">
+            <div :class="ui.actions">
+              <button
+                type="button"
+                class="lm-btn lm-btn--ghost lm-btn--icon lm-btn--sm"
+                :aria-label="t('downloads.moveTop')"
+                :title="t('downloads.moveTop')"
+                :disabled="index === 0 || busy === item.download_id"
+                @click="run(item.download_id, () => downloadsApi.moveToTop(item.download_id))"
+              >
                 <AppIcon name="arrowUp" :size="16" />
               </button>
-              <button type="button" class="lm-btn lm-btn--ghost lm-btn--icon lm-btn--sm" :aria-label="t('downloads.moveEnd')" :title="t('downloads.moveEnd')" :disabled="index === queue.waiting.value.length - 1 || busy === item.download_id" @click="run(item.download_id, () => downloadsApi.moveToEnd(item.download_id))">
+              <button
+                type="button"
+                class="lm-btn lm-btn--ghost lm-btn--icon lm-btn--sm"
+                :aria-label="t('downloads.moveEnd')"
+                :title="t('downloads.moveEnd')"
+                :disabled="index === queue.waiting.value.length - 1 || busy === item.download_id"
+                @click="run(item.download_id, () => downloadsApi.moveToEnd(item.download_id))"
+              >
                 <AppIcon name="arrowDown" :size="16" />
               </button>
-              <button type="button" class="lm-btn lm-btn--ghost lm-btn--icon lm-btn--sm downloads__danger" :aria-label="t('downloads.remove')" :title="t('downloads.remove')" :disabled="busy === item.download_id" @click="removeItem(item)">
+              <button
+                type="button"
+                class="lm-btn lm-btn--ghost lm-btn--icon lm-btn--sm enabled:hover:text-danger"
+                :aria-label="t('downloads.remove')"
+                :title="t('downloads.remove')"
+                :disabled="busy === item.download_id"
+                @click="removeItem(item)"
+              >
                 <AppIcon name="trash" :size="16" />
               </button>
             </div>
@@ -248,10 +287,10 @@ watch(finishedCount, (value) => {
       </section>
     </template>
 
-    <section class="downloads__section" aria-labelledby="dl-history">
-      <div class="downloads__section-head">
-        <h2 id="dl-history">{{ t('downloads.history') }} <span class="lm-muted">{{ historyTotal }}</span></h2>
-        <div class="downloads__actions">
+    <section :class="ui.section" aria-labelledby="dl-history">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <h2 id="dl-history" class="text-lg">{{ t('downloads.history') }} <span class="lm-muted">{{ historyTotal }}</span></h2>
+        <div :class="ui.actions">
           <button v-if="failedCount" type="button" class="lm-btn lm-btn--sm" :disabled="busy === 'retry-all'" @click="retryAll">
             <AppIcon name="refresh" :size="14" />{{ t('downloads.retryAll') }}
           </button>
@@ -262,25 +301,38 @@ watch(finishedCount, (value) => {
       </div>
       <StateBlock v-if="historyError" kind="error" :message="historyError" @retry="loadHistory" />
       <StateBlock v-else-if="historyLoading && !history.length" kind="loading" />
-      <p v-else-if="!history.length" class="lm-muted">{{ t('downloads.noHistory') }}</p>
-      <ul v-else class="downloads__list">
-        <li v-for="item in history" :key="item.download_id" class="downloads__item downloads__item--history lm-panel">
-          <img v-if="item.thumbnail_url" class="downloads__thumb downloads__thumb--sm" :src="item.thumbnail_url" alt="" loading="lazy" />
-          <div v-else class="downloads__thumb downloads__thumb--sm"></div>
-          <div class="downloads__main">
-            <strong class="downloads__name">{{ itemName(item) }}</strong>
-            <div class="downloads__meta">
+      <p v-else-if="!history.length" :class="ui.empty">{{ t('downloads.noHistory') }}</p>
+      <ul v-else :class="ui.list">
+        <li v-for="item in history" :key="item.download_id" :class="ui.item">
+          <img v-if="item.thumbnail_url" :class="ui.thumbSm" :src="item.thumbnail_url" alt="" loading="lazy" />
+          <div v-else :class="ui.thumbSm"></div>
+          <div :class="ui.main">
+            <strong class="truncate">{{ itemName(item) }}</strong>
+            <div :class="ui.meta">
               <span class="lm-badge" :class="statusClass(item.status)">{{ statusLabel(item.status) }}</span>
               <span>{{ formatDateTime(item.completed_at) }}</span>
               <span v-if="item.total_bytes">{{ formatBytes(item.total_bytes) }}</span>
             </div>
             <p v-if="item.error" class="lm-error-text">{{ item.error }}</p>
           </div>
-          <div class="downloads__actions">
-            <button v-if="item.status === 'failed' || item.status === 'canceled'" type="button" class="lm-btn lm-btn--sm" :disabled="busy === item.download_id" @click="retry(item)">
+          <div :class="ui.actions">
+            <button
+              v-if="item.status === 'failed' || item.status === 'canceled'"
+              type="button"
+              class="lm-btn lm-btn--sm"
+              :disabled="busy === item.download_id"
+              @click="retry(item)"
+            >
               <AppIcon name="refresh" :size="14" />{{ t('downloads.retry') }}
             </button>
-            <button type="button" class="lm-btn lm-btn--ghost lm-btn--icon lm-btn--sm" :aria-label="t('downloads.deleteEntry')" :title="t('downloads.deleteEntry')" :disabled="busy === item.download_id" @click="deleteEntry(item)">
+            <button
+              type="button"
+              class="lm-btn lm-btn--ghost lm-btn--icon lm-btn--sm"
+              :aria-label="t('downloads.deleteEntry')"
+              :title="t('downloads.deleteEntry')"
+              :disabled="busy === item.download_id"
+              @click="deleteEntry(item)"
+            >
               <AppIcon name="close" :size="16" />
             </button>
           </div>
@@ -289,148 +341,3 @@ watch(finishedCount, (value) => {
     </section>
   </div>
 </template>
-
-<style scoped>
-.downloads {
-  flex: 1;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: var(--lm-space-6);
-}
-
-.downloads .lm-page-header {
-  margin-bottom: 0;
-}
-
-.downloads__status {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--lm-space-2);
-  margin: var(--lm-space-2) 0 0;
-  font-size: var(--lm-font-size-sm);
-}
-
-.downloads__notice {
-  margin: 0;
-  padding: var(--lm-space-3) var(--lm-space-4);
-  color: var(--lm-color-muted);
-}
-
-.downloads__add {
-  padding: var(--lm-space-4);
-}
-
-.downloads__add-row {
-  display: flex;
-  gap: var(--lm-space-2);
-}
-
-.downloads__section {
-  display: flex;
-  flex-direction: column;
-  gap: var(--lm-space-3);
-}
-
-.downloads__section h2 {
-  font-size: var(--lm-font-size-lg);
-}
-
-.downloads__section-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--lm-space-2);
-}
-
-.downloads__list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--lm-space-2);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.downloads__item {
-  display: flex;
-  align-items: center;
-  gap: var(--lm-space-3);
-  padding: var(--lm-space-3);
-}
-
-.downloads__thumb {
-  flex: none;
-  width: 48px;
-  height: 64px;
-  border-radius: var(--lm-radius-sm);
-  background: var(--lm-color-sunken);
-  object-fit: cover;
-}
-
-.downloads__thumb--sm {
-  width: 36px;
-  height: 48px;
-}
-
-.downloads__main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--lm-space-1);
-}
-
-.downloads__name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.downloads__meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--lm-space-2);
-  color: var(--lm-color-muted);
-  font-size: var(--lm-font-size-xs);
-  font-variant-numeric: tabular-nums;
-}
-
-.downloads__bar {
-  height: 6px;
-  overflow: hidden;
-  border-radius: var(--lm-radius-pill);
-  background: var(--lm-color-sunken);
-}
-
-.downloads__bar span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--lm-color-accent);
-  transition: width var(--lm-motion-normal) var(--lm-ease);
-}
-
-.downloads__actions {
-  display: flex;
-  align-items: center;
-  gap: var(--lm-space-1);
-}
-
-.downloads__danger:hover:not(:disabled) {
-  color: var(--lm-color-danger);
-}
-
-@media (max-width: 720px) {
-  .downloads__item {
-    flex-wrap: wrap;
-  }
-
-  .downloads__actions {
-    margin-left: auto;
-  }
-}
-</style>

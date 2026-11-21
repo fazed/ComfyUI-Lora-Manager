@@ -116,10 +116,16 @@ defineExpose({ scrollToTop })
 </script>
 
 <template>
-  <div ref="scroller" class="vgrid" :aria-label="label || undefined" role="region" @scroll.passive="onScroll">
-    <div class="vgrid__sizer" :style="{ height: `${totalHeight}px` }">
+  <div
+    ref="scroller"
+    class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-6 pb-6 phone:px-3 phone:pb-4"
+    :aria-label="label || undefined"
+    role="region"
+    @scroll.passive="onScroll"
+  >
+    <div class="relative" :style="{ height: `${totalHeight}px` }">
       <div
-        class="vgrid__window"
+        class="absolute inset-x-0 top-0 grid gap-card will-change-transform"
         role="list"
         :style="{
           transform: `translateY(${startRow * rowHeight}px)`,
@@ -127,7 +133,7 @@ defineExpose({ scrollToTop })
           gridAutoRows: `${itemHeight}px`,
         }"
       >
-        <div v-for="entry in visible" :key="itemKey(entry.item)" class="vgrid__cell" role="listitem">
+        <div v-for="entry in visible" :key="itemKey(entry.item)" class="min-w-0" role="listitem">
           <slot :item="entry.item" :index="entry.index" />
         </div>
       </div>
@@ -135,36 +141,3 @@ defineExpose({ scrollToTop })
     <slot name="footer" />
   </div>
 </template>
-
-<style scoped>
-.vgrid {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overflow-x: hidden;
-  padding: 0 var(--lm-space-6) var(--lm-space-6);
-  overscroll-behavior: contain;
-}
-
-.vgrid__sizer {
-  position: relative;
-}
-
-.vgrid__window {
-  position: absolute;
-  inset: 0 0 auto 0;
-  display: grid;
-  gap: var(--lm-card-gap);
-  will-change: transform;
-}
-
-.vgrid__cell {
-  min-width: 0;
-}
-
-@media (max-width: 720px) {
-  .vgrid {
-    padding: 0 var(--lm-space-3) var(--lm-space-4);
-  }
-}
-</style>

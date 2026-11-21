@@ -19,7 +19,7 @@ import { useInfiniteList } from '@/composables/useInfiniteList'
 import { CARD_SIZE_MAX, CARD_SIZE_MIN, useLibraryFilters } from '@/composables/useLibraryFilters'
 import { useSearch } from '@/composables/useSearch'
 import { withMountPrefix } from '@/utils/basePath'
-import { t } from '@/i18n'
+import { t, type MessageKey } from '@/i18n'
 
 const props = defineProps<{ prefix: ModelPrefix }>()
 
@@ -62,6 +62,16 @@ const selected = ref<Set<string>>(new Set())
 
 const blurMature = computed(() => !!settings.value?.blur_mature_content)
 const civitaiHost = computed(() => String(settings.value?.civitai_host || 'civitai.com'))
+
+/** The two chip groups of the filter panel. */
+const filterGroups = computed(() => [
+  { field: 'baseModels' as const, title: 'library.baseModels' as MessageKey, entries: baseModels.value },
+  {
+    field: 'tags' as const,
+    title: 'library.tags' as MessageKey,
+    entries: topTags.value.map((entry) => ({ name: entry.tag, count: entry.count })),
+  },
+])
 
 function reload(): void {
   grid.value?.scrollToTop()
@@ -123,27 +133,36 @@ async function copySelectedNames(): Promise<void> {
 </script>
 
 <template>
-  <div class="library">
-    <aside v-if="showFolders" class="library__folders" :aria-label="t('library.folders')">
-      <div class="library__folders-head">
-        <h2>{{ t('library.folders') }}</h2>
+  <div class="flex min-h-0 flex-1">
+    <aside
+      v-if="showFolders"
+      class="w-[240px] flex-none overflow-y-auto hairline-r border-border bg-surface px-3 py-4 narrow:absolute narrow:inset-y-0 narrow:left-0 narrow:z-20 narrow:w-[min(300px,85vw)] narrow:shadow-lg"
+      :aria-label="t('library.folders')"
+    >
+      <div class="mb-2 flex items-center justify-between">
+        <h2 class="lm-overline text-sm">{{ t('library.folders') }}</h2>
         <button type="button" class="lm-btn lm-btn--ghost lm-btn--icon lm-btn--sm" :aria-label="t('common.close')" @click="showFolders = false">
           <AppIcon name="close" :size="14" />
         </button>
       </div>
-      <button type="button" class="library__all" :class="{ 'is-selected': !state.folder }" @click="state.folder = ''">
+      <button
+        type="button"
+        class="lm-row flex h-[30px] w-full cursor-pointer items-center gap-2 px-2 text-sm"
+        :class="{ 'is-selected': !state.folder }"
+        @click="state.folder = ''"
+      >
         <AppIcon name="grid" :size="15" />{{ t('library.allFolders') }}
       </button>
       <FolderTree :tree="tree" :selected="state.folder" @select="selectFolder" />
     </aside>
 
-    <section class="library__main">
-      <div class="library__toolbar">
-        <div class="library__title">
+    <section class="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div class="lm-toolbar pb-3 phone:pb-2">
+        <div class="lm-toolbar-title">
           <h1>{{ t(config.title) }}</h1>
-          <span class="lm-muted library__count" aria-live="polite">{{ t('library.count', { count: list.total.value.toLocaleString() }) }}</span>
+          <span class="text-sm text-muted tabular-nums" aria-live="polite">{{ t('library.count', { count: list.total.value.toLocaleString() }) }}</span>
         </div>
-        <div class="library__controls">
+        <div class="flex flex-wrap items-center gap-2 phone:w-full">
           <button
             type="button"
             class="lm-btn"
@@ -151,94 +170,96 @@ async function copySelectedNames(): Promise<void> {
             :aria-pressed="showFolders"
             @click="showFolders = !showFolders"
           >
-            <AppIcon name="folder" :size="16" /><span class="library__btn-text">{{ t('library.folders') }}</span>
+            <AppIcon name="folder" :size="16" /><span class="phone:hidden">{{ t('library.folders') }}</span>
           </button>
-          <label class="visually-hidden" :for="`sort-${prefix}`">{{ t('library.sort') }}</label>
-          <select :id="`sort-${prefix}`" v-model="filters.sort.value" class="lm-select library__sort">
+          <label class="sr-only" :for="`sort-${prefix}`">{{ t('library.sort') }}</label>
+          <select :id="`sort-${prefix}`" v-model="filters.sort.value" class="lm-select w-auto min-w-[150px] phone:min-w-0 phone:flex-1">
             <option v-for="option in config.sortOptions" :key="option.value" :value="option.value">{{ t(option.label) }}</option>
           </select>
           <button type="button" class="lm-btn" :aria-expanded="showFilters" aria-controls="library-filters" @click="showFilters = !showFilters">
-            <AppIcon name="filter" :size="16" /><span class="library__btn-text">{{ t('library.filters') }}</span>
+            <AppIcon name="filter" :size="16" /><span class="phone:hidden">{{ t('library.filters') }}</span>
             <span v-if="filters.panelCount.value" class="lm-badge lm-badge--accent">{{ filters.panelCount.value }}</span>
           </button>
-          <label class="library__size">
-            <span class="visually-hidden">{{ t('library.cardSize') }}</span>
+          <label class="inline-flex items-center gap-2 px-2 text-muted phone:hidden">
+            <span class="sr-only">{{ t('library.cardSize') }}</span>
             <AppIcon name="grid" :size="16" />
-            <input v-model.number="filters.cardSize.value" type="range" :min="CARD_SIZE_MIN" :max="CARD_SIZE_MAX" step="10" :aria-label="t('library.cardSize')" />
+            <input
+              v-model.number="filters.cardSize.value"
+              class="w-[110px] accent-accent"
+              type="range"
+              :min="CARD_SIZE_MIN"
+              :max="CARD_SIZE_MAX"
+              step="10"
+              :aria-label="t('library.cardSize')"
+            />
           </label>
           <button type="button" class="lm-btn" :aria-pressed="selectionMode" @click="setSelectionMode(!selectionMode)">
             <AppIcon :name="selectionMode ? 'check' : 'checkSquare'" :size="16" />
-            <span class="library__btn-text">{{ selectionMode ? t('library.selectDone') : t('library.select') }}</span>
+            <span class="phone:hidden">{{ selectionMode ? t('library.selectDone') : t('library.select') }}</span>
           </button>
         </div>
       </div>
 
-      <div v-if="showFilters" id="library-filters" class="library__filters lm-panel">
-        <div class="library__filter-group">
-          <h3>{{ t('library.baseModels') }}</h3>
-          <div class="library__chip-list">
+      <div v-if="showFilters" id="library-filters" class="lm-panel mx-6 mb-3 grid gap-4 p-4 phone:mx-3">
+        <div v-for="group in filterGroups" :key="group.field">
+          <h3 class="lm-overline mb-2">{{ t(group.title) }}</h3>
+          <div class="flex max-h-[120px] flex-wrap gap-1 overflow-y-auto">
             <button
-              v-for="entry in baseModels"
+              v-for="entry in group.entries"
               :key="entry.name"
               type="button"
               class="lm-chip"
-              :class="{ 'lm-chip--active': state.baseModels.includes(entry.name) }"
-              :aria-pressed="state.baseModels.includes(entry.name)"
-              @click="filters.toggle('baseModels', entry.name)"
+              :class="{ 'lm-chip--active': state[group.field].includes(entry.name) }"
+              :aria-pressed="state[group.field].includes(entry.name)"
+              @click="filters.toggle(group.field, entry.name)"
             >
               {{ entry.name }} <span class="lm-muted">{{ entry.count }}</span>
             </button>
           </div>
         </div>
-        <div class="library__filter-group">
-          <h3>{{ t('library.tags') }}</h3>
-          <div class="library__chip-list">
-            <button
-              v-for="entry in topTags"
-              :key="entry.tag"
-              type="button"
-              class="lm-chip"
-              :class="{ 'lm-chip--active': state.tags.includes(entry.tag) }"
-              :aria-pressed="state.tags.includes(entry.tag)"
-              @click="filters.toggle('tags', entry.tag)"
-            >
-              {{ entry.tag }} <span class="lm-muted">{{ entry.count }}</span>
-            </button>
-          </div>
-        </div>
-        <div class="library__filter-group library__filter-toggles">
-          <label><input v-model="state.favoritesOnly" type="checkbox" /> {{ t('library.favoritesOnly') }}</label>
-          <label v-if="config.supportsUpdates"><input v-model="state.updatesOnly" type="checkbox" /> {{ t('library.updatesOnly') }}</label>
+        <div class="flex flex-wrap gap-4">
+          <label><input v-model="state.favoritesOnly" class="accent-accent" type="checkbox" /> {{ t('library.favoritesOnly') }}</label>
+          <label v-if="config.supportsUpdates"><input v-model="state.updatesOnly" class="accent-accent" type="checkbox" /> {{ t('library.updatesOnly') }}</label>
         </div>
       </div>
 
-      <div v-if="filters.chips.value.length" class="library__chips" :aria-label="t('library.filters')">
+      <div v-if="filters.chips.value.length" class="flex flex-wrap items-center gap-2 px-6 pb-3 phone:px-3" :aria-label="t('library.filters')">
         <span v-for="chip in filters.chips.value" :key="chip.key" class="lm-chip lm-chip--active">
           {{ chip.label }}
-          <button type="button" class="library__chip-x" :aria-label="t('library.removeFilter', { name: chip.label })" @click="chip.remove()">
+          <button type="button" class="lm-icon-btn" :aria-label="t('library.removeFilter', { name: chip.label })" @click="chip.remove()">
             <AppIcon name="close" :size="12" />
           </button>
         </span>
         <button type="button" class="lm-btn lm-btn--ghost lm-btn--sm" @click="filters.clear()">{{ t('library.clearFilters') }}</button>
       </div>
 
-      <div v-if="selectionMode" class="library__selection" role="region" :aria-label="t('library.selected', { count: selected.size })">
+      <div
+        v-if="selectionMode"
+        class="mx-6 mb-3 flex flex-wrap items-center gap-2 rounded-md bg-accent-soft px-3 py-2 phone:mx-3"
+        role="region"
+        :aria-label="t('library.selected', { count: selected.size })"
+      >
         <strong>{{ t('library.selected', { count: selected.size }) }}</strong>
         <button type="button" class="lm-btn lm-btn--sm" @click="selectAllLoaded">{{ t('library.selectAllLoaded') }}</button>
         <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="selected = new Set()">{{ t('library.clearSelection') }}</button>
         <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="copySelectedNames">
           <AppIcon name="copy" :size="14" />{{ t('library.copyNames') }}
         </button>
-        <span class="lm-muted library__selection-hint">
+        <span class="text-xs text-muted">
           {{ t('library.bulkClassic') }} <a :href="classicUrl">{{ t('common.openClassic') }}</a>
         </span>
       </div>
 
       <StateBlock v-if="list.error.value && !list.items.value.length" kind="error" :message="list.error.value" @retry="reload" />
       <StateBlock v-else-if="list.loaded.value && !list.items.value.length" kind="empty" :message="t('library.empty')" />
-      <div v-else-if="!list.loaded.value" class="library__skeletons" aria-hidden="true">
-        <div v-for="n in 12" :key="n" class="lm-skeleton library__skeleton"></div>
+      <div
+        v-else-if="!list.loaded.value"
+        class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-card overflow-hidden px-6 phone:px-3"
+        aria-hidden="true"
+      >
+        <div v-for="n in 12" :key="n" class="lm-skeleton aspect-card rounded-md"></div>
       </div>
+
       <VirtualGrid
         v-show="list.items.value.length"
         ref="grid"
@@ -260,8 +281,10 @@ async function copySelectedNames(): Promise<void> {
           />
         </template>
         <template #footer>
-          <p v-if="list.loading.value && list.items.value.length" class="library__more lm-muted">{{ t('library.loadMore') }}</p>
-          <p v-else-if="list.error.value && list.items.value.length" class="library__more">
+          <p v-if="list.loading.value && list.items.value.length" class="mt-4 flex items-center justify-center gap-2 text-sm text-muted">
+            {{ t('library.loadMore') }}
+          </p>
+          <p v-else-if="list.error.value && list.items.value.length" class="mt-4 flex items-center justify-center gap-2 text-sm">
             <span class="lm-error-text">{{ list.error.value }}</span>
             <button type="button" class="lm-btn lm-btn--sm" @click="list.loadMore()">{{ t('common.retry') }}</button>
           </p>
@@ -280,247 +303,3 @@ async function copySelectedNames(): Promise<void> {
     />
   </div>
 </template>
-
-<style scoped>
-.library {
-  display: flex;
-  flex: 1;
-  min-height: 0;
-}
-
-.library__folders {
-  flex: none;
-  width: 240px;
-  padding: var(--lm-space-4) var(--lm-space-3);
-  border-right: var(--lm-border-width) solid var(--lm-color-border);
-  background: var(--lm-color-surface);
-  overflow-y: auto;
-}
-
-.library__folders-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: var(--lm-space-2);
-}
-
-.library__folders-head h2 {
-  font-size: var(--lm-font-size-sm);
-  color: var(--lm-color-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.library__all {
-  display: flex;
-  align-items: center;
-  gap: var(--lm-space-2);
-  width: 100%;
-  height: 30px;
-  padding: 0 var(--lm-space-2);
-  border: 0;
-  border-radius: var(--lm-radius-sm);
-  background: transparent;
-  font-size: var(--lm-font-size-sm);
-  cursor: pointer;
-}
-
-.library__all:hover {
-  background: var(--lm-color-sunken);
-}
-
-.library__all.is-selected {
-  background: var(--lm-color-accent-soft);
-  color: var(--lm-color-accent);
-}
-
-.library__main {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-width: 0;
-  min-height: 0;
-}
-
-.library__toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--lm-space-3);
-  padding: var(--lm-space-5) var(--lm-space-6) var(--lm-space-3);
-}
-
-.library__title {
-  display: flex;
-  align-items: baseline;
-  gap: var(--lm-space-3);
-}
-
-.library__title h1 {
-  font-size: var(--lm-font-size-2xl);
-}
-
-.library__count {
-  font-size: var(--lm-font-size-sm);
-  font-variant-numeric: tabular-nums;
-}
-
-.library__controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--lm-space-2);
-}
-
-.library__sort {
-  width: auto;
-  min-width: 150px;
-}
-
-.library__size {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--lm-space-2);
-  padding: 0 var(--lm-space-2);
-  color: var(--lm-color-muted);
-}
-
-.library__size input {
-  width: 110px;
-  accent-color: var(--lm-color-accent);
-}
-
-.library__filters {
-  display: grid;
-  gap: var(--lm-space-4);
-  margin: 0 var(--lm-space-6) var(--lm-space-3);
-  padding: var(--lm-space-4);
-}
-
-.library__filter-group h3 {
-  margin-bottom: var(--lm-space-2);
-  font-size: var(--lm-font-size-xs);
-  color: var(--lm-color-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.library__chip-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--lm-space-1);
-  max-height: 120px;
-  overflow-y: auto;
-}
-
-.library__filter-toggles {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--lm-space-4);
-}
-
-.library__filter-toggles input {
-  accent-color: var(--lm-color-accent);
-}
-
-.library__chips {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--lm-space-2);
-  padding: 0 var(--lm-space-6) var(--lm-space-3);
-}
-
-.library__chip-x {
-  display: inline-grid;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-}
-
-.library__selection {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--lm-space-2);
-  margin: 0 var(--lm-space-6) var(--lm-space-3);
-  padding: var(--lm-space-2) var(--lm-space-3);
-  border-radius: var(--lm-radius-md);
-  background: var(--lm-color-accent-soft);
-}
-
-.library__selection-hint {
-  font-size: var(--lm-font-size-xs);
-}
-
-.library__skeletons {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: var(--lm-card-gap);
-  padding: 0 var(--lm-space-6);
-  overflow: hidden;
-}
-
-.library__skeleton {
-  aspect-ratio: var(--lm-card-aspect);
-  border-radius: var(--lm-radius-md);
-}
-
-.library__more {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--lm-space-2);
-  margin: var(--lm-space-4) 0 0;
-  font-size: var(--lm-font-size-sm);
-}
-
-@media (max-width: 1100px) {
-  .library__folders {
-    position: absolute;
-    inset: 0 auto 0 0;
-    z-index: 20;
-    width: min(300px, 85vw);
-    box-shadow: var(--lm-shadow-lg);
-  }
-}
-
-@media (max-width: 720px) {
-  .library__toolbar {
-    padding: var(--lm-space-4) var(--lm-space-3) var(--lm-space-2);
-  }
-
-  .library__filters,
-  .library__selection {
-    margin-left: var(--lm-space-3);
-    margin-right: var(--lm-space-3);
-  }
-
-  .library__chips,
-  .library__skeletons {
-    padding-left: var(--lm-space-3);
-    padding-right: var(--lm-space-3);
-  }
-
-  .library__btn-text {
-    display: none;
-  }
-
-  .library__size {
-    display: none;
-  }
-
-  .library__sort {
-    min-width: 0;
-    flex: 1;
-  }
-
-  .library__controls {
-    width: 100%;
-  }
-}
-</style>

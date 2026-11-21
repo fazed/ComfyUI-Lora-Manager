@@ -1,17 +1,38 @@
 <script setup lang="ts">
-import AppIcon from './AppIcon.vue'
-import { useToasts } from '@/composables/useFeedback'
+import AppIcon, { type IconName } from './AppIcon.vue'
+import { useToasts, type ToastKind } from '@/composables/useFeedback'
 import { t } from '@/i18n'
 
 const { toasts, dismiss } = useToasts()
+
+/** Per-kind accent: left border color and icon. */
+const KIND: Record<ToastKind, { border: string; icon: IconName; iconClass: string }> = {
+  info: { border: 'border-l-accent', icon: 'sparkle', iconClass: '' },
+  success: { border: 'border-l-success', icon: 'check', iconClass: 'text-success' },
+  error: { border: 'border-l-danger', icon: 'alert', iconClass: 'text-danger' },
+}
 </script>
 
 <template>
-  <div class="toasts" role="status" aria-live="polite">
-    <TransitionGroup name="toast">
-      <div v-for="toast in toasts" :key="toast.id" class="toast" :class="`toast--${toast.kind}`">
-        <AppIcon :name="toast.kind === 'error' ? 'alert' : toast.kind === 'success' ? 'check' : 'sparkle'" />
-        <span class="toast__text">{{ toast.message }}</span>
+  <div
+    class="fixed right-4 bottom-4 z-90 flex max-w-[min(420px,calc(100vw-var(--lm-space-8)))] flex-col gap-2"
+    role="status"
+    aria-live="polite"
+  >
+    <TransitionGroup
+      enter-active-class="transition-[opacity,translate] duration-(--lm-motion-normal)"
+      leave-active-class="transition-[opacity,translate] duration-(--lm-motion-normal)"
+      enter-from-class="translate-y-[8px] opacity-0"
+      leave-to-class="translate-y-[8px] opacity-0"
+    >
+      <div
+        v-for="toast in toasts"
+        :key="toast.id"
+        class="flex items-center gap-2 rounded-md hairline border-l-4 border-border bg-elevated py-2 pr-2 pl-3 text-sm shadow-md"
+        :class="KIND[toast.kind].border"
+      >
+        <AppIcon :name="KIND[toast.kind].icon" :class="KIND[toast.kind].iconClass" />
+        <span class="flex-1">{{ toast.message }}</span>
         <button type="button" class="lm-btn lm-btn--ghost lm-btn--icon lm-btn--sm" :aria-label="t('common.close')" @click="dismiss(toast.id)">
           <AppIcon name="close" :size="14" />
         </button>
@@ -19,66 +40,3 @@ const { toasts, dismiss } = useToasts()
     </TransitionGroup>
   </div>
 </template>
-
-<style scoped>
-.toasts {
-  position: fixed;
-  right: var(--lm-space-4);
-  bottom: var(--lm-space-4);
-  z-index: 90;
-  display: flex;
-  flex-direction: column;
-  gap: var(--lm-space-2);
-  max-width: min(420px, calc(100vw - var(--lm-space-8)));
-}
-
-.toast {
-  display: flex;
-  align-items: center;
-  gap: var(--lm-space-2);
-  padding: var(--lm-space-2) var(--lm-space-2) var(--lm-space-2) var(--lm-space-3);
-  border: var(--lm-border-width) solid var(--lm-color-border);
-  border-left-width: 4px;
-  border-radius: var(--lm-radius-md);
-  background: var(--lm-color-elevated);
-  box-shadow: var(--lm-shadow-md);
-  font-size: var(--lm-font-size-sm);
-}
-
-.toast--success {
-  border-left-color: var(--lm-color-success);
-}
-
-.toast--success > .lm-icon {
-  color: var(--lm-color-success);
-}
-
-.toast--error {
-  border-left-color: var(--lm-color-danger);
-}
-
-.toast--error > .lm-icon {
-  color: var(--lm-color-danger);
-}
-
-.toast--info {
-  border-left-color: var(--lm-color-accent);
-}
-
-.toast__text {
-  flex: 1;
-}
-
-.toast-enter-active,
-.toast-leave-active {
-  transition:
-    opacity var(--lm-motion-normal) var(--lm-ease),
-    transform var(--lm-motion-normal) var(--lm-ease);
-}
-
-.toast-enter-from,
-.toast-leave-to {
-  opacity: 0;
-  transform: translateY(8px);
-}
-</style>

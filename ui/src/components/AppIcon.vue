@@ -56,7 +56,7 @@ const paths = computed(() => PATHS[props.name])
 
 <template>
   <svg
-    class="lm-icon"
+    class="inline-block flex-none align-middle"
     :width="size"
     :height="size"
     viewBox="0 0 24 24"
@@ -73,11 +73,3 @@ const paths = computed(() => PATHS[props.name])
     <path v-for="(d, index) in paths" :key="index" :d="d" />
   </svg>
 </template>
-
-<style scoped>
-.lm-icon {
-  flex: none;
-  display: inline-block;
-  vertical-align: middle;
-}
-</style>

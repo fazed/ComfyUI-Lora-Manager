@@ -24,6 +24,11 @@ const TABS: { id: Tab; label: MessageKey }[] = [
   { id: 'description', label: 'detail.tabs.description' },
 ]
 
+// Repeated layout classes.
+const sectionClass = 'flex flex-col gap-5'
+const blockTitleClass = 'mb-2 text-sm'
+const chipsClass = 'flex flex-wrap items-center gap-2'
+
 const toasts = useToasts()
 const tab = ref<Tab>('overview')
 const panel = ref<HTMLElement | null>(null)
@@ -201,13 +206,19 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="drawer-backdrop" @click.self="emit('close')">
-    <aside ref="panel" class="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
-      <header class="drawer__header">
-        <div class="drawer__heading">
-          <p class="drawer__eyebrow">{{ t('detail.title') }}</p>
-          <h2 id="drawer-title" class="drawer__title">{{ displayName }}</h2>
-          <div class="drawer__badges">
+  <div class="fixed inset-0 z-60 flex animate-fade-in justify-end bg-overlay" @click.self="emit('close')">
+    <aside
+      ref="panel"
+      class="flex h-full w-[min(var(--lm-drawer-width),100vw)] animate-slide-in flex-col hairline-l border-border bg-elevated shadow-lg"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="drawer-title"
+    >
+      <header class="flex items-start gap-2 px-5 pt-5 pb-3 phone:px-4">
+        <div class="min-w-0 flex-1">
+          <p class="lm-overline tracking-[0.06em]">{{ t('detail.title') }}</p>
+          <h2 id="drawer-title" class="mt-1 mb-2 text-xl wrap-anywhere">{{ displayName }}</h2>
+          <div class="flex flex-wrap gap-1">
             <span v-if="item.base_model" class="lm-badge lm-badge--accent">{{ item.base_model }}</span>
             <span v-if="item.update_available" class="lm-badge lm-badge--warning">{{ t('card.update') }}</span>
             <span v-if="item.civitai?.name" class="lm-badge">{{ item.civitai.name }}</span>
@@ -216,7 +227,7 @@ onBeforeUnmount(() => {
         <button
           type="button"
           class="lm-btn lm-btn--ghost lm-btn--icon"
-          :class="{ 'drawer__fav--on': item.favorite }"
+          :class="{ 'text-warning': item.favorite }"
           :aria-label="t('detail.toggleFavorite')"
           :aria-pressed="!!item.favorite"
           @click="toggleFavorite"
@@ -228,33 +239,40 @@ onBeforeUnmount(() => {
         </button>
       </header>
 
-      <div class="drawer__tabs" role="tablist">
+      <div class="flex gap-1 overflow-x-auto hairline-b border-border px-5 phone:px-3" role="tablist">
         <button
           v-for="entry in TABS"
           :id="`tab-${entry.id}`"
           :key="entry.id"
           type="button"
           role="tab"
-          class="drawer__tab"
-          :class="{ 'is-active': tab === entry.id }"
+          class="inline-flex cursor-pointer items-center gap-1 border-b-2 px-3 py-2 font-medium whitespace-nowrap"
+          :class="tab === entry.id ? 'border-accent text-fg' : 'border-transparent text-muted'"
           :aria-selected="tab === entry.id"
           :aria-controls="`panel-${entry.id}`"
           @click="tab = entry.id"
         >
           {{ t(entry.label) }}
-          <span v-if="entry.id === 'examples' && images.length" class="drawer__tab-count">{{ images.length }}</span>
+          <span v-if="entry.id === 'examples' && images.length" class="text-xs text-muted">{{ images.length }}</span>
         </button>
       </div>
 
-      <div class="drawer__body">
+      <div class="flex-1 overflow-y-auto p-5 phone:px-4">
         <!-- Overview -->
-        <section v-if="tab === 'overview'" id="panel-overview" role="tabpanel" aria-labelledby="tab-overview" class="drawer__section">
-          <div v-if="previewUrl" class="drawer__preview">
-            <video v-if="isVideoUrl(item.preview_url)" :src="previewUrl" muted loop autoplay playsinline></video>
-            <img v-else :src="previewUrl" alt="" />
+        <section v-if="tab === 'overview'" id="panel-overview" role="tabpanel" aria-labelledby="tab-overview" :class="sectionClass">
+          <div v-if="previewUrl" class="overflow-hidden rounded-md bg-sunken">
+            <video
+              v-if="isVideoUrl(item.preview_url)"
+              class="max-h-[420px] w-full object-contain"
+              :src="previewUrl"
+              muted
+              loop
+              autoplay
+              playsinline
+            ></video>
+            <img v-else class="max-h-[420px] w-full object-contain" :src="previewUrl" alt="" />
           </div>
-
-          <div class="drawer__links">
+          <div class="flex flex-wrap gap-2">
             <a v-if="civitaiUrl" class="lm-btn" :href="civitaiUrl" target="_blank" rel="noopener noreferrer">
               <AppIcon name="external" :size="16" />{{ t('detail.civitai') }}
             </a>
@@ -263,57 +281,72 @@ onBeforeUnmount(() => {
             </a>
           </div>
 
-          <div class="drawer__block">
-            <div class="drawer__block-head">
-              <h3>{{ t('detail.triggerWords') }}</h3>
+          <div>
+            <div class="flex items-center justify-between">
+              <h3 :class="blockTitleClass">{{ t('detail.triggerWords') }}</h3>
               <button v-if="triggerWords.length > 1" type="button" class="lm-btn lm-btn--sm" @click="copy(triggerWords.join(', '))">
                 <AppIcon name="copy" :size="14" />{{ t('detail.copyAll') }}
               </button>
             </div>
-            <div v-if="metaLoading" class="lm-skeleton drawer__skeleton"></div>
-            <div v-else-if="triggerWords.length" class="drawer__chips">
+            <div v-if="metaLoading" class="lm-skeleton h-[28px] rounded-sm"></div>
+            <div v-else-if="triggerWords.length" :class="chipsClass">
               <button
                 v-for="word in triggerWords"
                 :key="word"
                 type="button"
-                class="lm-chip drawer__word"
+                class="lm-chip text-left font-mono whitespace-normal"
                 :title="t('common.copy')"
                 @click="copy(word)"
               >
                 {{ word }}<AppIcon name="copy" :size="12" />
               </button>
             </div>
-            <p v-else class="lm-muted">{{ t('detail.noTriggerWords') }}</p>
+            <p v-else class="my-[1em] text-muted">{{ t('detail.noTriggerWords') }}</p>
             <p v-if="metaError" class="lm-error-text">{{ metaError }}</p>
           </div>
 
-          <div class="drawer__block">
-            <h3>{{ t('detail.tags') }}</h3>
-            <div class="drawer__chips">
+          <div>
+            <h3 :class="blockTitleClass">{{ t('detail.tags') }}</h3>
+            <div :class="chipsClass">
               <span v-for="tag in tags" :key="tag" class="lm-chip">
                 {{ tag }}
-                <button type="button" class="drawer__chip-x" :aria-label="t('detail.removeTag', { tag })" :disabled="savingTags" @click="removeTag(tag)">
+                <button
+                  type="button"
+                  class="lm-icon-btn text-muted hover:text-danger"
+                  :aria-label="t('detail.removeTag', { tag })"
+                  :disabled="savingTags"
+                  @click="removeTag(tag)"
+                >
                   <AppIcon name="close" :size="12" />
                 </button>
               </span>
-              <form class="drawer__tag-form" @submit.prevent="addTag">
-                <label class="visually-hidden" for="drawer-new-tag">{{ t('detail.addTag') }}</label>
-                <input id="drawer-new-tag" v-model="newTag" class="lm-input drawer__tag-input" :placeholder="t('detail.addTag')" :disabled="savingTags" />
+              <form class="min-w-[120px] flex-1" @submit.prevent="addTag">
+                <label class="sr-only" for="drawer-new-tag">{{ t('detail.addTag') }}</label>
+                <input
+                  id="drawer-new-tag"
+                  v-model="newTag"
+                  class="lm-input min-h-[28px]"
+                  :placeholder="t('detail.addTag')"
+                  :disabled="savingTags"
+                />
               </form>
             </div>
           </div>
 
-          <div class="drawer__block">
-            <label class="lm-label" for="drawer-notes"><h3>{{ t('detail.notes') }}</h3></label>
+          <div>
+            <label class="lm-label" for="drawer-notes"><h3 :class="blockTitleClass">{{ t('detail.notes') }}</h3></label>
             <textarea id="drawer-notes" v-model="notes" class="lm-textarea" :placeholder="t('detail.notesPlaceholder')"></textarea>
-            <div class="drawer__actions">
+            <div class="mt-2 flex flex-wrap justify-end gap-2">
               <button type="button" class="lm-btn lm-btn--primary" :disabled="!notesDirty || savingNotes" @click="saveNotes">
                 {{ t('common.save') }}
               </button>
             </div>
           </div>
 
-          <dl class="drawer__meta">
+          <!-- Each row: label column + value column. -->
+          <dl
+            class="grid gap-2 rounded-md bg-sunken p-4 *:grid *:grid-cols-[110px_minmax(0,1fr)] *:gap-3 [&_dd]:text-sm [&_dd]:wrap-anywhere [&_dt]:text-sm [&_dt]:text-muted"
+          >
             <div><dt>{{ t('detail.fileName') }}</dt><dd class="lm-mono">{{ item.file_name }}</dd></div>
             <div><dt>{{ t('detail.folder') }}</dt><dd>{{ item.folder || '/' }}</dd></div>
             <div><dt>{{ t('detail.size') }}</dt><dd>{{ formatBytes(item.file_size) }}</dd></div>
@@ -322,7 +355,7 @@ onBeforeUnmount(() => {
             <div><dt>{{ t('detail.usage') }}</dt><dd>{{ item.usage_count ?? 0 }}</dd></div>
             <div v-if="item.sha256">
               <dt>{{ t('detail.hash') }}</dt>
-              <dd class="drawer__hash">
+              <dd class="flex items-center gap-1">
                 <span class="lm-mono">{{ item.sha256 }}</span>
                 <button type="button" class="lm-btn lm-btn--ghost lm-btn--icon lm-btn--sm" :aria-label="t('common.copy')" @click="copy(item.sha256!)">
                   <AppIcon name="copy" :size="14" />
@@ -333,42 +366,61 @@ onBeforeUnmount(() => {
         </section>
 
         <!-- Examples -->
-        <section v-else-if="tab === 'examples'" id="panel-examples" role="tabpanel" aria-labelledby="tab-examples" class="drawer__section">
+        <section v-else-if="tab === 'examples'" id="panel-examples" role="tabpanel" aria-labelledby="tab-examples" :class="sectionClass">
           <StateBlock v-if="metaLoading" kind="loading" />
           <StateBlock v-else-if="!images.length" kind="empty" :title="t('detail.noExamples')" />
-          <div v-else class="drawer__gallery">
+          <div v-else class="gap-x-2 [columns:2_180px]">
             <a
               v-for="(image, index) in images"
               :key="index"
-              class="drawer__shot"
+              class="mb-2 block break-inside-avoid overflow-hidden rounded-sm bg-sunken"
               :href="image.url"
               target="_blank"
               rel="noopener noreferrer"
               :style="image.width && image.height ? { aspectRatio: `${image.width} / ${image.height}` } : undefined"
             >
-              <video v-if="image.type === 'video' || isVideoUrl(image.url)" :src="image.url" muted loop playsinline preload="metadata" @mouseenter="($event.target as HTMLVideoElement).play().catch(() => undefined)"></video>
-              <img v-else :src="image.url" alt="" loading="lazy" />
+              <video
+                v-if="image.type === 'video' || isVideoUrl(image.url)"
+                class="size-full object-cover"
+                :src="image.url"
+                muted
+                loop
+                playsinline
+                preload="metadata"
+                @mouseenter="($event.target as HTMLVideoElement).play().catch(() => undefined)"
+              ></video>
+              <img v-else class="size-full object-cover" :src="image.url" alt="" loading="lazy" />
             </a>
           </div>
         </section>
 
         <!-- Versions -->
-        <section v-else-if="tab === 'versions'" id="panel-versions" role="tabpanel" aria-labelledby="tab-versions" class="drawer__section">
+        <section v-else-if="tab === 'versions'" id="panel-versions" role="tabpanel" aria-labelledby="tab-versions" :class="sectionClass">
           <StateBlock v-if="versionsLoading" kind="loading" />
           <StateBlock v-else-if="versionsError" kind="error" :message="versionsError" @retry="loadVersions" />
           <StateBlock v-else-if="!versions?.versions?.length" kind="empty" :title="t('detail.noVersions')" />
-          <ul v-else class="drawer__versions">
-            <li v-for="version in versions.versions" :key="version.versionId" class="drawer__version">
-              <img v-if="version.previewUrl && !isVideoUrl(version.previewUrl)" class="drawer__version-thumb" :src="withMountPrefix(version.previewUrl)" alt="" loading="lazy" />
-              <div v-else class="drawer__version-thumb"></div>
-              <div class="drawer__version-main">
+          <ul v-else class="flex flex-col gap-2">
+            <li
+              v-for="version in versions.versions"
+              :key="version.versionId"
+              class="flex items-center gap-3 rounded-md hairline border-border p-2"
+            >
+              <img
+                v-if="version.previewUrl && !isVideoUrl(version.previewUrl)"
+                class="lm-thumb h-[72px] w-[56px]"
+                :src="withMountPrefix(version.previewUrl)"
+                alt=""
+                loading="lazy"
+              />
+              <div v-else class="lm-thumb h-[72px] w-[56px]"></div>
+              <div class="flex min-w-0 flex-1 flex-col gap-[2px]">
                 <strong>{{ version.name }}</strong>
-                <div class="drawer__version-meta">
+                <div class="flex flex-wrap gap-2 text-xs text-muted">
                   <span v-if="version.baseModel">{{ version.baseModel }}</span>
                   <span v-if="version.releasedAt">{{ formatDate(version.releasedAt) }}</span>
                   <span v-if="version.sizeBytes">{{ formatBytes(version.sizeBytes) }}</span>
                 </div>
-                <div class="drawer__badges">
+                <div class="flex flex-wrap gap-1">
                   <span v-if="version.isInLibrary" class="lm-badge lm-badge--success">{{ t('detail.inLibrary') }}</span>
                   <span v-else-if="version.hasBeenDownloaded" class="lm-badge">{{ t('detail.downloaded') }}</span>
                   <span v-if="version.isEarlyAccess" class="lm-badge lm-badge--warning">{{ t('detail.earlyAccess') }}</span>
@@ -382,322 +434,13 @@ onBeforeUnmount(() => {
         </section>
 
         <!-- Description -->
-        <section v-else id="panel-description" role="tabpanel" aria-labelledby="tab-description" class="drawer__section">
+        <section v-else id="panel-description" role="tabpanel" aria-labelledby="tab-description" :class="sectionClass">
           <StateBlock v-if="metaLoading" kind="loading" />
           <!-- eslint-disable-next-line vue/no-v-html -- sanitized with an allow-list -->
-          <div v-else-if="description" class="drawer__description" v-html="description"></div>
+          <div v-else-if="description" class="lm-prose" v-html="description"></div>
           <StateBlock v-else kind="empty" :title="t('detail.noDescription')" />
         </section>
       </div>
     </aside>
   </div>
 </template>
-
-<style scoped>
-.drawer-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  display: flex;
-  justify-content: flex-end;
-  background: var(--lm-color-overlay);
-  animation: drawer-fade var(--lm-motion-normal) var(--lm-ease);
-}
-
-.drawer {
-  display: flex;
-  flex-direction: column;
-  width: min(var(--lm-drawer-width), 100vw);
-  height: 100%;
-  background: var(--lm-color-elevated);
-  border-left: var(--lm-border-width) solid var(--lm-color-border);
-  box-shadow: var(--lm-shadow-lg);
-  animation: drawer-in var(--lm-motion-normal) var(--lm-ease);
-}
-
-@keyframes drawer-in {
-  from {
-    transform: translateX(24px);
-    opacity: 0;
-  }
-}
-
-@keyframes drawer-fade {
-  from {
-    opacity: 0;
-  }
-}
-
-.drawer__header {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--lm-space-2);
-  padding: var(--lm-space-5) var(--lm-space-5) var(--lm-space-3);
-}
-
-.drawer__heading {
-  flex: 1;
-  min-width: 0;
-}
-
-.drawer__eyebrow {
-  margin: 0;
-  color: var(--lm-color-muted);
-  font-size: var(--lm-font-size-xs);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-.drawer__title {
-  margin: var(--lm-space-1) 0 var(--lm-space-2);
-  font-size: var(--lm-font-size-xl);
-  overflow-wrap: anywhere;
-}
-
-.drawer__badges {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--lm-space-1);
-}
-
-.drawer__fav--on {
-  color: var(--lm-color-warning);
-}
-
-.drawer__tabs {
-  display: flex;
-  gap: var(--lm-space-1);
-  padding: 0 var(--lm-space-5);
-  border-bottom: var(--lm-border-width) solid var(--lm-color-border);
-  overflow-x: auto;
-}
-
-.drawer__tab {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--lm-space-1);
-  padding: var(--lm-space-2) var(--lm-space-3);
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--lm-color-muted);
-  font-weight: var(--lm-font-weight-medium);
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.drawer__tab.is-active {
-  border-bottom-color: var(--lm-color-accent);
-  color: var(--lm-color-text);
-}
-
-.drawer__tab-count {
-  font-size: var(--lm-font-size-xs);
-  color: var(--lm-color-muted);
-}
-
-.drawer__body {
-  flex: 1;
-  overflow-y: auto;
-  padding: var(--lm-space-5);
-}
-
-.drawer__section {
-  display: flex;
-  flex-direction: column;
-  gap: var(--lm-space-5);
-}
-
-.drawer__preview {
-  overflow: hidden;
-  border-radius: var(--lm-radius-md);
-  background: var(--lm-color-sunken);
-}
-
-.drawer__preview img,
-.drawer__preview video {
-  width: 100%;
-  max-height: 420px;
-  object-fit: contain;
-}
-
-.drawer__links,
-.drawer__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--lm-space-2);
-}
-
-.drawer__actions {
-  justify-content: flex-end;
-  margin-top: var(--lm-space-2);
-}
-
-.drawer__block h3 {
-  font-size: var(--lm-font-size-sm);
-  margin-bottom: var(--lm-space-2);
-}
-
-.drawer__block-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.drawer__chips {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--lm-space-2);
-}
-
-.drawer__word {
-  font-family: var(--lm-font-mono);
-  white-space: normal;
-  text-align: left;
-}
-
-.drawer__chip-x {
-  display: inline-grid;
-  place-items: center;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--lm-color-muted);
-  cursor: pointer;
-}
-
-.drawer__chip-x:hover {
-  color: var(--lm-color-danger);
-}
-
-.drawer__tag-form {
-  flex: 1;
-  min-width: 120px;
-}
-
-.drawer__tag-input {
-  min-height: 28px;
-}
-
-.drawer__skeleton {
-  height: 28px;
-  border-radius: var(--lm-radius-sm);
-}
-
-.drawer__meta {
-  display: grid;
-  gap: var(--lm-space-2);
-  margin: 0;
-  padding: var(--lm-space-4);
-  border-radius: var(--lm-radius-md);
-  background: var(--lm-color-sunken);
-}
-
-.drawer__meta > div {
-  display: grid;
-  grid-template-columns: 110px minmax(0, 1fr);
-  gap: var(--lm-space-3);
-}
-
-.drawer__meta dt {
-  color: var(--lm-color-muted);
-  font-size: var(--lm-font-size-sm);
-}
-
-.drawer__meta dd {
-  margin: 0;
-  font-size: var(--lm-font-size-sm);
-  overflow-wrap: anywhere;
-}
-
-.drawer__hash {
-  display: flex;
-  align-items: center;
-  gap: var(--lm-space-1);
-}
-
-.drawer__gallery {
-  columns: 2 180px;
-  column-gap: var(--lm-space-2);
-}
-
-.drawer__shot {
-  display: block;
-  margin-bottom: var(--lm-space-2);
-  overflow: hidden;
-  border-radius: var(--lm-radius-sm);
-  background: var(--lm-color-sunken);
-  break-inside: avoid;
-}
-
-.drawer__shot img,
-.drawer__shot video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.drawer__versions {
-  display: flex;
-  flex-direction: column;
-  gap: var(--lm-space-2);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.drawer__version {
-  display: flex;
-  align-items: center;
-  gap: var(--lm-space-3);
-  padding: var(--lm-space-2);
-  border: var(--lm-border-width) solid var(--lm-color-border);
-  border-radius: var(--lm-radius-md);
-}
-
-.drawer__version-thumb {
-  flex: none;
-  width: 56px;
-  height: 72px;
-  border-radius: var(--lm-radius-sm);
-  background: var(--lm-color-sunken);
-  object-fit: cover;
-}
-
-.drawer__version-main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.drawer__version-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--lm-space-2);
-  color: var(--lm-color-muted);
-  font-size: var(--lm-font-size-xs);
-}
-
-.drawer__description {
-  overflow-wrap: anywhere;
-}
-
-.drawer__description :deep(img) {
-  max-width: 100%;
-}
-
-@media (max-width: 720px) {
-  .drawer__header,
-  .drawer__body {
-    padding-left: var(--lm-space-4);
-    padding-right: var(--lm-space-4);
-  }
-
-  .drawer__tabs {
-    padding: 0 var(--lm-space-3);
-  }
-}
-</style>

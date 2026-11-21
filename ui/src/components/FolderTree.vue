@@ -12,6 +12,9 @@ const props = withDefaults(defineProps<{ tree: FolderTree; selected: string; par
 })
 const emit = defineEmits<{ select: [path: string] }>()
 
+/** Chevron button and the spacer that keeps leaf rows aligned with it. */
+const toggleClass = 'inline-grid h-[28px] w-[22px] flex-none cursor-pointer place-items-center text-muted'
+
 // Explicit user choices; folders without one open when they contain the selection.
 const expanded = ref<Map<string, boolean>>(new Map())
 const entries = computed(() =>
@@ -37,22 +40,36 @@ function toggle(path: string): void {
 </script>
 
 <template>
-  <ul class="tree" :role="depth === 0 ? 'tree' : 'group'">
-    <li v-for="entry in entries" :key="entry.path" role="treeitem" :aria-expanded="entry.hasChildren ? isOpen(entry.path) : undefined" :aria-selected="selected === entry.path">
-      <div class="tree__row" :class="{ 'is-selected': selected === entry.path }" :style="{ paddingLeft: `calc(${depth} * var(--lm-space-3))` }">
+  <ul :role="depth === 0 ? 'tree' : 'group'">
+    <li
+      v-for="entry in entries"
+      :key="entry.path"
+      role="treeitem"
+      :aria-expanded="entry.hasChildren ? isOpen(entry.path) : undefined"
+      :aria-selected="selected === entry.path"
+    >
+      <div
+        class="lm-row flex items-center"
+        :class="{ 'is-selected': selected === entry.path }"
+        :style="{ paddingLeft: `calc(${depth} * var(--lm-space-3))` }"
+      >
         <button
           v-if="entry.hasChildren"
           type="button"
-          class="tree__toggle"
+          :class="toggleClass"
           :aria-label="`${isOpen(entry.path) ? 'Collapse' : 'Expand'} ${entry.name}`"
           @click="toggle(entry.path)"
         >
           <AppIcon :name="isOpen(entry.path) ? 'chevronDown' : 'chevronRight'" :size="14" />
         </button>
-        <span v-else class="tree__toggle-spacer"></span>
-        <button type="button" class="tree__label" @click="emit('select', entry.path)">
+        <span v-else :class="toggleClass"></span>
+        <button
+          type="button"
+          class="flex h-[28px] min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-sm px-1 text-left text-sm"
+          @click="emit('select', entry.path)"
+        >
           <AppIcon name="folder" :size="15" />
-          <span>{{ entry.name }}</span>
+          <span class="truncate">{{ entry.name }}</span>
         </button>
       </div>
       <FolderTree
@@ -66,62 +83,3 @@ function toggle(path: string): void {
     </li>
   </ul>
 </template>
-
-<style scoped>
-.tree {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.tree__row {
-  display: flex;
-  align-items: center;
-  border-radius: var(--lm-radius-sm);
-}
-
-.tree__row:hover {
-  background: var(--lm-color-sunken);
-}
-
-.tree__row.is-selected {
-  background: var(--lm-color-accent-soft);
-  color: var(--lm-color-accent);
-}
-
-.tree__toggle,
-.tree__toggle-spacer {
-  display: inline-grid;
-  place-items: center;
-  flex: none;
-  width: 22px;
-  height: 28px;
-  border: 0;
-  background: transparent;
-  color: var(--lm-color-muted);
-  cursor: pointer;
-}
-
-.tree__label {
-  display: flex;
-  align-items: center;
-  gap: var(--lm-space-2);
-  flex: 1;
-  min-width: 0;
-  height: 28px;
-  padding: 0 var(--lm-space-1);
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font-size: var(--lm-font-size-sm);
-  text-align: left;
-  cursor: pointer;
-  border-radius: var(--lm-radius-sm);
-}
-
-.tree__label span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-</style>

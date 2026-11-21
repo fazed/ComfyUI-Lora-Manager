@@ -29,15 +29,15 @@ onMounted(() => void list.reset())
 </script>
 
 <template>
-  <div class="recipes">
-    <div class="recipes__toolbar">
-      <div class="recipes__title">
+  <div class="flex min-h-0 flex-1 flex-col">
+    <div class="lm-toolbar pb-2">
+      <div class="lm-toolbar-title">
         <h1>{{ t('recipes.title') }}</h1>
         <span class="lm-muted">{{ list.total.value.toLocaleString() }}</span>
       </div>
-      <div class="recipes__controls">
-        <label class="visually-hidden" for="recipe-sort">{{ t('library.sort') }}</label>
-        <select id="recipe-sort" v-model="sort" class="lm-select">
+      <div class="flex gap-2">
+        <label class="sr-only" for="recipe-sort">{{ t('library.sort') }}</label>
+        <select id="recipe-sort" v-model="sort" class="lm-select w-auto">
           <option value="date:desc">{{ t('library.sort.dateDesc') }}</option>
           <option value="date:asc">{{ t('library.sort.dateAsc') }}</option>
           <option value="name:asc">{{ t('library.sort.nameAsc') }}</option>
@@ -46,11 +46,12 @@ onMounted(() => void list.reset())
         <a class="lm-btn" :href="classicUrl"><AppIcon name="external" :size="16" />{{ t('common.openClassic') }}</a>
       </div>
     </div>
-    <p class="recipes__hint lm-muted">{{ t('recipes.classicHint') }}</p>
+    <p class="mx-6 mb-3 text-sm text-muted phone:mx-3">{{ t('recipes.classicHint') }}</p>
 
     <StateBlock v-if="list.error.value && !list.items.value.length" kind="error" :message="list.error.value" @retry="list.reset()" />
     <StateBlock v-else-if="list.loaded.value && !list.items.value.length" kind="empty" icon="book" :title="t('recipes.empty')" />
     <StateBlock v-else-if="!list.loaded.value" kind="loading" />
+
     <VirtualGrid
       v-show="list.items.value.length"
       ref="grid"
@@ -61,11 +62,23 @@ onMounted(() => void list.reset())
       @reach-end="list.loadMore()"
     >
       <template #default="{ item }">
-        <a class="recipe" :href="classicUrl" :title="item.title">
-          <video v-if="isVideoUrl(item.file_url)" :src="withMountPrefix(item.file_url ?? '')" muted loop playsinline preload="metadata"></video>
-          <img v-else-if="item.file_url" :src="withMountPrefix(item.file_url)" alt="" loading="lazy" />
-          <div class="recipe__info">
-            <strong>{{ item.title || item.id }}</strong>
+        <a
+          class="relative block h-full overflow-hidden rounded-md hairline border-border bg-sunken text-on-scrim no-underline"
+          :href="classicUrl"
+          :title="item.title"
+        >
+          <video
+            v-if="isVideoUrl(item.file_url)"
+            class="size-full object-cover"
+            :src="withMountPrefix(item.file_url ?? '')"
+            muted
+            loop
+            playsinline
+            preload="metadata"
+          ></video>
+          <img v-else-if="item.file_url" class="size-full object-cover" :src="withMountPrefix(item.file_url)" alt="" loading="lazy" />
+          <div class="absolute inset-x-0 bottom-0 flex flex-col gap-[2px] bg-scrim-fade px-3 pt-6 pb-3 text-xs">
+            <strong class="text-sm">{{ item.title || item.id }}</strong>
             <span>
               <template v-if="item.base_model">{{ item.base_model }} &middot; </template>{{ t('recipes.loras', { count: item.loras?.length ?? 0 }) }}
             </span>
@@ -75,89 +88,3 @@ onMounted(() => void list.reset())
     </VirtualGrid>
   </div>
 </template>
-
-<style scoped>
-.recipes {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-}
-
-.recipes__toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--lm-space-3);
-  padding: var(--lm-space-5) var(--lm-space-6) var(--lm-space-2);
-}
-
-.recipes__title {
-  display: flex;
-  align-items: baseline;
-  gap: var(--lm-space-3);
-}
-
-.recipes__title h1 {
-  font-size: var(--lm-font-size-2xl);
-}
-
-.recipes__controls {
-  display: flex;
-  gap: var(--lm-space-2);
-}
-
-.recipes__controls .lm-select {
-  width: auto;
-}
-
-.recipes__hint {
-  margin: 0 var(--lm-space-6) var(--lm-space-3);
-  font-size: var(--lm-font-size-sm);
-}
-
-.recipe {
-  position: relative;
-  display: block;
-  height: 100%;
-  overflow: hidden;
-  border: var(--lm-border-width) solid var(--lm-color-border);
-  border-radius: var(--lm-radius-md);
-  background: var(--lm-color-sunken);
-  color: var(--lm-color-on-scrim);
-  text-decoration: none;
-}
-
-.recipe img,
-.recipe video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.recipe__info {
-  position: absolute;
-  inset: auto 0 0 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: var(--lm-space-6) var(--lm-space-3) var(--lm-space-3);
-  background: linear-gradient(to top, var(--lm-color-scrim), transparent);
-  font-size: var(--lm-font-size-xs);
-}
-
-.recipe__info strong {
-  font-size: var(--lm-font-size-sm);
-}
-
-@media (max-width: 720px) {
-  .recipes__toolbar {
-    padding: var(--lm-space-4) var(--lm-space-3) var(--lm-space-2);
-  }
-
-  .recipes__hint {
-    margin: 0 var(--lm-space-3) var(--lm-space-3);
-  }
-}
-</style>
