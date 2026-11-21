@@ -358,6 +358,10 @@
                 "aria2": "aria2 (מומלץ)"
             }
         },
+        "downloadQueueMaxConcurrent": {
+            "label": "Parallel queue downloads",
+            "help": "How many downloads from the download queue run at the same time. The server starts waiting queue items on its own, up to this number."
+        },
         "aria2cPath": {
             "label": "נתיב aria2c",
             "help": "נתיב אופציונלי לקובץ ההפעלה aria2c. השאר ריק כדי להשתמש ב-aria2c מתוך ה-PATH של המערכת.",

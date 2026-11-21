@@ -129,6 +129,21 @@
                 </div>
             </div>
         </div>
+        <div class="setting-item">
+            <div class="setting-row">
+                <div class="setting-info">
+                    <label for="downloadQueueMaxConcurrent">{{ t('settings.downloadQueueMaxConcurrent.label') }}</label>
+                    <i class="fas fa-info-circle info-icon" data-tooltip="{{ t('settings.downloadQueueMaxConcurrent.help') }}"></i>
+                </div>
+                <div class="setting-control select-control">
+                    <select id="downloadQueueMaxConcurrent" onchange="settingsManager.saveSelectSetting('downloadQueueMaxConcurrent', 'download_queue_max_concurrent')">
+                        {% for count in range(1, 6) %}
+                        <option value="{{ count }}">{{ count }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+            </div>
+        </div>
         <div class="setting-item" id="aria2PathSetting" style="display: none;">
             <div class="setting-row">
                 <div class="setting-info">

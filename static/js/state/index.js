@@ -10,6 +10,7 @@ const DEFAULT_SETTINGS_BASE = Object.freeze({
     huggingface_api_key_set: false,
     civitai_host: 'civitai.com',
     download_backend: 'python',
+    download_queue_max_concurrent: 2,
     aria2c_path: '',
     use_portable_settings: false,
     language: 'en',

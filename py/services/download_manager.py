@@ -4037,6 +4037,30 @@ class DownloadManager:
         elif asyncio.iscoroutine(result):
             await result
 
+    def get_running_download_ids(self) -> Set[str]:
+        """Return the ids of downloads that currently hold live tracking.
+
+        Covers downloads with an unfinished asyncio task (running, waiting
+        for a semaphore slot or paused mid-transfer) and restored aria2
+        transfers that are paused without a task yet. The download queue
+        worker uses this to avoid starting the same ``download_id`` twice and
+        to count these downloads towards its concurrency limit.
+        """
+        running = {
+            download_id
+            for download_id, task in self._download_tasks.items()
+            if not task.done()
+        }
+        for download_id, info in self._active_downloads.items():
+            if download_id in self._pause_events and info.get("status") in (
+                "queued",
+                "waiting",
+                "downloading",
+                "paused",
+            ):
+                running.add(download_id)
+        return running
+
     async def get_active_downloads(self) -> Dict[str, Any]:
         """Get information about all active downloads
 

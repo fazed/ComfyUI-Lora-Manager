@@ -94,6 +94,8 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "huggingface_api_key": "",
     "civitai_host": "civitai.com",
     "download_backend": "python",
+    # How many downloads the server-side queue worker runs at once (1-5).
+    "download_queue_max_concurrent": 2,
     "aria2c_path": "",
     "use_portable_settings": False,
     "hash_chunk_size_mb": DEFAULT_HASH_CHUNK_SIZE_MB,

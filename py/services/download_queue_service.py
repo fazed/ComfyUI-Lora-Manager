@@ -94,6 +94,11 @@ class DownloadQueueService:
         );
         CREATE INDEX IF NOT EXISTS idx_dh_completed ON download_history(completed_at DESC);
         CREATE INDEX IF NOT EXISTS idx_dh_status ON download_history(status);
+
+        CREATE TABLE IF NOT EXISTS download_queue_state (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        );
     """
 
     _CREATE_UNIQUE_INDEX = """
@@ -804,6 +809,36 @@ class DownloadQueueService:
             conn.commit()
 
         return count
+
+    # ------------------------------------------------------------------
+    # Persistent queue state (e.g. the queue worker's global pause flag)
+    # ------------------------------------------------------------------
+
+    async def get_state(self, key: str, default: Optional[str] = None) -> Optional[str]:
+        """Return a persisted queue state value, or *default* when unset."""
+        async with self._lock:
+            conn = self._get_conn()
+            row = conn.execute(
+                "SELECT value FROM download_queue_state WHERE key = ?",
+                (key,),
+            ).fetchone()
+        return row["value"] if row is not None else default
+
+    async def set_state(self, key: str, value: Optional[str]) -> None:
+        """Persist a queue state value (``None`` removes the key)."""
+        async with self._lock:
+            conn = self._get_conn()
+            if value is None:
+                conn.execute(
+                    "DELETE FROM download_queue_state WHERE key = ?", (key,)
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO download_queue_state (key, value) VALUES (?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (key, value),
+                )
+            conn.commit()
 
     # ------------------------------------------------------------------
     # Stats

@@ -495,3 +495,142 @@ async def test_retry_with_start_maps_validation_error_to_400(
 
     assert response.status == 400
     assert json.loads(response.text)["success"] is False
+
+
+# ----------------------------------------------------------------------
+# Server-side queue worker integration
+# ----------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def isolated_worker(monkeypatch: pytest.MonkeyPatch):
+    """Install a worker that never touches the real download manager.
+
+    Autouse: download-model-get and retry?start=true route manual starts
+    through the process-wide worker.
+    """
+    from py.services import download_queue_worker as worker_module
+
+    async def no_cooldown() -> float:
+        return 0.0
+
+    async def manager_factory():
+        return SimpleNamespace(get_running_download_ids=lambda: set())
+
+    worker = worker_module.DownloadQueueWorker(
+        download_runner=AsyncMock(return_value={"success": True}),
+        download_manager_factory=manager_factory,
+        cooldown_probe=no_cooldown,
+        settings_getter=lambda: SimpleNamespace(get=lambda key, default=None: default),
+        startup_delay_seconds=0,
+    )
+    monkeypatch.setattr(worker_module, "_worker", worker)
+    return worker
+
+
+@pytest.mark.asyncio
+async def test_queue_response_advertises_worker_capability(
+    queue_service: DownloadQueueService, isolated_worker
+) -> None:
+    handler = _make_handler()
+    response = await handler.get_download_queue(
+        _queue_request("/api/lm/downloads/queue", {})
+    )
+    payload = json.loads(response.text)
+    assert payload["queue_worker"] is True
+    assert payload["worker"]["paused"] is False
+    assert payload["worker"]["max_concurrent"] == 2
+    assert payload["worker"]["rate_limited"] is False
+
+    stats = json.loads(
+        (await handler.get_download_stats(_queue_request("/api/lm/downloads/stats", {}))).text
+    )
+    assert stats["queue_worker"] is True
+    assert "worker" in stats
+
+
+@pytest.mark.asyncio
+async def test_pause_all_and_resume_all_toggle_worker(
+    queue_service: DownloadQueueService, isolated_worker
+) -> None:
+    handler = _make_handler()
+    paused = json.loads(
+        (await handler.pause_download_queue(
+            _queue_request("/api/lm/downloads/queue/pause-all", {})
+        )).text
+    )
+    assert paused == {"success": True, "worker": paused["worker"]}
+    assert paused["worker"]["paused"] is True
+    assert await queue_service.get_state("worker_paused") == "1"
+
+    resumed = json.loads(
+        (await handler.resume_download_queue(
+            _queue_request("/api/lm/downloads/queue/resume-all", {})
+        )).text
+    )
+    assert resumed["worker"]["paused"] is False
+    assert await queue_service.get_state("worker_paused") is None
+
+
+@pytest.mark.asyncio
+async def test_add_to_queue_wakes_the_worker(
+    queue_service: DownloadQueueService, isolated_worker
+) -> None:
+    handler = _make_handler()
+    assert not isolated_worker._wake_event.is_set()
+    await handler.add_to_download_queue(
+        _queue_request("/api/lm/downloads/queue/add", {"download_id": "dl-w", "model_id": "5"})
+    )
+    assert isolated_worker._wake_event.is_set()
+
+
+@pytest.mark.asyncio
+async def test_download_model_get_joins_running_download(
+    queue_service: DownloadQueueService, isolated_worker
+) -> None:
+    """A manual start of a download the worker already runs is not doubled."""
+    import asyncio
+
+    gate = asyncio.get_running_loop().create_future()
+    calls: list[str] = []
+
+    async def slow_runner(payload: dict) -> dict:
+        calls.append(payload["download_id"])
+        return await gate
+
+    isolated_worker._download_runner = slow_runner
+    await queue_service.add_to_queue(download_id="dl-run", model_id=1)
+    assert await isolated_worker.tick() == ["dl-run"]
+
+    handler = _make_download_handler({"success": True, "via": "handler"})
+    request = _queue_request(
+        "/api/lm/download-model-get", {"model_id": "1", "download_id": "dl-run"}
+    )
+    pending = asyncio.ensure_future(handler.download_model_get(request))
+    for _ in range(5):
+        await asyncio.sleep(0)
+    gate.set_result({"success": True, "via": "worker"})
+    response = await pending
+
+    assert json.loads(response.text)["via"] == "worker"
+    assert calls == ["dl-run"]
+    handler._download_use_case.execute.assert_not_called()  # pyright: ignore[reportAttributeAccessIssue]
+
+
+@pytest.mark.asyncio
+async def test_download_model_get_returns_409_when_running_elsewhere(
+    queue_service: DownloadQueueService, isolated_worker
+) -> None:
+    async def manager_factory():
+        return SimpleNamespace(get_running_download_ids=lambda: {"dl-x"})
+
+    isolated_worker._download_manager_factory = manager_factory
+    handler = _make_download_handler({"success": True})
+    response = await handler.download_model_get(
+        _queue_request(
+            "/api/lm/download-model-get", {"model_id": "1", "download_id": "dl-x"}
+        )
+    )
+    assert response.status == 409
+    assert json.loads(response.text)["reason"] == "already_running"
+    handler._download_use_case.execute.assert_not_called()  # pyright: ignore[reportAttributeAccessIssue]

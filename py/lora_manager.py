@@ -29,6 +29,10 @@ from .routes.pending_delete_routes import PendingDeleteRoutes
 from .routes.preview_routes import PreviewRoutes
 from .routes.example_images_routes import ExampleImagesRoutes
 from .services.service_registry import ServiceRegistry
+from .services.download_queue_worker import (
+    start_download_queue_worker,
+    stop_download_queue_worker,
+)
 from .services.settings_manager import get_settings_manager
 from .services.pending_delete_service import get_pending_delete_service
 from .utils.example_images_migration import ExampleImagesMigration
@@ -186,9 +190,12 @@ class LoraManager:
 
         # Schedule service initialization
         app.on_startup.append(lambda app: cls._initialize_services())
+        # Server-side executor for the persistent download queue
+        app.on_startup.append(start_download_queue_worker)
 
         # Add cleanup
         app.on_shutdown.append(cls._cleanup)
+        app.on_shutdown.append(stop_download_queue_worker)
 
     @classmethod
     async def _initialize_services(cls):

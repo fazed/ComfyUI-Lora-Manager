@@ -1147,6 +1147,11 @@ export class SettingsManager {
             downloadBackendSelect.value = state.global.settings.download_backend || 'python';
         }
 
+        const downloadQueueMaxConcurrentSelect = document.getElementById('downloadQueueMaxConcurrent');
+        if (downloadQueueMaxConcurrentSelect) {
+            downloadQueueMaxConcurrentSelect.value = String(state.global.settings.download_queue_max_concurrent ?? 2);
+        }
+
         const unknownBaseModelRoutingSelect = document.getElementById('unknownBaseModelRouting');
         if (unknownBaseModelRoutingSelect) {
             unknownBaseModelRoutingSelect.value = state.global.settings.unknown_base_model_routing || 'diffusion_model';

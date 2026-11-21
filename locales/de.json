@@ -358,6 +358,10 @@
                 "aria2": "aria2 (empfohlen)"
             }
         },
+        "downloadQueueMaxConcurrent": {
+            "label": "Parallel queue downloads",
+            "help": "How many downloads from the download queue run at the same time. The server starts waiting queue items on its own, up to this number."
+        },
         "aria2cPath": {
             "label": "aria2c-Pfad",
             "help": "Optionaler Pfad zur ausführbaren aria2c-Datei. Leer lassen, um aria2c aus dem System-PATH zu verwenden.",

@@ -45,7 +45,19 @@ from ...services.settings_manager import get_settings_manager
 from ...services.first_run_manager import get_first_run_manager
 from ...services.websocket_manager import ws_manager
 from ...services.downloader import get_downloader
+from ...services.download_queue_worker import (
+    MAX_CONCURRENT_SETTING_KEY,
+    MAX_MAX_CONCURRENT,
+    MIN_MAX_CONCURRENT,
+    normalize_max_concurrent,
+    wake_download_queue_worker,
+)
 from ...services.errors import ResourceNotFoundError
+from ...services.model_versions_status_cache import (
+    FAILURE_ERROR,
+    FAILURE_RATE_LIMITED,
+    ModelVersionsStatusCache,
+)
 from ...services.llm_service import (
     PROVIDER_PRESETS,
     fetch_ollama_models,
@@ -1988,6 +2000,22 @@ class SettingsHandler:
                         {"success": False, "error": "update_channel must be 'release' or 'nightly'"}
                     )
 
+                if key == MAX_CONCURRENT_SETTING_KEY:
+                    normalized = normalize_max_concurrent(value)
+                    if normalized is None:
+                        return web.json_response(
+                            {
+                                "success": False,
+                                "error": (
+                                    f"{MAX_CONCURRENT_SETTING_KEY} must be an integer "
+                                    f"from {MIN_MAX_CONCURRENT} to {MAX_MAX_CONCURRENT}"
+                                ),
+                            }
+                        )
+                    value = normalized
+                    if value == self._settings.get(key):
+                        continue
+
                 if value == "__DELETE__" and key in (
                     "proxy_username",
                     "proxy_password",
@@ -2006,6 +2034,9 @@ class SettingsHandler:
 
                 if key in self._PROXY_KEYS:
                     proxy_changed = True
+
+                if key == MAX_CONCURRENT_SETTING_KEY:
+                    wake_download_queue_worker()
 
             if proxy_changed:
                 downloader = await self._downloader_factory()
@@ -2447,9 +2478,15 @@ class ModelLibraryHandler:
         metadata_provider_factory: Callable[
             [], Awaitable[MetadataProviderProtocol | None]
         ],
+        versions_status_cache: ModelVersionsStatusCache | None = None,
     ) -> None:
         self._service_registry = service_registry
         self._metadata_provider_factory = metadata_provider_factory
+        # Remote half of /model-versions-status (CivitAI version lists), kept
+        # per model id with stale-while-revalidate; local status is not cached.
+        self._versions_status_cache = (
+            versions_status_cache or ModelVersionsStatusCache()
+        )
         # Creator suggestions are derived from scanner caches. The snapshot is
         # keyed by each scanner's monotonic cache_version, so scans, saves,
         # moves and deletes invalidate it without extra hooks.
@@ -3395,17 +3432,40 @@ class ModelLibraryHandler:
                     status=503,
                 )
 
-            try:
-                response = await metadata_provider.get_model_versions(model_id)
-            except ResourceNotFoundError as exc:
-                return web.json_response(
-                    {"success": False, "error": str(exc) or "Model not found"},
-                    status=404,
-                )
-            if not response or not response.get("modelVersions"):
-                return web.json_response(
-                    {"success": False, "error": "Model not found"}, status=404
-                )
+            force_refresh = request.query.get("refresh", "").lower() in {
+                "1",
+                "true",
+                "yes",
+            }
+
+            async def fetch_remote_versions():
+                return await metadata_provider.get_model_versions(model_id)
+
+            lookup = await self._versions_status_cache.get(
+                model_id, fetch_remote_versions, force_refresh=force_refresh
+            )
+            if lookup.failure is not None or lookup.payload is None:
+                failure = lookup.failure
+                error_payload: dict[str, Any] = {
+                    "success": False,
+                    "error": (failure.message if failure else "") or "Model not found",
+                    "cached": lookup.cached,
+                }
+                status = 404
+                if failure is not None and failure.kind == FAILURE_RATE_LIMITED:
+                    status = 429
+                    if failure.retry_after is not None:
+                        error_payload["retryAfter"] = round(failure.retry_after, 1)
+                elif failure is not None and failure.kind == FAILURE_ERROR:
+                    status = 500
+                return web.json_response(error_payload, status=status)
+
+            response = lookup.payload
+            cache_fields = {
+                "cached": lookup.cached,
+                "stale": lookup.stale,
+                "source": lookup.source,
+            }
 
             versions = response.get("modelVersions", [])
             model_name = response.get("name", "")
@@ -3437,6 +3497,7 @@ class ModelLibraryHandler:
                         "modelType": model_type,
                         "supported": False,
                         "reason": reason,
+                        **cache_fields,
                         "versions": [
                             {
                                 "id": version.get("id"),
@@ -3492,6 +3553,7 @@ class ModelLibraryHandler:
                     "modelName": model_name,
                     "modelType": model_type,
                     "supported": True,
+                    **cache_fields,
                     "versions": enriched_versions,
                 }
             )

@@ -51,6 +51,10 @@ from ...services.websocket_progress_callback import (
     WebSocketProgressCallback,
 )
 from ...services.download_queue_service import DownloadQueueService
+from ...services.download_queue_worker import (
+    get_download_queue_worker,
+    wake_download_queue_worker,
+)
 from ...services.errors import RateLimitError, ResourceNotFoundError
 from ...utils.civitai_utils import resolve_license_payload
 from ...utils.file_utils import calculate_sha256
@@ -1995,6 +1999,16 @@ class ModelQueryHandler:
             return web.json_response({"success": False, "error": str(exc)}, status=500)
 
 
+def _download_failure_status(result: Mapping[str, Any]) -> int:
+    """HTTP status for an unsuccessful download result."""
+    reason = result.get("reason")
+    if reason == "rate_limited":
+        return 429
+    if reason == "already_running":
+        return 409
+    return 500
+
+
 def _is_truthy(value: Any) -> bool:
     """Parse an optional boolean flag from a query string or JSON body.
 
@@ -2077,15 +2091,16 @@ class ModelDownloadHandler:
                         "Invalid file_params JSON: %s", file_params_json
                     )
 
-            loop = asyncio.get_event_loop()
-            future = loop.create_future()
-            future.set_result(data)
-
-            mock_request = type("MockRequest", (), {"json": lambda self=None: future})()
-            result = await self._download_use_case.execute(data)
+            # Shared with the server-side queue worker so a download_id that
+            # is already running is joined instead of started twice, and
+            # manual starts count towards the worker's concurrency limit.
+            result = await get_download_queue_worker().run_download(
+                data, runner=self._download_use_case.execute
+            )
             if not result.get("success", False):
-                status = 429 if result.get("reason") == "rate_limited" else 500
-                return web.json_response(result, status=status)
+                return web.json_response(
+                    result, status=_download_failure_status(result)
+                )
             return web.json_response(result)
         except DownloadModelValidationError as exc:
             return web.json_response({"success": False, "error": str(exc)}, status=400)
@@ -2207,7 +2222,14 @@ class ModelDownloadHandler:
             service = await DownloadQueueService.get_instance()
             queue = await service.get_queue()
             stats = await service.get_stats()
-            return web.json_response({"success": True, "queue": queue, "stats": stats})
+            return web.json_response(
+                {
+                    "success": True,
+                    "queue": queue,
+                    "stats": stats,
+                    **await self._queue_worker_payload(),
+                }
+            )
         except Exception as exc:
             self._logger.error(
                 "Error getting download queue: %s", exc, exc_info=True
@@ -2264,6 +2286,8 @@ class ModelDownloadHandler:
                 file_params=file_params,
             )
             duplicate = item.pop("duplicate", False)
+            if item and not duplicate:
+                wake_download_queue_worker()
             return web.json_response({
                 "success": True,
                 "queued": bool(item) and not duplicate,
@@ -2438,6 +2462,7 @@ class ModelDownloadHandler:
                     {"success": False, "error": "History item not found or not retryable"}
                 )
             if not start:
+                wake_download_queue_worker()
                 return web.json_response({"success": True, "item": item})
 
             result = await self._start_queued_download(item)
@@ -2445,8 +2470,9 @@ class ModelDownloadHandler:
             payload["item"] = item
             payload["started"] = True
             if not result.get("success", False):
-                status = 429 if result.get("reason") == "rate_limited" else 500
-                return web.json_response(payload, status=status)
+                return web.json_response(
+                    payload, status=_download_failure_status(result)
+                )
             return web.json_response(payload)
         except DownloadModelValidationError as exc:
             return web.json_response({"success": False, "error": str(exc)}, status=400)
@@ -2460,15 +2486,14 @@ class ModelDownloadHandler:
             return web.json_response({"success": False, "error": str(exc)}, status=500)
 
     async def _start_queued_download(self, item: dict[str, Any]) -> dict[str, Any]:
-        """Start a re-queued download without a client-side executor.
+        """Start a re-queued download right away.
 
-        ``retry_from_history`` only writes a ``queued`` row. The queue is
-        normally drained by the companion browser extension, so callers
-        without it (headless or third-party integrations) pass
-        ``start=true`` to have the backend run the download now. The payload
-        mirrors what the extension sends on retry, and reuses the re-queued
-        ``download_id`` so the normal status transitions keep updating the
-        same row.
+        ``retry_from_history`` only writes a ``queued`` row, which the
+        server-side queue worker picks up when a slot is free. Callers that
+        want it to run now pass ``start=true``. The payload reuses the
+        re-queued ``download_id`` so the normal status transitions keep
+        updating the same row; it goes through the worker so the row is never
+        started twice.
         """
         file_params: Any = item.get("file_params")
         if isinstance(file_params, str):
@@ -2485,12 +2510,16 @@ class ModelDownloadHandler:
             "source": item.get("source") or "retry",
             "file_params": file_params or None,
         }
-        return await self._download_use_case.execute(payload)
+        return await get_download_queue_worker().run_download(
+            payload, runner=self._download_use_case.execute
+        )
 
     async def retry_all_failed_downloads(self, request: web.Request) -> web.Response:
         try:
             service = await DownloadQueueService.get_instance()
             retry_count = await service.retry_all_failed()
+            if retry_count:
+                wake_download_queue_worker()
             return web.json_response({"success": True, "retry_count": retry_count})
         except Exception as exc:
             self._logger.error(
@@ -2547,7 +2576,9 @@ class ModelDownloadHandler:
         try:
             service = await DownloadQueueService.get_instance()
             stats = await service.get_stats()
-            return web.json_response({"success": True, "stats": stats})
+            return web.json_response(
+                {"success": True, "stats": stats, **await self._queue_worker_payload()}
+            )
         except Exception as exc:
             self._logger.error(
                 "Error getting download stats: %s", exc, exc_info=True
@@ -2575,6 +2606,8 @@ class ModelDownloadHandler:
                 )
             service = await DownloadQueueService.get_instance()
             updated = await service.update_status(download_id, status)
+            if updated:
+                wake_download_queue_worker()
             if not updated:
                 # Same rationale as complete_download_in_queue: a missing
                 # queue item is a business outcome, not a routing error.
@@ -2586,6 +2619,39 @@ class ModelDownloadHandler:
             self._logger.error(
                 "Error updating download queue status: %s", exc, exc_info=True
             )
+            return web.json_response({"success": False, "error": str(exc)}, status=500)
+
+    async def _queue_worker_payload(self) -> dict[str, Any]:
+        """Capability flag plus worker state for queue/stats responses."""
+        payload: dict[str, Any] = {"queue_worker": True}
+        try:
+            payload["worker"] = await get_download_queue_worker().describe()
+        except Exception as exc:
+            self._logger.warning("Could not describe the queue worker: %s", exc)
+        return payload
+
+    async def pause_download_queue(self, request: web.Request) -> web.Response:
+        """Stop the queue worker from starting new downloads (persisted)."""
+        try:
+            worker = get_download_queue_worker()
+            await worker.pause()
+            return web.json_response(
+                {"success": True, "worker": await worker.describe()}
+            )
+        except Exception as exc:
+            self._logger.error("Error pausing download queue: %s", exc, exc_info=True)
+            return web.json_response({"success": False, "error": str(exc)}, status=500)
+
+    async def resume_download_queue(self, request: web.Request) -> web.Response:
+        """Let the queue worker start downloads again."""
+        try:
+            worker = get_download_queue_worker()
+            await worker.resume()
+            return web.json_response(
+                {"success": True, "worker": await worker.describe()}
+            )
+        except Exception as exc:
+            self._logger.error("Error resuming download queue: %s", exc, exc_info=True)
             return web.json_response({"success": False, "error": str(exc)}, status=500)
 
 
@@ -4044,6 +4110,8 @@ class ModelHandlerSet:
             "move_queue_item_to_top": self.download.move_queue_item_to_top,
             "move_queue_item_to_end": self.download.move_queue_item_to_end,
             "clear_download_queue": self.download.clear_download_queue,
+            "pause_download_queue": self.download.pause_download_queue,
+            "resume_download_queue": self.download.resume_download_queue,
             "get_download_history": self.download.get_download_history,
             "clear_download_history": self.download.clear_download_history,
             "delete_download_history_item": self.download.delete_download_history_item,

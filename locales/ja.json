@@ -358,6 +358,10 @@
                 "aria2": "aria2（推奨）"
             }
         },
+        "downloadQueueMaxConcurrent": {
+            "label": "Parallel queue downloads",
+            "help": "How many downloads from the download queue run at the same time. The server starts waiting queue items on its own, up to this number."
+        },
         "aria2cPath": {
             "label": "aria2c のパス",
             "help": "aria2c 実行ファイルへの任意のパスです。空欄のままにすると、システム PATH 上の aria2c を使用します。",

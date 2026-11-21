@@ -368,6 +368,10 @@ class StandaloneLoraManager(LoraManager):
         from py.routes.preview_routes import PreviewRoutes
         from py.routes.stats_routes import StatsRoutes
         from py.services.websocket_manager import ws_manager
+        from py.services.download_queue_worker import (
+            start_download_queue_worker,
+            stop_download_queue_worker,
+        )
 
         register_default_model_types()
 
@@ -395,9 +399,12 @@ class StandaloneLoraManager(LoraManager):
 
         # Schedule service initialization
         app.on_startup.append(lambda app: cls._initialize_services())
+        # Server-side executor for the persistent download queue
+        app.on_startup.append(start_download_queue_worker)
 
         # Add cleanup
         app.on_shutdown.append(cls._cleanup)
+        app.on_shutdown.append(stop_download_queue_worker)
 
 
 def parse_args():

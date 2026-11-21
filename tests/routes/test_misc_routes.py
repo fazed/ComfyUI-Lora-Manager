@@ -3749,3 +3749,38 @@ def test_price_alert_endpoints_are_gone():
     ]
 
     assert leftovers == []
+
+
+@pytest.mark.asyncio
+async def test_update_settings_validates_queue_max_concurrent(monkeypatch):
+    from py.services import download_queue_worker
+
+    wakes: list[bool] = []
+    monkeypatch.setattr(
+        misc_handlers, "wake_download_queue_worker", lambda: wakes.append(True)
+    )
+    settings_service = DummySettings({"download_queue_max_concurrent": 2})
+    handler = SettingsHandler(
+        settings_service=settings_service,
+        metadata_provider_updater=noop_async,
+        downloader_factory=dummy_downloader_factory,
+    )
+
+    for invalid in (0, 6, "abc", True):
+        response = await handler.update_settings(  # pyright: ignore[reportArgumentType]
+            FakeRequest(json_data={"download_queue_max_concurrent": invalid})
+        )
+        payload = _json_payload(response)
+        assert payload["success"] is False
+        assert "download_queue_max_concurrent" in payload["error"]
+    assert settings_service.data["download_queue_max_concurrent"] == 2
+    assert wakes == []
+
+    # The settings modal sends select values as strings; they are stored as int.
+    response = await handler.update_settings(  # pyright: ignore[reportArgumentType]
+        FakeRequest(json_data={"download_queue_max_concurrent": "4"})
+    )
+    assert _json_payload(response)["success"] is True
+    assert settings_service.data["download_queue_max_concurrent"] == 4
+    assert wakes == [True]
+    assert download_queue_worker.normalize_max_concurrent("4") == 4
