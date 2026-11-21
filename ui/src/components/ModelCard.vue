@@ -21,7 +21,21 @@ const emit = defineEmits<{
   'toggle-favorite': [item: ModelItem]
   /** replace = Shift+click (replace the node's LoRAs instead of appending). */
   send: [item: ModelItem, replace: boolean]
+  /** Open the action menu at a viewport point; `opener` gets focus back when it closes. */
+  menu: [item: ModelItem, point: { x: number; y: number }, opener: HTMLElement | null]
 }>()
+
+function openMenuFromButton(event: MouseEvent): void {
+  const button = event.currentTarget as HTMLElement
+  const rect = button.getBoundingClientRect()
+  emit('menu', props.item, { x: rect.right - 220, y: rect.bottom + 4 }, button)
+}
+
+function openContextMenu(event: MouseEvent): void {
+  if (props.selectionMode) return
+  event.preventDefault()
+  emit('menu', props.item, { x: event.clientX, y: event.clientY }, event.currentTarget instanceof HTMLElement ? event.currentTarget.querySelector('button') : null)
+}
 
 const media = ref<InstanceType<typeof LazyMedia> | null>(null)
 const video = computed(() => (media.value?.element instanceof HTMLVideoElement ? media.value.element : null))
@@ -60,6 +74,7 @@ function pause(): void {
     :class="selected ? 'border-accent ring-selected' : 'border-border shadow-sm hover:shadow-md'"
     @mouseenter="play"
     @mouseleave="pause"
+    @contextmenu="openContextMenu"
   >
     <button
       type="button"
@@ -118,6 +133,17 @@ function pause(): void {
         @click.stop="emit('toggle-favorite', item)"
       >
         <AppIcon name="star" :size="16" :filled="!!item.favorite" />
+      </button>
+      <button
+        v-if="!selectionMode"
+        type="button"
+        :class="[roundClass, 'pointer-events-auto bg-scrim text-on-scrim transition-opacity hover:bg-accent hover:text-on-accent', revealClass]"
+        :aria-label="t('actions.menu', { name: displayName })"
+        :title="t('actions.menuTitle')"
+        aria-haspopup="menu"
+        @click.stop="openMenuFromButton"
+      >
+        <AppIcon name="more" :size="16" />
       </button>
     </div>
     <div class="pointer-events-none absolute inset-x-0 bottom-0 z-1 bg-scrim-fade px-3 pt-6 pb-3 text-on-scrim">

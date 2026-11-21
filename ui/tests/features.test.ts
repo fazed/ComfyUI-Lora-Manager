@@ -323,4 +323,13 @@ describe('useSendToWorkflow', () => {
     expect(await useSendToWorkflow().sendLora(LORA)).toBe(false)
     expect(useToasts().toasts.value.at(-1)?.kind).toBe('warning')
   })
+
+  it('sends a selection as one comma-joined code (bulk send)', async () => {
+    mockBackend({ success: true, data: { nodes: { '7': NODES['7'] }, tab_count: 1 } })
+    const second = { ...LORA, file_name: 'Other', usage_tips: '{"strength": 0.6}' }
+    expect(await useSendToWorkflow().sendLoras([LORA, second], 'append')).toBe(true)
+    const body = JSON.parse(String(calls.find((call) => call.url.includes('/update-lora-code'))?.init?.body))
+    expect(body.lora_code).toBe('<lora:Anima-2.5D Style-V1:1>, <lora:Other:0.6>')
+    expect(await useSendToWorkflow().sendLoras([])).toBe(false)
+  })
 })

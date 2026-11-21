@@ -75,6 +75,11 @@ export function createModelApi(prefix: ModelPrefix) {
     roots: () => request<{ roots: string[] }>(`${prefix}/roots`).then((r) => r.roots ?? []),
     folderTree: () =>
       request<{ tree: FolderTree }>(`${prefix}/unified-folder-tree`).then((r) => r.tree ?? {}),
+    /** Folders of one root, including empty ones (move targets). */
+    rootFolderTree: (modelRoot: string) =>
+      request<{ tree: FolderTree }>(`${prefix}/folder-tree`, { query: { model_root: modelRoot, include_empty: 'true' } }).then(
+        (r) => r.tree ?? {},
+      ),
     metadata: (filePath: string) =>
       request<{ metadata: ModelMetadata | null }>(`${prefix}/metadata`, { query: { file_path: filePath } }).then(
         (r) => r.metadata ?? null,

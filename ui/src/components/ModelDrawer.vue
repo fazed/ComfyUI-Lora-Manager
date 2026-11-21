@@ -4,6 +4,7 @@ import { useEventListener } from '@vueuse/core'
 import AppIcon from './AppIcon.vue'
 import ExampleLightbox from './ExampleLightbox.vue'
 import LazyMedia from './LazyMedia.vue'
+import type { ModelAction } from './ModelActionMenu.vue'
 import StateBlock from './StateBlock.vue'
 import { downloadsApi, type ModelApi } from '@/api/endpoints'
 import type { ModelItem, ModelMetadata, ModelUpdateRecord } from '@/api/types'
@@ -23,7 +24,7 @@ const props = withDefaults(
   defineProps<{ item: ModelItem; api: ModelApi; classicUrl: string; civitaiHost?: string; canSend?: boolean }>(),
   { civitaiHost: 'civitai.com', canSend: false },
 )
-const emit = defineEmits<{ close: []; updated: [item: ModelItem]; 'filter-tag': [tag: string] }>()
+const emit = defineEmits<{ close: []; updated: [item: ModelItem]; 'filter-tag': [tag: string]; action: [action: ModelAction] }>()
 
 type Tab = 'overview' | 'description' | 'versions'
 const TABS: { id: Tab; label: MessageKey }[] = [
@@ -413,6 +414,22 @@ useEventListener(document, 'keydown', onKey)
             <a class="lm-btn lm-btn--ghost" :href="classicUrl">
               <AppIcon name="external" :size="16" />{{ t('common.openClassic') }}
             </a>
+          </div>
+
+          <!-- File actions: each opens its own dialog / confirm on the library page. -->
+          <div class="flex flex-wrap items-center gap-2" role="group" :aria-label="t('actions.menuTitle')">
+            <button type="button" class="lm-btn lm-btn--sm" @click="emit('action', 'rename')">
+              <AppIcon name="pencil" :size="14" />{{ t('actions.rename') }}
+            </button>
+            <button type="button" class="lm-btn lm-btn--sm" @click="emit('action', 'move')">
+              <AppIcon name="folderMove" :size="14" />{{ t('actions.move') }}
+            </button>
+            <button type="button" class="lm-btn lm-btn--sm" @click="emit('action', 'exclude')">
+              <AppIcon name="eyeOff" :size="14" />{{ t('actions.exclude') }}
+            </button>
+            <button type="button" class="lm-btn lm-btn--sm lm-btn--danger" @click="emit('action', 'delete')">
+              <AppIcon name="trash" :size="14" />{{ t('actions.delete') }}
+            </button>
           </div>
 
           <!-- Send to ComfyUI (LoRAs) -->

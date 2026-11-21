@@ -74,35 +74,31 @@ export function useSendToWorkflow() {
     return ok
   }
 
-  function warnWithCopy(message: string, item: LoraLike, options: LoraActionOptions): void {
-    toasts.warning(message, { label: t('workflow.copySyntax'), run: () => void copyLora(item, options) })
-  }
-
-  async function sendLora(item: LoraLike, options: LoraActionOptions = {}): Promise<boolean> {
-    const mode = options.mode ?? 'append'
-    await load()
+  /** Sends a ready LoRA code to the chosen node(s); `copyFallback` is offered when that is impossible. */
+  async function sendCode(code: string, mode: SendMode, copyFallback: () => void): Promise<boolean> {
+    const warnWithCopy = (message: string) => toasts.warning(message, { label: t('workflow.copySyntax'), run: copyFallback })
     let nodes: Record<string, RegistryNode>
     try {
       nodes = (await workflowApi.registry()).nodes ?? {}
     } catch (error) {
-      const code = error instanceof ApiError ? (error.payload as { error?: string } | null)?.error : undefined
-      if (code === 'Standalone Mode Active') warnWithCopy(t('workflow.standalone'), item, options)
-      else if (code === 'Empty Registry') warnWithCopy(t('workflow.noNodes'), item, options)
-      else warnWithCopy(t('workflow.registryFailed', { error: (error as Error).message }), item, options)
+      const reason = error instanceof ApiError ? (error.payload as { error?: string } | null)?.error : undefined
+      if (reason === 'Standalone Mode Active') warnWithCopy(t('workflow.standalone'))
+      else if (reason === 'Empty Registry') warnWithCopy(t('workflow.noNodes'))
+      else warnWithCopy(t('workflow.registryFailed', { error: (error as Error).message }))
       return false
     }
 
     const targets = loraTargetNodes(nodes, settings.value?.send_to_workflow_exclusions as SendExclusions | undefined)
     const keys = Object.keys(targets)
     if (!keys.length) {
-      warnWithCopy(t('workflow.noNodes'), item, options)
+      warnWithCopy(t('workflow.noNodes'))
       return false
     }
     const chosen = keys.length === 1 ? keys : await pick(targets, mode)
     if (!chosen?.length) return false
 
     try {
-      await workflowApi.updateLoraCode(buildUpdateLoraCodeBody(syntaxFor(item, options.strength), mode, chosen, targets))
+      await workflowApi.updateLoraCode(buildUpdateLoraCodeBody(code, mode, chosen, targets))
       toasts.success(t(mode === 'replace' ? 'workflow.replaced' : 'workflow.appended'))
       return true
     } catch (error) {
@@ -111,5 +107,20 @@ export function useSendToWorkflow() {
     }
   }
 
-  return { sendLora, copyLora, syntaxFor }
+  async function sendLora(item: LoraLike, options: LoraActionOptions = {}): Promise<boolean> {
+    await load()
+    return sendCode(syntaxFor(item, options.strength), options.mode ?? 'append', () => void copyLora(item, options))
+  }
+
+  /** Selection mode: all LoRAs in one update, joined with ", " like the classic bulk send. */
+  async function sendLoras(items: LoraLike[], mode: SendMode = 'append'): Promise<boolean> {
+    if (!items.length) return false
+    await load()
+    const code = items.map((item) => syntaxFor(item)).join(', ')
+    return sendCode(code, mode, () =>
+      void copyText(code).then((ok) => (ok ? toasts.success(t('workflow.syntaxCopied')) : toasts.error(t('common.copyFailed')))),
+    )
+  }
+
+  return { sendLora, sendLoras, copyLora, syntaxFor }
 }

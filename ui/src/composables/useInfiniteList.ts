@@ -66,5 +66,14 @@ export function useInfiniteList<T>(fetchPage: PageFetcher<T>) {
     items.value = items.value.map((item) => (predicate(item) ? patch(item) : item))
   }
 
-  return { items, total, page, loading, error, loaded, hasMore, loadMore, reset, updateItem }
+  /** Drop items at once (delete/exclude) and keep the total in step. */
+  function removeWhere(predicate: (item: T) => boolean): number {
+    const before = items.value.length
+    items.value = items.value.filter((item) => !predicate(item))
+    const removed = before - items.value.length
+    total.value = Math.max(0, total.value - removed)
+    return removed
+  }
+
+  return { items, total, page, loading, error, loaded, hasMore, loadMore, reset, updateItem, removeWhere }
 }

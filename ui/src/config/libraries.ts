@@ -10,6 +10,8 @@ export interface SortOption {
 
 export interface LibraryConfig {
   prefix: ModelPrefix
+  /** Singular type name used by settings keys such as default_<singular>_root. */
+  singular: 'lora' | 'checkpoint' | 'embedding'
   title: MessageKey
   /** Classic UI page (relative to the mount root). */
   classicPath: string
@@ -35,6 +37,7 @@ const COMMON_SORTS: SortOption[] = [
 export const LIBRARIES: Record<ModelPrefix, LibraryConfig> = {
   loras: {
     prefix: 'loras',
+    singular: 'lora',
     title: 'nav.loras',
     classicPath: 'loras',
     defaultSort: 'name:asc',
@@ -45,6 +48,7 @@ export const LIBRARIES: Record<ModelPrefix, LibraryConfig> = {
   },
   checkpoints: {
     prefix: 'checkpoints',
+    singular: 'checkpoint',
     title: 'nav.checkpoints',
     classicPath: 'checkpoints',
     defaultSort: 'name:asc',
@@ -55,6 +59,7 @@ export const LIBRARIES: Record<ModelPrefix, LibraryConfig> = {
   },
   embeddings: {
     prefix: 'embeddings',
+    singular: 'embedding',
     title: 'nav.embeddings',
     classicPath: 'embeddings',
     defaultSort: 'name:asc',

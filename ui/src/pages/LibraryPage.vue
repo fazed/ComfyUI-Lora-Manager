@@ -3,14 +3,18 @@
  * Generic model library (LoRAs, checkpoints, embeddings): folder tree,
  * filters, virtualised card grid, selection mode and the detail drawer.
  */
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useTimeoutFn } from '@vueuse/core'
+import { useEventListener, useTimeoutFn } from '@vueuse/core'
 import AppIcon from '@/components/AppIcon.vue'
 import BaseModelQuickFilter from '@/components/BaseModelQuickFilter.vue'
 import FolderTree from '@/components/FolderTree.vue'
+import InputDialog from '@/components/InputDialog.vue'
+import ModelActionMenu, { type ModelAction } from '@/components/ModelActionMenu.vue'
 import ModelCard from '@/components/ModelCard.vue'
 import ModelDrawer from '@/components/ModelDrawer.vue'
+import MoveDialog from '@/components/MoveDialog.vue'
+import OrganizeDialog from '@/components/OrganizeDialog.vue'
 import SearchCombobox from '@/components/SearchCombobox.vue'
 import StateBlock from '@/components/StateBlock.vue'
 import VirtualGrid from '@/components/VirtualGrid.vue'
@@ -28,7 +32,9 @@ import { LOCAL_PER_GROUP, MAX_TAGS } from '@/api/suggestSource'
 import { queryParam } from '@/config/navigation'
 import type { SuggestOption } from '@/utils/suggest'
 import { useSendToWorkflow } from '@/composables/useSendToWorkflow'
+import { useModelActions } from '@/composables/useModelActions'
 import { sortBaseModels } from '@/utils/baseModelChips'
+import { invertSelection, pruneSelection, validateFileName } from '@/utils/modelActions'
 import { withMountPrefix } from '@/utils/basePath'
 import { t, type MessageKey } from '@/i18n'
 
@@ -237,14 +243,117 @@ function setSelectionMode(value: boolean): void {
   if (!value) selected.value = new Set()
 }
 
+const loadedKeys = () => list.items.value.map((item) => item.file_path)
+const selectedItems = computed(() => list.items.value.filter((item) => selected.value.has(item.file_path)))
+
 function selectAllLoaded(): void {
-  selected.value = new Set(list.items.value.map((item) => item.file_path))
+  selected.value = new Set(loadedKeys())
 }
 
+function invertSelected(): void {
+  selected.value = invertSelection(selected.value, loadedKeys())
+}
+
+// Ctrl/Cmd+A selects every loaded card while selection mode is on (not inside text fields or dialogs).
+useEventListener(document, 'keydown', (event: KeyboardEvent) => {
+  if (!selectionMode.value || !(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'a') return
+  const target = event.target as HTMLElement | null
+  if (target?.closest('input, textarea, select, [contenteditable="true"], dialog[open]') || openItem.value) return
+  event.preventDefault()
+  selectAllLoaded()
+})
+
 async function copySelectedNames(): Promise<void> {
-  const names = list.items.value.filter((item) => selected.value.has(item.file_path)).map((item) => item.file_name)
+  const names = selectedItems.value.map((item) => item.file_name)
   if (await copyText(names.join('\n'))) toasts.success(t('common.copied'))
   else toasts.error(t('common.copyFailed'))
+}
+
+// --- Model management actions ------------------------------------------------
+
+function refreshFolders(): void {
+  api.folderTree().then((value) => (tree.value = value)).catch(() => undefined)
+}
+
+const actions = useModelActions(api, {
+  removed: (paths) => {
+    const gone = new Set(paths)
+    list.removeWhere((item) => gone.has(item.file_path))
+    selected.value = pruneSelection(selected.value, paths)
+    if (openItem.value && gone.has(openItem.value.file_path)) openItem.value = null
+  },
+  changed: () => {
+    grid.value?.scrollToTop()
+    // Paths changed (rename/move/undo): keep only selected keys that still exist.
+    void list.reset().then(() => {
+      const present = new Set(loadedKeys())
+      selected.value = new Set([...selected.value].filter((key) => present.has(key)))
+    })
+    refreshFolders()
+  },
+})
+
+const menu = ref<{ item: ModelItem; x: number; y: number; opener: HTMLElement | null } | null>(null)
+const renameTarget = ref<ModelItem | null>(null)
+const moveTargets = ref<ModelItem[] | null>(null)
+const tagTargets = ref<ModelItem[] | null>(null)
+const organizeOpen = ref(false)
+
+function openMenu(item: ModelItem, point: { x: number; y: number }, opener: HTMLElement | null): void {
+  menu.value = { item, ...point, opener }
+}
+
+function closeMenu(reason: 'escape' | 'outside' | 'select'): void {
+  const opener = menu.value?.opener
+  menu.value = null
+  if (reason === 'escape') opener?.focus()
+}
+
+function runAction(action: ModelAction, item: ModelItem): void {
+  if (action === 'rename') renameTarget.value = item
+  else if (action === 'move') moveTargets.value = [item]
+  else if (action === 'exclude') void actions.excludeItem(item)
+  else void actions.deleteItems([item])
+}
+
+const extensionOf = (item: ModelItem) => item.file_path.match(/(\.[^./\\]+)$/)?.[1] ?? ''
+
+async function submitRename(value: string): Promise<string | null> {
+  const item = renameTarget.value
+  if (!item) return null
+  const error = await actions.renameItem(item, value)
+  if (!error && openItem.value?.file_path === item.file_path) {
+    // Keep the drawer on the renamed model (the grid reloads behind it).
+    const name = value.trim()
+    const dir = item.file_path.slice(0, item.file_path.length - item.file_name.length - extensionOf(item).length)
+    openItem.value = { ...item, file_name: name, file_path: `${dir}${name}${extensionOf(item)}` }
+  }
+  return error
+}
+
+function parseTags(value: string): string[] {
+  return [...new Set(value.split(',').map((tag) => tag.trim().toLowerCase()).filter(Boolean))]
+}
+
+async function submitTags(value: string): Promise<string | null> {
+  const items = tagTargets.value ?? []
+  await actions.addTags(items, parseTags(value))
+  return null
+}
+
+function onMoveClosed(): void {
+  moveTargets.value = null
+}
+
+function onOrganized(prefix: ModelPrefix): void {
+  if (prefix === props.prefix) {
+    reload()
+    refreshFolders()
+  }
+}
+
+function bulkSend(event: MouseEvent): void {
+  void workflow.sendLoras(selectedItems.value, event.shiftKey ? 'replace' : 'append')
 }
 </script>
 
@@ -329,6 +438,9 @@ async function copySelectedNames(): Promise<void> {
               :aria-label="t('library.cardSize')"
             />
           </label>
+          <button type="button" class="lm-btn" :title="t('organize.title')" @click="organizeOpen = true">
+            <AppIcon name="wand" :size="16" /><span class="phone:sr-only">{{ t('organize.open') }}</span>
+          </button>
           <button type="button" class="lm-btn" :aria-pressed="selectionMode" @click="setSelectionMode(!selectionMode)">
             <AppIcon :name="selectionMode ? 'check' : 'checkSquare'" :size="16" />
             <span class="phone:hidden">{{ selectionMode ? t('library.selectDone') : t('library.select') }}</span>
@@ -382,18 +494,40 @@ async function copySelectedNames(): Promise<void> {
       <div
         v-if="selectionMode"
         class="mx-6 mb-3 flex flex-wrap items-center gap-2 rounded-md bg-accent-soft px-3 py-2 phone:mx-3"
-        role="region"
-        :aria-label="t('library.selected', { count: selected.size })"
+        role="toolbar"
+        :aria-label="t('selection.toolbar', { count: selected.size })"
       >
-        <strong>{{ t('library.selected', { count: selected.size }) }}</strong>
-        <button type="button" class="lm-btn lm-btn--sm" @click="selectAllLoaded">{{ t('library.selectAllLoaded') }}</button>
-        <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="selected = new Set()">{{ t('library.clearSelection') }}</button>
-        <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="copySelectedNames">
-          <AppIcon name="copy" :size="14" />{{ t('library.copyNames') }}
-        </button>
-        <span class="text-xs text-muted">
-          {{ t('library.bulkClassic') }} <a :href="classicUrl">{{ t('common.openClassic') }}</a>
-        </span>
+        <strong class="tabular-nums" aria-live="polite">{{ t('library.selected', { count: selected.size }) }}</strong>
+        <div class="flex flex-wrap items-center gap-1" role="group" :aria-label="t('library.select')">
+          <button type="button" class="lm-btn lm-btn--sm" :title="t('selection.hint')" @click="selectAllLoaded">{{ t('selection.all') }}</button>
+          <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="selected = new Set()">{{ t('selection.none') }}</button>
+          <button type="button" class="lm-btn lm-btn--sm" :disabled="!list.items.value.length" @click="invertSelected">{{ t('selection.invert') }}</button>
+        </div>
+        <span class="mx-1 h-[20px] hairline-l border-border-strong phone:hidden" aria-hidden="true"></span>
+        <div class="flex flex-wrap items-center gap-1">
+          <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="moveTargets = selectedItems">
+            <AppIcon name="folderMove" :size="14" />{{ t('selection.move') }}
+          </button>
+          <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="tagTargets = selectedItems">
+            <AppIcon name="tag" :size="14" />{{ t('selection.tags') }}
+          </button>
+          <button
+            v-if="config.sendToComfy"
+            type="button"
+            class="lm-btn lm-btn--sm"
+            :disabled="!selected.size"
+            :title="t('card.sendHint')"
+            @click="bulkSend"
+          >
+            <AppIcon name="send" :size="14" />{{ t('selection.send') }}
+          </button>
+          <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="copySelectedNames">
+            <AppIcon name="copy" :size="14" />{{ t('selection.copyNames') }}
+          </button>
+          <button type="button" class="lm-btn lm-btn--sm lm-btn--danger" :disabled="!selected.size" @click="actions.deleteItems(selectedItems)">
+            <AppIcon name="trash" :size="14" />{{ t('selection.delete') }}
+          </button>
+        </div>
       </div>
 
       <StateBlock v-if="list.error.value && !list.items.value.length" kind="error" :message="list.error.value" @retry="reload" />
@@ -426,6 +560,7 @@ async function copySelectedNames(): Promise<void> {
             @send="sendToComfy"
             @toggle-select="toggleSelect"
             @toggle-favorite="toggleFavorite"
+            @menu="openMenu"
           />
         </template>
         <template #footer>
@@ -450,6 +585,47 @@ async function copySelectedNames(): Promise<void> {
       @close="openItem = null"
       @filter-tag="filterByTag"
       @updated="onUpdated"
+      @action="runAction($event, openItem!)"
     />
+
+    <ModelActionMenu
+      v-if="menu"
+      :x="menu.x"
+      :y="menu.y"
+      :label="t('actions.menu', { name: menu.item.model_name || menu.item.file_name })"
+      @select="runAction($event, menu!.item)"
+      @close="closeMenu"
+    />
+    <InputDialog
+      v-if="renameTarget"
+      :title="t('actions.rename.title')"
+      :label="t('actions.rename.label')"
+      :hint="t('actions.rename.hint', { ext: extensionOf(renameTarget) || '.safetensors' })"
+      :initial="renameTarget.file_name"
+      :confirm-label="t('actions.rename.confirm')"
+      :validate="(value) => { const key = validateFileName(value, renameTarget!.file_name); return key ? t(key) : null }"
+      :submit="submitRename"
+      @close="renameTarget = null"
+    />
+    <InputDialog
+      v-if="tagTargets"
+      :title="t('actions.tags.title', { count: tagTargets.length })"
+      :label="t('actions.tags.label')"
+      :hint="t('actions.tags.hint')"
+      initial=""
+      :confirm-label="t('actions.tags.confirm')"
+      :validate="(value) => (parseTags(value).length ? null : t('actions.tags.errorEmpty'))"
+      :submit="submitTags"
+      @close="tagTargets = null"
+    />
+    <MoveDialog
+      v-if="moveTargets"
+      :items="moveTargets"
+      :api="api"
+      :actions="actions"
+      :default-root="String(settings?.[`default_${config.singular}_root`] ?? '')"
+      @close="onMoveClosed"
+    />
+    <OrganizeDialog v-if="organizeOpen" :prefix="prefix" @close="organizeOpen = false" @organized="onOrganized" />
   </div>
 </template>

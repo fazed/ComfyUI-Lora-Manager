@@ -12,6 +12,14 @@ function page<T>(items: T[], pageNo: number, totalPages: number, total = 99): Pa
 }
 
 describe('useInfiniteList', () => {
+  it('removes items in place and lowers the total', async () => {
+    const list = useInfiniteList<string>(async () => page(['a', 'b', 'c'], 1, 1, 10))
+    await list.reset()
+    expect(list.removeWhere((value) => value !== 'b')).toBe(2)
+    expect(list.items.value).toEqual(['b'])
+    expect(list.total.value).toBe(8)
+  })
+
   it('appends pages until the last one', async () => {
     const fetcher = vi.fn(async (p: number) => page([`a${p}`], p, 2))
     const list = useInfiniteList<string>(fetcher)
