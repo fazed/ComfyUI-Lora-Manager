@@ -18,7 +18,9 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   open: [item: ModelItem]
-  'toggle-select': [item: ModelItem]
+  /** shift = Shift+click (select a range from the last toggled card). */
+  /** shift = Shift+click: select a range from the last toggled card. */
+  'toggle-select': [item: ModelItem, shift: boolean]
   'toggle-favorite': [item: ModelItem]
   /** replace = Shift+click (replace the node's LoRAs instead of appending). */
   send: [item: ModelItem, replace: boolean]
@@ -54,8 +56,8 @@ const roundClass = 'inline-grid size-[28px] cursor-pointer place-items-center ro
 /** Hover-revealed corner buttons: always visible on touch devices and while focused. */
 const revealClass = 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 touch:opacity-100'
 
-function activate(): void {
-  if (props.selectionMode) emit('toggle-select', props.item)
+function activate(event: MouseEvent): void {
+  if (props.selectionMode) emit('toggle-select', props.item, event.shiftKey)
   else emit('open', props.item)
 }
 
@@ -146,11 +148,9 @@ function pause(): void {
         <AppIcon name="more" :size="16" />
       </button>
     </div>
-    <div class="pointer-events-none absolute inset-x-0 bottom-0 z-1 bg-scrim-fade px-3 pt-6 pb-3 text-on-scrim">
-      <h3 class="line-clamp-2 text-sm font-bold" :title="displayName">{{ displayName }}</h3>
-      <div v-if="tags.length" class="mt-1 flex max-h-[1.6em] flex-wrap gap-1 overflow-hidden">
-        <span v-for="tag in tags" :key="tag" class="text-xs opacity-85 not-last:after:ml-1 not-last:after:content-['·']">{{ tag }}</span>
-      </div>
+    <div class="pointer-events-none absolute inset-x-0 bottom-0 z-1 bg-scrim-fade px-3 pt-10 pb-3 text-on-scrim">
+      <p class="line-clamp-2 text-sm font-bold" :title="displayName">{{ displayName }}</p>
+      <p v-if="tags.length" class="mt-1 truncate text-xs opacity-85">{{ tags.join(' · ') }}</p>
     </div>
   </article>
 </template>

@@ -15,7 +15,9 @@ import { t } from '@/i18n'
 const props = defineProps<{ item: RecipeItem; selectionMode: boolean; selected: boolean; blurMature: boolean }>()
 const emit = defineEmits<{
   open: [item: RecipeItem]
-  'toggle-select': [item: RecipeItem]
+  /** shift = Shift+click (select a range from the last toggled card). */
+  /** shift = Shift+click: select a range from the last toggled card. */
+  'toggle-select': [item: RecipeItem, shift: boolean]
   'toggle-favorite': [item: RecipeItem]
   send: [item: RecipeItem, replace: boolean]
   menu: [item: RecipeItem, point: { x: number; y: number }, opener: HTMLElement | null]
@@ -44,8 +46,8 @@ const pillClass =
 const roundClass = 'inline-grid size-[28px] cursor-pointer place-items-center rounded-pill'
 const revealClass = 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 touch:opacity-100'
 
-function activate(): void {
-  if (props.selectionMode) emit('toggle-select', props.item)
+function activate(event: MouseEvent): void {
+  if (props.selectionMode) emit('toggle-select', props.item, event.shiftKey)
   else emit('open', props.item)
 }
 
@@ -98,7 +100,7 @@ function openContextMenu(event: MouseEvent): void {
       <template v-else>
         <button
           type="button"
-          :class="[roundClass, 'pointer-events-auto bg-scrim text-on-scrim transition-opacity hover:bg-accent hover:text-on-accent', revealClass]"
+          :class="[roundClass, 'pointer-events-auto bg-scrim text-on-scrim transition-opacity hover:bg-accent hover:text-on-accent phone:hidden', revealClass]"
           :aria-label="t('recipes.send')"
           :title="t('recipes.sendHint')"
           @click.stop="emit('send', item, $event.shiftKey)"
@@ -126,8 +128,8 @@ function openContextMenu(event: MouseEvent): void {
         </button>
       </template>
     </div>
-    <div class="pointer-events-none absolute inset-x-0 bottom-0 z-1 bg-scrim-fade px-3 pt-6 pb-3 text-on-scrim">
-      <h3 class="line-clamp-2 text-sm font-bold" :title="title">{{ title }}</h3>
+    <div class="pointer-events-none absolute inset-x-0 bottom-0 z-1 bg-scrim-fade px-3 pt-10 pb-3 text-on-scrim">
+      <p class="line-clamp-2 text-sm font-bold" :title="title">{{ title }}</p>
       <div class="mt-1 flex items-center gap-1">
         <span :class="[pillClass, 'max-w-full', statusClass]">
           <AppIcon v-if="status.missing || status.deleted" name="alert" :size="12" />{{ statusLabel }}

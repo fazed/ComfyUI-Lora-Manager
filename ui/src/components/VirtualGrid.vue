@@ -8,6 +8,8 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useEventListener, useMutationObserver, useResizeObserver } from '@vueuse/core'
 import { scrollTopToReveal } from '@/utils/drawerNav'
+import { gridColumns } from '@/utils/gridLayout'
+import { t } from '@/i18n'
 
 const props = withDefaults(
   defineProps<{
@@ -17,8 +19,10 @@ const props = withDefaults(
     /** Extra rows rendered above/below the viewport. */
     overscan?: number
     label?: string
+    /** Loading: render placeholder cells with the real columns, gap and aspect instead of items. */
+    skeleton?: boolean
   }>(),
-  { overscan: 2, label: '' },
+  { overscan: 2, label: '', skeleton: false },
 )
 
 const emit = defineEmits<{ 'reach-end': [] }>()
@@ -45,15 +49,8 @@ function readTokens(): void {
   gap.value = Number.isFinite(parsedGap) ? parsedGap : 14
 }
 
-// On phone widths always allow two columns, whatever the card-size slider says.
-const effectiveMinWidth = computed(() =>
-  width.value > 0 && width.value < 640
-    ? Math.min(props.minItemWidth, (width.value - gap.value) / 2)
-    : props.minItemWidth,
-)
-const columns = computed(() =>
-  Math.max(1, Math.floor((width.value + gap.value) / (effectiveMinWidth.value + gap.value))),
-)
+// On phone widths always allow two columns, whatever the card-size slider says (utils/gridLayout.ts).
+const columns = computed(() => gridColumns(width.value, gap.value, props.minItemWidth))
 const itemWidth = computed(() => (width.value - gap.value * (columns.value - 1)) / columns.value)
 const itemHeight = computed(() => Math.max(40, itemWidth.value / aspect.value))
 const rowHeight = computed(() => itemHeight.value + gap.value)
@@ -129,7 +126,19 @@ function scrollToIndex(index: number): void {
   scrollTop.value = next
 }
 
-defineExpose({ scrollToTop, scrollToIndex })
+const scrollOffset = () => scroller.value?.scrollTop ?? 0
+
+/** Restore a saved scroll position (after the list has been re-loaded). */
+function scrollTo(top: number): void {
+  if (!scroller.value) return
+  scroller.value.scrollTop = top
+  scrollTop.value = scroller.value.scrollTop
+}
+
+/** Placeholder cells that fill the viewport at the real column count. */
+const skeletonCount = computed(() => columns.value * (Math.ceil(viewportHeight.value / rowHeight.value) + 1))
+
+defineExpose({ scrollToTop, scrollToIndex, scrollTo, scrollOffset })
 </script>
 
 <template>
@@ -137,10 +146,17 @@ defineExpose({ scrollToTop, scrollToIndex })
     ref="scroller"
     class="min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-6 pb-6 phone:px-3 phone:pb-4"
     :aria-label="label || undefined"
+    :aria-busy="skeleton || undefined"
     role="region"
     @scroll.passive="onScroll"
   >
-    <div class="relative" :style="{ height: `${totalHeight}px` }">
+    <template v-if="skeleton">
+      <p class="sr-only" role="status">{{ t('common.loading') }}</p>
+      <div class="grid gap-card" aria-hidden="true" :style="{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, gridAutoRows: `${itemHeight}px` }">
+        <div v-for="n in skeletonCount" :key="n" class="lm-skeleton rounded-md"></div>
+      </div>
+    </template>
+    <div v-else class="relative" :style="{ height: `${totalHeight}px` }">
       <div
         class="absolute inset-x-0 top-0 grid gap-card will-change-transform"
         role="list"

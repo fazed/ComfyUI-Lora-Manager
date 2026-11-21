@@ -5,7 +5,7 @@
  * the bulk actions the backend supports, the detail drawer and the import,
  * batch import, move and duplicates dialogs.
  */
-import { computed, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useEventListener, useTimeoutFn } from '@vueuse/core'
 import AppIcon from '@/components/AppIcon.vue'
@@ -21,10 +21,11 @@ import RecipeDrawer from '@/components/RecipeDrawer.vue'
 import RecipeDuplicatesDialog from '@/components/RecipeDuplicatesDialog.vue'
 import RecipeImportDialog from '@/components/RecipeImportDialog.vue'
 import RecipeMoveDialog from '@/components/RecipeMoveDialog.vue'
-import SearchCombobox from '@/components/SearchCombobox.vue'
+import LibraryFilterPanel, { type FilterGroup } from '@/components/LibraryFilterPanel.vue'
+import LibrarySelectionBar from '@/components/LibrarySelectionBar.vue'
+import LibraryToolbar from '@/components/LibraryToolbar.vue'
 import StateBlock from '@/components/StateBlock.vue'
 import VirtualGrid from '@/components/VirtualGrid.vue'
-import { LOCAL_PER_GROUP, MAX_TAGS } from '@/api/suggestSource'
 import { recipesApi } from '@/api/recipes'
 import type { CountEntry, FolderTree as FolderTreeData, RecipeItem, TagEntry } from '@/api/types'
 import type { SortOption } from '@/config/libraries'
@@ -34,10 +35,10 @@ import { useDismissLayer } from '@/composables/useDismiss'
 import { useToasts } from '@/composables/useFeedback'
 import { useFolderPanel } from '@/composables/useFolderPanel'
 import { useInfiniteList } from '@/composables/useInfiniteList'
-import { CARD_SIZE_MAX, CARD_SIZE_MIN, useLibraryFilters } from '@/composables/useLibraryFilters'
+import { useLibraryFilters } from '@/composables/useLibraryFilters'
 import { recipeTitle, useRecipeActions } from '@/composables/useRecipeActions'
-import { sortBaseModels } from '@/utils/baseModelChips'
-import { invertSelection, pruneSelection } from '@/utils/modelActions'
+import { clearBrowseView, RESTORE_MAX_ITEMS, saveBrowseView, takeBrowseView, unfilteredTotal, type BrowseViewState } from '@/utils/browse'
+import { hiddenSelectedCount, invertSelection, pruneSelection, selectRange } from '@/utils/modelActions'
 import { missingLoraTargets, missingLorasInput, parseTagInput } from '@/utils/recipes'
 import type { SuggestOption } from '@/utils/suggest'
 import { t, type MessageKey } from '@/i18n'
@@ -59,17 +60,31 @@ const { settings, load: loadSettings } = useAppSettings()
 const filters = useLibraryFilters({ prefix: 'recipes', sortOptions: SORTS, defaultSort: 'date:desc' })
 const { state } = filters
 const missingOnly = ref(false)
+
+// Filters, search, folder and scroll survive a tab switch; a real deep link starts clean.
+const deepLinked = route.query.q !== undefined || route.query.open !== undefined
+if (deepLinked) clearBrowseView('recipes')
+const restored = takeBrowseView('recipes')
+if (restored) {
+  state.search = restored.search
+  state.folder = restored.folder
+  state.baseModels = [...restored.baseModels]
+  state.tags = [...restored.tags]
+  state.favoritesOnly = restored.favoritesOnly
+  missingOnly.value = restored.missingOnly
+}
 const folders = useFolderPanel('recipes')
 const showFolders = folders.open
 const foldersPanel = ref<HTMLElement | null>(null)
-const foldersToggle = ref<HTMLButtonElement | null>(null)
+const toolbar = ref<InstanceType<typeof LibraryToolbar> | null>(null)
+const foldersToggle = () => toolbar.value?.foldersToggle ?? null
 useDismissLayer({
   active: () => showFolders.value && folders.isOverlay(),
   close: (reason) => {
     folders.set(false)
-    if (reason === 'escape') foldersToggle.value?.focus()
+    if (reason === 'escape') foldersToggle()?.focus()
   },
-  outside: () => [foldersPanel.value, foldersToggle.value],
+  outside: () => [foldersPanel.value, foldersToggle()],
 })
 
 const list = useInfiniteList<RecipeItem>((page, signal) =>
@@ -93,7 +108,6 @@ const grid = ref<InstanceType<typeof VirtualGrid> | null>(null)
 const tree = shallowRef<FolderTreeData>({})
 const baseModels = ref<CountEntry[]>([])
 const topTags = ref<TagEntry[]>([])
-const showFilters = ref(false)
 const openItem = ref<RecipeItem | null>(null)
 const selectionMode = ref(false)
 const selected = ref<Set<string>>(new Set())
@@ -104,10 +118,32 @@ const chips = computed(() => [
   ...(missingOnly.value ? [{ key: 'missing', label: t('recipes.filter.missingOnly'), remove: () => (missingOnly.value = false) }] : []),
 ])
 const panelCount = computed(() => filters.panelCount.value + (missingOnly.value ? 1 : 0))
-const filterGroups = computed(() => [
-  { field: 'baseModels' as const, title: 'library.baseModels' as MessageKey, entries: sortBaseModels(baseModels.value) },
+const filterGroups = computed<FilterGroup[]>(() => [
+  // The quick-filter row already offers the base models: do not repeat the group.
   { field: 'tags' as const, title: 'library.tags' as MessageKey, entries: topTags.value.map((entry) => ({ name: entry.tag, count: entry.count })) },
 ])
+
+function clearAll(): void {
+  filters.clear()
+  missingOnly.value = false
+}
+
+// "N of total" while filtered: the total is the count seen the last time nothing was filtered.
+const knownTotal = ref<number | null>(null)
+watch(
+  () => [list.loaded.value, list.total.value, chips.value.length] as const,
+  ([loaded, total, active]) => {
+    if (loaded && !active) knownTotal.value = total
+  },
+  { immediate: true },
+)
+const countText = computed(() => {
+  const count = list.total.value
+  const all = unfilteredTotal(count, knownTotal.value, chips.value.length > 0)
+  return all === null
+    ? t('recipes.count', { count: count.toLocaleString() })
+    : t('recipes.countOf', { count: count.toLocaleString(), total: all.toLocaleString() })
+})
 
 function refreshMeta(): void {
   recipesApi.folderTree().then((value) => (tree.value = value)).catch(() => undefined)
@@ -125,8 +161,31 @@ function reload(): void {
 }
 
 watch([filters.signature, missingOnly], reload)
+async function restoreScroll(view: BrowseViewState): Promise<void> {
+  // The list restarts at page 1: load as many pages as were loaded before, then jump back.
+  for (let guard = 0; guard < 20 && list.hasMore.value && !list.error.value && list.items.value.length < Math.min(view.loadedCount, RESTORE_MAX_ITEMS); guard++) {
+    await list.loadMore()
+  }
+  await nextTick()
+  grid.value?.scrollTo(view.scrollTop)
+}
+
+onBeforeUnmount(() => {
+  saveBrowseView('recipes', {
+    search: state.search,
+    folder: state.folder,
+    baseModels: state.baseModels,
+    tags: state.tags,
+    favoritesOnly: state.favoritesOnly,
+    updatesOnly: false,
+    missingOnly: missingOnly.value,
+    scrollTop: grid.value?.scrollOffset() ?? 0,
+    loadedCount: list.items.value.length,
+  })
+})
+
 onMounted(() => {
-  void list.reset()
+  void list.reset().then(() => (restored ? restoreScroll(restored) : undefined))
   void loadSettings()
   refreshMeta()
 })
@@ -215,19 +274,29 @@ const actions = useRecipeActions({
   },
 })
 
-function toggleSelect(item: RecipeItem): void {
+/** Last toggled card: the start of a Shift+click range. */
+let anchor: string | null = null
+
+function toggleSelect(item: RecipeItem, range = false): void {
   const next = new Set(selected.value)
-  if (next.has(item.id)) next.delete(item.id)
+  if (range && anchor) for (const inRange of selectRange(loadedKeys(), anchor, item.id)) next.add(inRange)
+  else if (next.has(item.id)) next.delete(item.id)
   else next.add(item.id)
+  anchor = item.id
   selected.value = next
 }
 
 function setSelectionMode(value: boolean): void {
   selectionMode.value = value
+  anchor = null
   if (!value) selected.value = new Set()
 }
 
+// Escape leaves selection mode (only when no drawer, dialog or menu is above it).
+useDismissLayer({ active: () => selectionMode.value, close: () => setSelectionMode(false) })
+
 const loadedKeys = () => list.items.value.map((item) => item.id)
+const hiddenSelected = computed(() => hiddenSelectedCount(selected.value, loadedKeys()))
 const selectedItems = computed(() => list.items.value.filter((item) => selected.value.has(item.id)))
 
 useEventListener(document, 'keydown', (event: KeyboardEvent) => {
@@ -340,134 +409,82 @@ function filterByTag(tag: string): void {
     </aside>
 
     <section class="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div class="lm-toolbar pb-3 phone:pb-2">
-        <div class="lm-toolbar-title">
-          <h1>{{ t('recipes.title') }}</h1>
-          <span class="text-sm text-muted tabular-nums" aria-live="polite">{{ t('recipes.count', { count: list.total.value.toLocaleString() }) }}</span>
-        </div>
-        <div class="flex flex-wrap items-center gap-2 phone:w-full">
-          <SearchCombobox
-            id="recipe-search"
-            v-model="searchText"
-            scope="recipes"
-            class="w-[260px] narrow:w-[200px] phone:w-full"
-            :label="t('library.search', { section: t('nav.recipes') })"
-            :placeholder="t('library.searchPlaceholder', { section: t('nav.recipes') })"
-            :max-per-group="LOCAL_PER_GROUP"
-            :max-tags="MAX_TAGS"
-            :active-tags="state.tags"
-            panel-class="left-0 top-[calc(100%+var(--lm-space-1))] w-[min(420px,calc(100vw-24px))] phone:right-0 phone:w-auto"
-            @commit="commitSearch"
-            @choose="onSearchChoose"
-          />
-          <button type="button" class="lm-btn lm-btn--primary" @click="importOpen = true">
-            <AppIcon name="plus" :size="16" /><span class="phone:sr-only">{{ t('recipes.import.open') }}</span>
-          </button>
-          <button
-            ref="foldersToggle"
-            type="button"
-            class="lm-btn"
-            :class="{ 'lm-chip--active': showFolders }"
-            :aria-expanded="showFolders"
-            aria-controls="folders-recipes"
-            :title="t(showFolders ? 'library.hideFolders' : 'library.showFolders')"
-            @click="folders.toggle()"
-          >
-            <AppIcon name="folder" :size="16" /><span class="phone:sr-only">{{ t('library.folders') }}</span>
-            <span v-if="state.folder && !showFolders" class="size-[6px] rounded-pill bg-accent" aria-hidden="true"></span>
-          </button>
-          <label class="sr-only" for="recipe-sort">{{ t('library.sort') }}</label>
-          <select id="recipe-sort" v-model="filters.sort.value" class="lm-select w-auto min-w-[150px] phone:min-w-0 phone:flex-1">
-            <option v-for="option in SORTS" :key="option.value" :value="option.value">{{ t(option.label) }}</option>
-          </select>
-          <button type="button" class="lm-btn" :aria-expanded="showFilters" aria-controls="recipe-filters" @click="showFilters = !showFilters">
-            <AppIcon name="filter" :size="16" /><span class="phone:sr-only">{{ t('library.filters') }}</span>
-            <span v-if="panelCount" class="lm-badge lm-badge--accent">{{ panelCount }}</span>
-          </button>
-          <label class="inline-flex items-center gap-2 px-2 text-muted phone:hidden">
-            <span class="sr-only">{{ t('library.cardSize') }}</span>
-            <AppIcon name="grid" :size="16" />
-            <input v-model.number="filters.cardSize.value" class="w-[110px] accent-accent" type="range" :min="CARD_SIZE_MIN" :max="CARD_SIZE_MAX" step="10" :aria-label="t('library.cardSize')" />
-          </label>
-          <MenuButton :label="t('tools.menu')" icon="wrench" align="right" :items="toolItems" @select="runTool" />
-          <button type="button" class="lm-btn" :aria-pressed="selectionMode" @click="setSelectionMode(!selectionMode)">
-            <AppIcon :name="selectionMode ? 'check' : 'checkSquare'" :size="16" />
-            <span class="phone:sr-only">{{ selectionMode ? t('library.selectDone') : t('library.select') }}</span>
-          </button>
-        </div>
-      </div>
-
-      <BaseModelQuickFilter
-        :entries="baseModels"
-        :selected="state.baseModels"
-        :limit="8"
+      <LibraryToolbar
+        ref="toolbar"
+        v-model:search="searchText"
+        v-model:sort="filters.sort.value"
+        v-model:card-size="filters.cardSize.value"
+        :title="t('recipes.title')"
+        :count-text="countText"
+        search-id="recipe-search"
+        search-scope="recipes"
+        :search-label="t('library.search', { section: t('nav.recipes') })"
+        :search-placeholder="t('library.searchPlaceholder', { section: t('nav.recipes') })"
+        :active-tags="state.tags"
         id-prefix="recipes"
-        @toggle="filters.toggle('baseModels', $event)"
-        @clear="filters.clearList('baseModels')"
-      />
-
-      <div v-if="showFilters" id="recipe-filters" class="lm-panel mx-6 mb-3 grid gap-4 p-4 phone:mx-3">
-        <div v-for="group in filterGroups" :key="group.field">
-          <h3 class="lm-overline mb-2">{{ t(group.title) }}</h3>
-          <div class="flex max-h-[120px] flex-wrap gap-1 overflow-y-auto">
-            <button
-              v-for="entry in group.entries"
-              :key="entry.name"
-              type="button"
-              class="lm-chip"
-              :class="{ 'lm-chip--active': state[group.field].includes(entry.name) }"
-              :aria-pressed="state[group.field].includes(entry.name)"
-              @click="filters.toggle(group.field, entry.name)"
-            >
-              {{ entry.name }} <span class="lm-muted">{{ entry.count }}</span>
-            </button>
-            <p v-if="!group.entries.length" class="text-sm text-muted">{{ t('common.none') }}</p>
-          </div>
-        </div>
-        <div class="flex flex-wrap gap-4">
-          <label><input v-model="state.favoritesOnly" class="accent-accent" type="checkbox" /> {{ t('library.favoritesOnly') }}</label>
-          <label><input v-model="missingOnly" class="accent-accent" type="checkbox" /> {{ t('recipes.filter.missingOnly') }}</label>
-        </div>
-      </div>
-
-      <div v-if="chips.length" class="flex flex-wrap items-center gap-2 px-6 pb-3 phone:px-3" :aria-label="t('library.filters')">
-        <span v-for="chip in chips" :key="chip.key" class="lm-chip lm-chip--active">
-          {{ chip.label }}
-          <button type="button" class="lm-icon-btn" :aria-label="t('library.removeFilter', { name: chip.label })" @click="chip.remove()">
-            <AppIcon name="close" :size="12" />
-          </button>
-        </span>
-        <button type="button" class="lm-btn lm-btn--ghost lm-btn--sm" @click="filters.clear(); missingOnly = false">{{ t('library.clearFilters') }}</button>
-      </div>
-
-      <div
-        v-if="selectionMode"
-        class="mx-6 mb-3 flex flex-wrap items-center gap-2 rounded-md bg-accent-soft px-3 py-2 phone:mx-3"
-        role="toolbar"
-        :aria-label="t('selection.toolbar', { count: selected.size })"
+        :sort-options="SORTS"
+        folders-id="folders-recipes"
+        :folders-open="showFolders"
+        :folder-active="!!state.folder"
+        :filter-count="panelCount"
+        :chips="chips"
+        :selection-mode="selectionMode"
+        :tool-items="toolItems"
+        :shortcuts="!openItem"
+        @commit="commitSearch"
+        @choose="onSearchChoose"
+        @toggle-folders="folders.toggle()"
+        @toggle-select="setSelectionMode(!selectionMode)"
+        @tool="runTool"
+        @clear-filters="clearAll"
       >
-        <strong class="tabular-nums" aria-live="polite">{{ t('library.selected', { count: selected.size }) }}</strong>
-        <div class="flex flex-wrap items-center gap-1" role="group" :aria-label="t('library.select')">
-          <button type="button" class="lm-btn lm-btn--sm" :title="t('recipes.selection.hint')" @click="selected = new Set(loadedKeys())">{{ t('selection.all') }}</button>
-          <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="selected = new Set()">{{ t('selection.none') }}</button>
-          <button type="button" class="lm-btn lm-btn--sm" :disabled="!list.items.value.length" @click="selected = invertSelection(selected, loadedKeys())">{{ t('selection.invert') }}</button>
-        </div>
-        <span class="mx-1 h-[20px] hairline-l border-border-strong phone:hidden" aria-hidden="true"></span>
-        <div class="flex flex-wrap items-center gap-1">
-          <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="moveTargets = selectedItems">
-            <AppIcon name="folderMove" :size="14" />{{ t('selection.move') }}
+        <template #leading>
+          <button type="button" class="lm-btn lm-btn--primary flex-none phone:min-h-touch" @click="importOpen = true">
+            <AppIcon name="plus" :size="16" />{{ t('recipes.import.open') }}
           </button>
-          <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="tagTargets = selectedItems">
-            <AppIcon name="tag" :size="14" />{{ t('selection.tags') }}
-          </button>
-          <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="downloadMissing(selectedItems)">
-            <AppIcon name="download" :size="14" />{{ t('recipes.missing.downloadShort') }}
-          </button>
-          <button type="button" class="lm-btn lm-btn--sm lm-btn--danger" :disabled="!selected.size" @click="actions.deleteRecipes(selectedItems)">
-            <AppIcon name="trash" :size="14" />{{ t('selection.delete') }}
-          </button>
-        </div>
-      </div>
+        </template>
+        <template #quick>
+          <BaseModelQuickFilter
+            :entries="baseModels"
+            :selected="state.baseModels"
+            :limit="8"
+            id-prefix="recipes"
+            @toggle="filters.toggle('baseModels', $event)"
+            @clear="filters.clearList('baseModels')"
+          />
+        </template>
+        <template #filters>
+          <LibraryFilterPanel :groups="filterGroups" :selected="state" id-prefix="recipes" @toggle="filters.toggle">
+            <label><input v-model="state.favoritesOnly" class="accent-accent" type="checkbox" /> {{ t('library.favoritesOnly') }}</label>
+            <label><input v-model="missingOnly" class="accent-accent" type="checkbox" /> {{ t('recipes.filter.missingOnly') }}</label>
+          </LibraryFilterPanel>
+        </template>
+        <template #selection>
+          <LibrarySelectionBar
+            :count="selected.size"
+            :hidden="hiddenSelected"
+            :has-items="!!list.items.value.length"
+            :hint="`${t('recipes.selection.hint')} ${t('selection.rangeHint')}`"
+            @all="selected = new Set(loadedKeys())"
+            @none="selected = new Set()"
+            @invert="selected = invertSelection(selected, loadedKeys())"
+            @done="setSelectionMode(false)"
+          >
+            <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="moveTargets = selectedItems">
+              <AppIcon name="folderMove" :size="14" />{{ t('selection.move') }}
+            </button>
+            <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="tagTargets = selectedItems">
+              <AppIcon name="tag" :size="14" />{{ t('selection.tags') }}
+            </button>
+            <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="downloadMissing(selectedItems)">
+              <AppIcon name="download" :size="14" />{{ t('recipes.missing.downloadShort') }}
+            </button>
+            <button type="button" class="lm-btn lm-btn--sm lm-btn--danger" :disabled="!selected.size" @click="actions.deleteRecipes(selectedItems)">
+              <AppIcon name="trash" :size="14" />{{ t('selection.delete') }}
+            </button>
+          </LibrarySelectionBar>
+        </template>
+      </LibraryToolbar>
 
       <StateBlock v-if="list.error.value && !list.items.value.length" kind="error" :message="list.error.value" @retry="reload" />
       <StateBlock
@@ -476,14 +493,14 @@ function filterByTag(tag: string): void {
         icon="book"
         :title="chips.length ? t('library.empty') : t('recipes.empty')"
         :message="chips.length ? '' : t('recipes.emptyHint')"
-      />
-      <div v-else-if="!list.loaded.value" class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-card overflow-hidden px-6 phone:px-3" aria-hidden="true">
-        <div v-for="n in 12" :key="n" class="lm-skeleton aspect-card rounded-md"></div>
-      </div>
+      >
+        <button v-if="chips.length" type="button" class="lm-btn phone:min-h-touch" @click="clearAll">{{ t('library.clearFilters') }}</button>
+      </StateBlock>
 
       <VirtualGrid
-        v-show="list.items.value.length"
+        v-show="list.items.value.length || (!list.loaded.value && !list.error.value)"
         ref="grid"
+        :skeleton="!list.loaded.value && !list.error.value"
         :items="list.items.value"
         :item-key="(item: RecipeItem) => item.id"
         :min-item-width="filters.cardSize.value"
@@ -508,6 +525,9 @@ function filterByTag(tag: string): void {
           <p v-else-if="list.error.value && list.items.value.length" class="mt-4 flex items-center justify-center gap-2 text-sm">
             <span class="lm-error-text">{{ list.error.value }}</span>
             <button type="button" class="lm-btn lm-btn--sm" @click="list.loadMore()">{{ t('common.retry') }}</button>
+          </p>
+          <p v-else-if="list.loaded.value && !list.hasMore.value && list.items.value.length" class="mt-4 text-center text-sm text-muted">
+            {{ t('recipes.end', { count: list.total.value.toLocaleString() }) }}
           </p>
         </template>
       </VirtualGrid>

@@ -7,11 +7,13 @@
  */
 
 import { b2bMessages } from './b2bMessages'
+import { browseMessages } from './browseMessages'
 import { drawerMessages } from './drawerMessages'
 import { settingsUxMessages } from './settingsUxMessages'
 
 export const messages = {
   ...b2bMessages,
+  ...browseMessages,
   ...drawerMessages,
   ...settingsUxMessages,
   'app.title': 'LoRA Manager',

@@ -3,7 +3,7 @@
  * Generic model library (LoRAs, checkpoints, embeddings): folder tree,
  * filters, virtualised card grid, selection mode and the detail drawer.
  */
-import { computed, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { until, useEventListener, useTimeoutFn } from '@vueuse/core'
 import AppIcon from '@/components/AppIcon.vue'
@@ -22,7 +22,9 @@ import ModelCard from '@/components/ModelCard.vue'
 import ModelDrawer from '@/components/ModelDrawer.vue'
 import MoveDialog from '@/components/MoveDialog.vue'
 import OrganizeDialog from '@/components/OrganizeDialog.vue'
-import SearchCombobox from '@/components/SearchCombobox.vue'
+import LibraryFilterPanel, { type FilterGroup } from '@/components/LibraryFilterPanel.vue'
+import LibrarySelectionBar from '@/components/LibrarySelectionBar.vue'
+import LibraryToolbar from '@/components/LibraryToolbar.vue'
 import StateBlock from '@/components/StateBlock.vue'
 import VirtualGrid from '@/components/VirtualGrid.vue'
 import { createModelApi } from '@/api/endpoints'
@@ -33,9 +35,8 @@ import { useDismissLayer } from '@/composables/useDismiss'
 import { copyText, useToasts } from '@/composables/useFeedback'
 import { useFolderPanel } from '@/composables/useFolderPanel'
 import { useInfiniteList } from '@/composables/useInfiniteList'
-import { CARD_SIZE_MAX, CARD_SIZE_MIN, useLibraryFilters } from '@/composables/useLibraryFilters'
+import { useLibraryFilters } from '@/composables/useLibraryFilters'
 import { takeStashedItem } from '@/composables/useSearch'
-import { LOCAL_PER_GROUP, MAX_TAGS } from '@/api/suggestSource'
 import { queryParam } from '@/config/navigation'
 import type { SuggestOption } from '@/utils/suggest'
 import { useSendToWorkflow } from '@/composables/useSendToWorkflow'
@@ -45,7 +46,8 @@ import type { TemplateScope } from '@/api/endpoints'
 import { sortBaseModels } from '@/utils/baseModelChips'
 import { computeNav, type NavDirection } from '@/utils/drawerNav'
 import { isVideoUrl } from '@/utils/format'
-import { invertSelection, pruneSelection, validateFileName } from '@/utils/modelActions'
+import { clearBrowseView, RESTORE_MAX_ITEMS, saveBrowseView, takeBrowseView, unfilteredTotal, type BrowseViewState } from '@/utils/browse'
+import { hiddenSelectedCount, invertSelection, pruneSelection, selectRange, validateFileName } from '@/utils/modelActions'
 import { withMountPrefix } from '@/utils/basePath'
 import { t, type MessageKey } from '@/i18n'
 
@@ -61,19 +63,33 @@ const router = useRouter()
 const { settings, load: loadSettings } = useAppSettings()
 const filters = useLibraryFilters(config)
 const { state } = filters
+
+// Filters, search, folder and scroll survive a tab switch; a real deep link starts clean.
+const deepLinked = route.query.q !== undefined || route.query.tag !== undefined || route.query.open !== undefined
+if (deepLinked) clearBrowseView(props.prefix)
+const restored = takeBrowseView(props.prefix)
+if (restored) {
+  state.search = restored.search
+  state.folder = restored.folder
+  state.baseModels = [...restored.baseModels]
+  state.tags = [...restored.tags]
+  state.favoritesOnly = restored.favoritesOnly
+  state.updatesOnly = restored.updatesOnly
+}
 const folders = useFolderPanel(props.prefix)
 const showFolders = folders.open
 const foldersId = `folders-${props.prefix}`
 const foldersPanel = ref<HTMLElement | null>(null)
-const foldersToggle = ref<HTMLButtonElement | null>(null)
+const toolbar = ref<InstanceType<typeof LibraryToolbar> | null>(null)
+const foldersToggle = () => toolbar.value?.foldersToggle ?? null
 // On narrow viewports the folder panel overlays the grid: outside pointerdown or Escape closes it.
 useDismissLayer({
   active: () => showFolders.value && folders.isOverlay(),
   close: (reason) => {
     folders.set(false)
-    if (reason === 'escape') foldersToggle.value?.focus()
+    if (reason === 'escape') foldersToggle()?.focus()
   },
-  outside: () => [foldersPanel.value, foldersToggle.value],
+  outside: () => [foldersPanel.value, foldersToggle()],
 })
 const workflow = useSendToWorkflow()
 
@@ -98,7 +114,6 @@ const grid = ref<InstanceType<typeof VirtualGrid> | null>(null)
 const tree = shallowRef<FolderTreeData>({})
 const baseModels = ref<CountEntry[]>([])
 const topTags = ref<TagEntry[]>([])
-const showFilters = ref(false)
 const openItem = ref<ModelItem | null>(null)
 const selectionMode = ref(false)
 const selected = ref<Set<string>>(new Set())
@@ -107,14 +122,34 @@ const blurMature = computed(() => !!settings.value?.blur_mature_content)
 const civitaiHost = computed(() => String(settings.value?.civitai_host || 'civitai.com'))
 
 /** The two chip groups of the filter panel. */
-const filterGroups = computed(() => [
-  { field: 'baseModels' as const, title: 'library.baseModels' as MessageKey, entries: sortBaseModels(baseModels.value) },
+const filterGroups = computed<FilterGroup[]>(() => [
+  // The quick-filter row already offers the base models: do not repeat the group.
+  ...(config.quickBaseModels > 0
+    ? []
+    : [{ field: 'baseModels' as const, title: 'library.baseModels' as MessageKey, entries: sortBaseModels(baseModels.value) }]),
   {
     field: 'tags' as const,
     title: 'library.tags' as MessageKey,
     entries: topTags.value.map((entry) => ({ name: entry.tag, count: entry.count })),
   },
 ])
+
+// "N of total" while filtered: the total is the count seen the last time nothing was filtered.
+const knownTotal = ref<number | null>(null)
+watch(
+  () => [list.loaded.value, list.total.value, filters.chips.value.length] as const,
+  ([loaded, total, chips]) => {
+    if (loaded && !chips) knownTotal.value = total
+  },
+  { immediate: true },
+)
+const countText = computed(() => {
+  const count = list.total.value
+  const all = unfilteredTotal(count, knownTotal.value, filters.chips.value.length > 0)
+  return all === null
+    ? t('library.count', { count: count.toLocaleString() })
+    : t('library.countOf', { count: count.toLocaleString(), total: all.toLocaleString() })
+})
 
 function reload(): void {
   grid.value?.scrollToTop()
@@ -123,8 +158,31 @@ function reload(): void {
 
 watch(filters.signature, reload)
 
+async function restoreScroll(view: BrowseViewState): Promise<void> {
+  // The list restarts at page 1: load as many pages as were loaded before, then jump back.
+  for (let guard = 0; guard < 20 && list.hasMore.value && !list.error.value && list.items.value.length < Math.min(view.loadedCount, RESTORE_MAX_ITEMS); guard++) {
+    await list.loadMore()
+  }
+  await nextTick()
+  grid.value?.scrollTo(view.scrollTop)
+}
+
+onBeforeUnmount(() => {
+  saveBrowseView(props.prefix, {
+    search: state.search,
+    folder: state.folder,
+    baseModels: state.baseModels,
+    tags: state.tags,
+    favoritesOnly: state.favoritesOnly,
+    updatesOnly: state.updatesOnly,
+    missingOnly: false,
+    scrollTop: grid.value?.scrollOffset() ?? 0,
+    loadedCount: list.items.value.length,
+  })
+})
+
 onMounted(() => {
-  void list.reset()
+  void list.reset().then(() => (restored ? restoreScroll(restored) : undefined))
   void loadSettings()
   api.folderTree().then((value) => (tree.value = value)).catch(() => undefined)
   api.baseModels(100).then((value) => (baseModels.value = value)).catch(() => undefined)
@@ -286,19 +344,30 @@ function sendToComfy(item: ModelItem, replace: boolean): void {
   void workflow.sendLora(item, { mode: replace ? 'replace' : 'append' })
 }
 
-function toggleSelect(item: ModelItem): void {
+/** Last toggled card: the start of a Shift+click range. */
+let anchor: string | null = null
+
+function toggleSelect(item: ModelItem, range = false): void {
+  const key = item.file_path
   const next = new Set(selected.value)
-  if (next.has(item.file_path)) next.delete(item.file_path)
-  else next.add(item.file_path)
+  if (range && anchor) for (const inRange of selectRange(loadedKeys(), anchor, key)) next.add(inRange)
+  else if (next.has(key)) next.delete(key)
+  else next.add(key)
+  anchor = key
   selected.value = next
 }
 
 function setSelectionMode(value: boolean): void {
   selectionMode.value = value
+  anchor = null
   if (!value) selected.value = new Set()
 }
 
+// Escape leaves selection mode (only when no drawer, dialog or menu is above it).
+useDismissLayer({ active: () => selectionMode.value, close: () => setSelectionMode(false) })
+
 const loadedKeys = () => list.items.value.map((item) => item.file_path)
+const hiddenSelected = computed(() => hiddenSelectedCount(selected.value, loadedKeys()))
 const selectedItems = computed(() => list.items.value.filter((item) => selected.value.has(item.file_path)))
 
 function selectAllLoaded(): void {
@@ -389,6 +458,7 @@ const filenameTemplate = computed(() => {
 })
 
 const toolItems = computed<MenuEntry[]>(() => [
+  { id: 'organize', label: t('organize.open'), icon: 'wand' },
   { id: 'download', label: t('download.open'), icon: 'download' },
   { id: 'duplicates', label: t('tools.duplicates'), icon: 'files' },
   { id: 'excluded', label: t('tools.excluded'), icon: 'eyeOff' },
@@ -396,7 +466,8 @@ const toolItems = computed<MenuEntry[]>(() => [
 ])
 
 function runTool(id: string): void {
-  if (id === 'download') downloadInput.value = ''
+  if (id === 'organize') organizeOpen.value = true
+  else if (id === 'download') downloadInput.value = ''
   else if (id === 'duplicates') duplicatesOpen.value = true
   else if (id === 'excluded') excludedOpen.value = true
   else if (id === 'fetchAll') void tools.fetchAll(t(config.title))
@@ -569,174 +640,106 @@ function bulkSend(event: MouseEvent): void {
     </aside>
 
     <section class="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div class="lm-toolbar pb-3 phone:pb-2">
-        <div class="lm-toolbar-title">
-          <h1>{{ t(config.title) }}</h1>
-          <span class="text-sm text-muted tabular-nums" aria-live="polite">{{ t('library.count', { count: list.total.value.toLocaleString() }) }}</span>
-        </div>
-        <div class="flex flex-wrap items-center gap-2 phone:w-full">
-          <SearchCombobox
-            :id="`library-search-${prefix}`"
-            v-model="searchText"
-            :scope="prefix"
-            class="w-[260px] narrow:w-[200px] phone:w-full"
-            :label="t('library.search', { section: t(config.title) })"
-            :placeholder="t('library.searchPlaceholder', { section: t(config.title) })"
-            :max-per-group="LOCAL_PER_GROUP"
-            :max-tags="MAX_TAGS"
-            :active-tags="state.tags"
-            panel-class="left-0 top-[calc(100%+var(--lm-space-1))] w-[min(420px,calc(100vw-24px))] phone:right-0 phone:w-auto"
-            @commit="commitSearch"
-            @choose="onSearchChoose"
-          />
-          <button
-            ref="foldersToggle"
-            type="button"
-            class="lm-btn"
-            :class="{ 'lm-chip--active': showFolders }"
-            :aria-expanded="showFolders"
-            :aria-controls="foldersId"
-            :title="t(showFolders ? 'library.hideFolders' : 'library.showFolders')"
-            @click="folders.toggle()"
-          >
-            <AppIcon name="folder" :size="16" /><span class="phone:sr-only">{{ t('library.folders') }}</span>
-            <span v-if="state.folder && !showFolders" class="size-[6px] rounded-pill bg-accent" aria-hidden="true"></span>
-          </button>
-          <label class="sr-only" :for="`sort-${prefix}`">{{ t('library.sort') }}</label>
-          <select :id="`sort-${prefix}`" v-model="filters.sort.value" class="lm-select w-auto min-w-[150px] phone:min-w-0 phone:flex-1">
-            <option v-for="option in config.sortOptions" :key="option.value" :value="option.value">{{ t(option.label) }}</option>
-          </select>
-          <button type="button" class="lm-btn" :aria-expanded="showFilters" aria-controls="library-filters" @click="showFilters = !showFilters">
-            <AppIcon name="filter" :size="16" /><span class="phone:sr-only">{{ t('library.filters') }}</span>
-            <span v-if="filters.panelCount.value" class="lm-badge lm-badge--accent">{{ filters.panelCount.value }}</span>
-          </button>
-          <label class="inline-flex items-center gap-2 px-2 text-muted phone:hidden">
-            <span class="sr-only">{{ t('library.cardSize') }}</span>
-            <AppIcon name="grid" :size="16" />
-            <input
-              v-model.number="filters.cardSize.value"
-              class="w-[110px] accent-accent"
-              type="range"
-              :min="CARD_SIZE_MIN"
-              :max="CARD_SIZE_MAX"
-              step="10"
-              :aria-label="t('library.cardSize')"
-            />
-          </label>
-          <button type="button" class="lm-btn" @click="organizeOpen = true">
-            <AppIcon name="wand" :size="16" /><span class="phone:sr-only">{{ t('organize.open') }}</span>
-          </button>
-          <MenuButton :label="t('tools.menu')" icon="wrench" align="right" :items="toolItems" @select="runTool" />
-          <button type="button" class="lm-btn" :aria-pressed="selectionMode" @click="setSelectionMode(!selectionMode)">
-            <AppIcon :name="selectionMode ? 'check' : 'checkSquare'" :size="16" />
-            <span class="phone:sr-only">{{ selectionMode ? t('library.selectDone') : t('library.select') }}</span>
-          </button>
-        </div>
-      </div>
-
-      <BaseModelQuickFilter
-        v-if="config.quickBaseModels > 0"
-        :entries="baseModels"
-        :selected="state.baseModels"
-        :limit="config.quickBaseModels"
+      <LibraryToolbar
+        ref="toolbar"
+        v-model:search="searchText"
+        v-model:sort="filters.sort.value"
+        v-model:card-size="filters.cardSize.value"
+        :title="t(config.title)"
+        :count-text="countText"
+        :search-id="`library-search-${prefix}`"
+        :search-scope="prefix"
+        :search-label="t('library.search', { section: t(config.title) })"
+        :search-placeholder="t('library.searchPlaceholder', { section: t(config.title) })"
+        :active-tags="state.tags"
         :id-prefix="prefix"
-        @toggle="filters.toggle('baseModels', $event)"
-        @clear="filters.clearList('baseModels')"
-      />
-
-      <div v-if="showFilters" id="library-filters" class="lm-panel mx-6 mb-3 grid gap-4 p-4 phone:mx-3">
-        <div v-for="group in filterGroups" :key="group.field">
-          <h3 class="lm-overline mb-2">{{ t(group.title) }}</h3>
-          <div class="flex max-h-[120px] flex-wrap gap-1 overflow-y-auto">
-            <button
-              v-for="entry in group.entries"
-              :key="entry.name"
-              type="button"
-              class="lm-chip"
-              :class="{ 'lm-chip--active': state[group.field].includes(entry.name) }"
-              :aria-pressed="state[group.field].includes(entry.name)"
-              @click="filters.toggle(group.field, entry.name)"
-            >
-              {{ entry.name }} <span class="lm-muted">{{ entry.count }}</span>
-            </button>
-          </div>
-        </div>
-        <div class="flex flex-wrap gap-4">
-          <label><input v-model="state.favoritesOnly" class="accent-accent" type="checkbox" /> {{ t('library.favoritesOnly') }}</label>
-          <label v-if="config.supportsUpdates"><input v-model="state.updatesOnly" class="accent-accent" type="checkbox" /> {{ t('library.updatesOnly') }}</label>
-        </div>
-      </div>
-
-      <div v-if="filters.chips.value.length" class="flex flex-wrap items-center gap-2 px-6 pb-3 phone:px-3" :aria-label="t('library.filters')">
-        <span v-for="chip in filters.chips.value" :key="chip.key" class="lm-chip lm-chip--active">
-          {{ chip.label }}
-          <button type="button" class="lm-icon-btn" :aria-label="t('library.removeFilter', { name: chip.label })" @click="chip.remove()">
-            <AppIcon name="close" :size="12" />
-          </button>
-        </span>
-        <button type="button" class="lm-btn lm-btn--ghost lm-btn--sm" @click="filters.clear()">{{ t('library.clearFilters') }}</button>
-      </div>
-
-      <div
-        v-if="selectionMode"
-        class="mx-6 mb-3 flex flex-wrap items-center gap-2 rounded-md bg-accent-soft px-3 py-2 phone:mx-3"
-        role="toolbar"
-        :aria-label="t('selection.toolbar', { count: selected.size })"
+        :sort-options="config.sortOptions"
+        :folders-id="foldersId"
+        :folders-open="showFolders"
+        :folder-active="!!state.folder"
+        :filter-count="filters.panelCount.value"
+        :chips="filters.chips.value"
+        :selection-mode="selectionMode"
+        :tool-items="toolItems"
+        :shortcuts="!openItem"
+        @commit="commitSearch"
+        @choose="onSearchChoose"
+        @toggle-folders="folders.toggle()"
+        @toggle-select="setSelectionMode(!selectionMode)"
+        @tool="runTool"
+        @clear-filters="filters.clear()"
       >
-        <strong class="tabular-nums" aria-live="polite">{{ t('library.selected', { count: selected.size }) }}</strong>
-        <div class="flex flex-wrap items-center gap-1" role="group" :aria-label="t('library.select')">
-          <button type="button" class="lm-btn lm-btn--sm" :title="t('selection.hint')" @click="selectAllLoaded">{{ t('selection.all') }}</button>
-          <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="selected = new Set()">{{ t('selection.none') }}</button>
-          <button type="button" class="lm-btn lm-btn--sm" :disabled="!list.items.value.length" @click="invertSelected">{{ t('selection.invert') }}</button>
-        </div>
-        <span class="mx-1 h-[20px] hairline-l border-border-strong phone:hidden" aria-hidden="true"></span>
-        <div class="flex flex-wrap items-center gap-1">
-          <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="moveTargets = selectedItems">
-            <AppIcon name="folderMove" :size="14" />{{ t('selection.move') }}
-          </button>
-          <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="tagTargets = selectedItems">
-            <AppIcon name="tag" :size="14" />{{ t('selection.tags') }}
-          </button>
-          <button
-            v-if="config.sendToComfy"
-            type="button"
-            class="lm-btn lm-btn--sm"
-            :disabled="!selected.size"
-            :title="t('card.sendHint')"
-            @click="bulkSend"
+        <template #quick>
+          <BaseModelQuickFilter
+            v-if="config.quickBaseModels > 0"
+            :entries="baseModels"
+            :selected="state.baseModels"
+            :limit="config.quickBaseModels"
+            :id-prefix="prefix"
+            @toggle="filters.toggle('baseModels', $event)"
+            @clear="filters.clearList('baseModels')"
+          />
+        </template>
+        <template #filters>
+          <LibraryFilterPanel :groups="filterGroups" :selected="state" :id-prefix="prefix" @toggle="filters.toggle">
+            <label><input v-model="state.favoritesOnly" class="accent-accent" type="checkbox" /> {{ t('library.favoritesOnly') }}</label>
+            <label v-if="config.supportsUpdates"><input v-model="state.updatesOnly" class="accent-accent" type="checkbox" /> {{ t('library.updatesOnly') }}</label>
+          </LibraryFilterPanel>
+        </template>
+        <template #selection>
+          <LibrarySelectionBar
+            :count="selected.size"
+            :hidden="hiddenSelected"
+            :has-items="!!list.items.value.length"
+            :hint="`${t('selection.hint')} ${t('selection.rangeHint')}`"
+            @all="selectAllLoaded"
+            @none="selected = new Set()"
+            @invert="invertSelected"
+            @done="setSelectionMode(false)"
           >
-            <AppIcon name="send" :size="14" />{{ t('selection.send') }}
-          </button>
-          <button
-            type="button"
-            class="lm-btn lm-btn--sm"
-            :disabled="!selected.size"
-            @click="templateTarget = { scope: { filePaths: selectedItems.map((item) => item.file_path) }, label: t('tools.template.scopeFiles', { count: selectedItems.length }) }"
-          >
-            <AppIcon name="type" :size="14" />{{ t('selection.template') }}
-          </button>
-          <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="copySelectedNames">
-            <AppIcon name="copy" :size="14" />{{ t('selection.copyNames') }}
-          </button>
-          <button type="button" class="lm-btn lm-btn--sm lm-btn--danger" :disabled="!selected.size" @click="actions.deleteItems(selectedItems)">
-            <AppIcon name="trash" :size="14" />{{ t('selection.delete') }}
-          </button>
-        </div>
-      </div>
+            <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="moveTargets = selectedItems">
+              <AppIcon name="folderMove" :size="14" />{{ t('selection.move') }}
+            </button>
+            <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="tagTargets = selectedItems">
+              <AppIcon name="tag" :size="14" />{{ t('selection.tags') }}
+            </button>
+            <button
+              v-if="config.sendToComfy"
+              type="button"
+              class="lm-btn lm-btn--sm"
+              :disabled="!selected.size"
+              :title="t('card.sendHint')"
+              @click="bulkSend"
+            >
+              <AppIcon name="send" :size="14" />{{ t('selection.send') }}
+            </button>
+            <button
+              type="button"
+              class="lm-btn lm-btn--sm"
+              :disabled="!selected.size"
+              @click="templateTarget = { scope: { filePaths: selectedItems.map((item) => item.file_path) }, label: t('tools.template.scopeFiles', { count: selectedItems.length }) }"
+            >
+              <AppIcon name="type" :size="14" />{{ t('selection.template') }}
+            </button>
+            <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="copySelectedNames">
+              <AppIcon name="copy" :size="14" />{{ t('selection.copyNames') }}
+            </button>
+            <button type="button" class="lm-btn lm-btn--sm lm-btn--danger" :disabled="!selected.size" @click="actions.deleteItems(selectedItems)">
+              <AppIcon name="trash" :size="14" />{{ t('selection.delete') }}
+            </button>
+          </LibrarySelectionBar>
+        </template>
+      </LibraryToolbar>
 
       <StateBlock v-if="list.error.value && !list.items.value.length" kind="error" :message="list.error.value" @retry="reload" />
-      <StateBlock v-else-if="list.loaded.value && !list.items.value.length" kind="empty" :message="t('library.empty')" />
-      <div
-        v-else-if="!list.loaded.value"
-        class="grid grid-cols-[repeat(auto-fill,minmax(200px,1fr))] gap-card overflow-hidden px-6 phone:px-3"
-        aria-hidden="true"
-      >
-        <div v-for="n in 12" :key="n" class="lm-skeleton aspect-card rounded-md"></div>
-      </div>
+      <StateBlock v-else-if="list.loaded.value && !list.items.value.length" kind="empty" :message="t('library.empty')">
+        <button v-if="filters.chips.value.length" type="button" class="lm-btn phone:min-h-touch" @click="filters.clear()">{{ t('library.clearFilters') }}</button>
+      </StateBlock>
 
       <VirtualGrid
-        v-show="list.items.value.length"
+        v-show="list.items.value.length || (!list.loaded.value && !list.error.value)"
         ref="grid"
+        :skeleton="!list.loaded.value && !list.error.value"
         :items="list.items.value"
         :item-key="(item: ModelItem) => item.file_path"
         :min-item-width="filters.cardSize.value"
@@ -764,6 +767,9 @@ function bulkSend(event: MouseEvent): void {
           <p v-else-if="list.error.value && list.items.value.length" class="mt-4 flex items-center justify-center gap-2 text-sm">
             <span class="lm-error-text">{{ list.error.value }}</span>
             <button type="button" class="lm-btn lm-btn--sm" @click="list.loadMore()">{{ t('common.retry') }}</button>
+          </p>
+          <p v-else-if="list.loaded.value && !list.hasMore.value && list.items.value.length" class="mt-4 text-center text-sm text-muted">
+            {{ t('library.end', { count: list.total.value.toLocaleString() }) }}
           </p>
         </template>
       </VirtualGrid>
