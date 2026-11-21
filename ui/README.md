@@ -35,7 +35,11 @@ ui/
                           drawer, reconnect form, import / batch import /
                           move / duplicates dialogs), ...
     pages/                LibraryPage (generic, per model type), RecipesPage,
-                          SearchPage, DownloadsPage, SettingsPage, NotFoundPage
+                          SearchPage, DownloadsPage, SettingsPage (schema-driven),
+                          StatsPage, DoctorPage, NotFoundPage
+    components/charts/    dependency-free SVG/CSS charts (series tokens)
+    components/settings/  SettingsField + Backups/MetadataArchive/ExampleImages/About panels
+    config/settingsSchema.ts  settings sections and fields
     config/libraries.ts   per-type config (loras / checkpoints / embeddings)
     config/navigation.ts  top-bar tabs, active state, search route targets
     themes/               design tokens + themes + registry.ts
@@ -350,6 +354,7 @@ Colors (set by every theme):
 | `--lm-color-scrim`, `--lm-color-on-scrim` | gradient + text over card media |
 | `--lm-color-skeleton` | loading placeholders |
 | `--lm-color-shadow` | color part of the shadow tokens |
+| `--lm-color-series-1` ... `-6` | chart series (statistics), colorblind-safe order |
 
 Non-color tokens (defaults in `base.css`, any theme may override):
 
@@ -377,7 +382,8 @@ There is no sidebar: the content area uses the full width.
   search, and on the right the Downloads indicator (live `active/total`
   badge, links to the Downloads page), Settings, and a **More options** menu
   (`components/AppMenu.vue`) with the theme and density pickers and the
-  **Classic UI** link. Theme/density are also on the Settings page.
+  **Statistics** / **Diagnostics** links and the **Classic UI** link.
+  Theme/density are also on the Settings page.
 * Responsive: one row on desktop; at the `tablet:` breakpoint the search moves
   to a second full-width row; on `phone:` the tabs become a full-width
   segmented strip on the second row (scrolls horizontally if it ever does not
@@ -784,48 +790,183 @@ Backend semantics: "Phase B2a discovery" at the end of this file.
   folder after the 20 s purge. The drawer was not opened live, so no
   open-stats entry was written.
 
-## Phase 1 scope and roadmap
+## Statistics, diagnostics, settings, backups and example images (phase B2b)
 
-Covered in phase 1:
+Ported from the classic UI (`statistics.js` + `statistics.html`,
+`DoctorManager.js`, `EnvironmentPanel.js`, `SettingsManager.js` + the
+settings templates, `ExampleImagesManager.js`, `components/shared/showcase/*`,
+the update check of `UpdateService.js`). API client `api/maintenance.ts`,
+pure helpers `utils/{settingsModel,exampleImages,stats,maintenance}.ts`,
+flows `composables/{useSettingsForm,useExampleImages,useMaintenance}.ts`,
+strings `i18n/b2bMessages.ts`. Backend semantics: "Phase B2b discovery" at
+the end of this file.
 
-* App shell: top-bar tabs, global search with autocomplete and a results
-  page, download-queue indicator, More menu (theme/density, Classic UI),
-  responsive layout, skip link, keyboard focus styles, aria labels.
-* Library pages for LoRAs, checkpoints and embeddings (one generic page):
-  virtualised infinite grid, folder tree (hidden by default), local search
-  with autocomplete, sort, base-model and tag
-  filters with active-filter chips and a base-model quick filter,
-  favorites/updates toggles, card-size
-  slider, selection mode, favorite toggle on cards.
-* Detail drawer: preview with example thumbnails and a lightbox with
-  generation data, trigger words with copy, tags editor, notes, collapsible
-  specifications, Civitai link, versions with in-library badges and "queue
-  download", sanitized description; "Send to ComfyUI" for LoRAs.
-* Downloads: active downloads with progress and speed, waiting queue with
-  move top/end/remove, history with retry / retry failed / delete / clear,
-  global pause/resume, add by Civitai URL or model id. Polls every 1.5 s only
-  while the page is open and the tab visible (5 s for the top-bar indicator).
-* Recipes: originally a read-only grid; replaced by the full recipe library in phase B2a (see "Recipes (phase B2a)").
-* Settings: theme/density, default roots, filename and folder templates,
-  queue concurrency (validated 1-5), a few display toggles.
+* **Statistics** (`/stats`, top-bar More menu): seven metric tiles and five
+  tabs (Overview: collection donut, base models as stacked bars, 30-day usage
+  line chart; Usage: top 10 across libraries plus paged "most used" lists
+  per library; Collection: tag cloud (click = LoRAs with that tag), model
+  types donut, analysis; Storage: storage donut, largest models, size vs.
+  usage scatter on a log axis; Insights). Charts are dependency-free SVG/CSS
+  in `components/charts/` with the data transforms in `utils/stats.ts`. Every
+  chart has a `role="img"` summary and a **Show as table** toggle. Series
+  colors are the new `--lm-color-series-1..6` tokens (Okabe-Ito based,
+  colorblind-safe order, tuned per theme; Tailwind `fill-series-N`,
+  `stroke-series-N`, `bg-series-N` through `components/charts/chartClasses.ts`).
+  All stats endpoints are read-only.
+* **Diagnostics** (`/doctor`, More menu): runs the checks on open (and on
+  "Run again"), overall status plus one card per check with severity,
+  details and actions. **Rebuild cache...** (confirm: rescan + rewrite of the
+  persistent cache, no file touched) and **Rename duplicates...** (danger
+  confirm with the file and group counts, the rename pattern, no undo, and
+  the hint that the full LoRA syntax avoids renaming) call the backend;
+  "Open settings" / "Switch to full LoRA syntax" jump to the setting,
+  "Reload page" reloads. **Export support bundle** downloads the server's
+  sanitized zip (nothing is stored on the server). The page sends the
+  server's own version (`/version-info`) as `clientVersion`, so the classic
+  stale-bundle check stays green for the new UI. The environment panel
+  (versions + "Copy environment" as Markdown) is shared with Settings > About.
+* **Settings** (`/settings`): every section of the classic modal (General,
+  Downloads, AI provider, Proxy, Interface, Library, Organization, Example
+  images, Metadata, Backups, About) from one schema
+  (`config/settingsSchema.ts`, `utils/settingsModel.ts`): a section nav on
+  wide screens, a filter box, per-field validation (ranges, steps, folder and
+  file-name templates with their placeholders, proxy port, URLs, priority-tag
+  parentheses, checkpoint/UNet folder overlap) shown inline and after a save
+  attempt, a changed-dot per field and a count per section, **Reset to
+  default** per field (the backend defaults; the classic modal has none),
+  "Classic UI" badges for settings that only affect the classic interface and
+  "Restart" badges. One **Save changes** sends only the changed keys,
+  **server-validated keys first** (a rejected value then saves nothing), asks
+  first for side effects (moving recipes, portable mode, restart-only
+  folders), re-reads the settings afterwards, and after an error shows the
+  backend message, re-reads what the server actually stored and keeps the
+  unsaved edits. **Unsaved-changes guard**: leaving the route asks, closing
+  the tab triggers the browser prompt. Dotted fields (`download_path_templates.lora`,
+  `send_to_workflow_exclusions.node_classes`, `default_other_roots.vae`, ...)
+  are merged into the whole object, so keys the form does not show survive.
+  Path and file name templates now save an explicit empty value (classic
+  semantics: flat folder / original file name).
+* **Secrets** (Civitai key, Hugging Face token, LLM key, proxy password) are
+  never shown or pre-filled: the field says Configured / Not configured and
+  offers Change... (a `type=password` input with a show toggle) or Remove;
+  `proxy_password`, which GET returns in clear, is dropped from the settings
+  on read (`sanitizeSettings`). Secrets only travel in the POST body (never
+  a URL), the UI never logs them, and `redactPatch` masks them for any
+  display. Removing the proxy password sends `__DELETE__`.
+* **Backups** (Settings > Backups): automatic backup toggle and retention,
+  the list of stored snapshots (auto/manual, size, date, folder), **Download
+  a backup now** (the export endpoint; the zip goes to the browser, nothing
+  stays on the server), **Open backup folder**, and **Restore from a
+  backup...**: a dialog that lists every file that is overwritten, warns that
+  there is no safety copy (with a "Download current state first" button),
+  says ComfyUI must be restarted, and only enables "Overwrite and restore"
+  with a `.zip` file chosen and `RESTORE` typed (checked again in
+  `useBackups`). There is no delete (no endpoint).
+* **Metadata archive** (Settings > Metadata): status (downloaded / size,
+  enabled), **Download database...** (confirm stating the multi-GB download
+  and the overwrite; the request stays open, the panel shows a busy state;
+  progress over WebSocket is not ported) and **Remove database...** (danger
+  confirm).
+* **About**: version, **Check for updates** (GitHub, read-only; installing
+  stays classic), environment, the still-classic note.
+* **Local example images**: the drawer shows the local copy of every example
+  image when it exists (`/example_images_static/...`, matched like the
+  classic resolver but by the **source** index) and the remote URL
+  otherwise, plus imported images; a "N local" badge and **Manage example
+  images...** open `ExampleImagesDialog.vue`: Download from Civitai (this
+  model, synchronous), Import images... (file picker or drop, unsupported
+  types skipped and reported), Open folder (system / clipboard / URI mode
+  answered by the backend), a rating select per image (PG ... XXX) and Delete
+  for **imported** images only (danger confirm: permanent). Without a
+  configured folder the dialog says so and links to the setting. Settings >
+  Example images holds the folder (validated by the backend) and options plus
+  the library-wide **Download all...** (confirm) with progress (polled every
+  2 s while running), pause / resume / stop; it uses the **saved** folder.
 
-Left to the classic UI for now (linked from the new UI):
+### Safety
 
-* Phase A (model management actions) and phase B1 (download dialog and
-  model tools, see "Downloads and model tools") are done. Still classic-only
-  from that area: bulk set base model / favorite / content rating (no bulk
-  endpoint), deleting a folder that exists in several roots, WebSocket
-  progress of fetch-all.
-* Phase B2a (recipes) is done. Still classic-only for recipes: re-import
-  from the source, global and relaxed re-match, sharing / downloading a
-  recipe, directory batch import (server folder browser), creating a recipe
-  from an example image or the ComfyUI widget, editing prompts/generation
-  parameters, "send to workflow" with a strength override per LoRA.
-* Phase B2b: local example images (download, import, delete, NSFW levels),
-  statistics page, doctor/diagnostics, backups, metadata archive and the
-  remaining settings (LLM, proxy, ...).
-* WebSocket progress (the new UI polls instead), "send to workflow" for
-  checkpoints and embeddings, translations other than English.
+* Nothing destructive happens without a confirm that says what changes on
+  disk: renaming duplicates, rebuilding caches, restoring a backup (typed
+  confirm), downloading/removing the archive, deleting an imported example
+  image, starting the library-wide download, saving settings with side
+  effects.
+* Not ported on purpose (destructive or a migration flow): installing
+  updates and switching channels (`perform-update` / `switch-channel` rewrite
+  the plugin folder), the sidecar storage mode/path change with its migration,
+  the example-images folder cleanup (moves folders to `_deleted/`).
+
+### Tests and verification
+
+* Backend contract tests `tests/routes/test_b2b_ui_contract.py` (written
+  before the UI; real handlers, processor, file manager and BackupService on
+  temp directories): multipart import writes `custom_<id>` and the sidecar,
+  NSFW level for regular and custom images plus its validation codes (and
+  that a rejected call leaves the sidecar untouched), delete of an imported
+  image (file + entry gone, regular images kept, 404 for unknown ids and
+  regular images), listing and "no folder = []", missing path = 400; the
+  example-images path validation (missing, file, non-dedicated folder,
+  dedicated folder, clear; nothing created); **partial settings writes**
+  (keys before an invalid one are saved, validated-first saves nothing),
+  concurrency normalised to int, proxy refresh once per request and
+  `__DELETE__`, no side effects for unchanged values, API keys hidden in GET
+  (proxy password documented as returned), secrets not in the logs; backup
+  export leaves no file and never prunes, status ordering, restore overwrites
+  exactly the targets and refuses not-a-zip / no manifest / wrong version /
+  path traversal / checksum mismatch / empty upload without touching
+  anything; doctor rename of duplicates (model, sidecar, preview; first copy
+  kept), no-op with full syntax, cache repair only rebuilds, diagnostics
+  shape without a key makes no network call; the routes exist.
+* Frontend `tests/b2b.test.ts` (written before the UI): schema coverage,
+  sanitizing, dirty tracking, dotted merges, number/list normalisation, all
+  validators, secret modes, ordering, side-effect confirms, resets, the save
+  flow (ordered POST, secrets never in a URL, error -> re-read + edits kept,
+  invalid drafts never sent, cancel sends nothing); example-image matching,
+  request bodies, status normalisation and the import / delete / NSFW /
+  download / download-all flows; chart transforms; doctor, backup (typed
+  restore gating, export download, JSON error) and archive flows.
+  `tests/composables.test.ts` now checks the curated keys through the new
+  model.
+* Checked in a browser against a mock harness (stats and environment from
+  the real backend through read-only GETs, everything else mocked):
+  statistics (Light/Dark, desktop/phone), diagnostics with the rename
+  confirm, settings sections, validation, secret entry and save, backups
+  with the restore dialog, example images in the drawer and the dialog
+  (delete with confirm), download-all progress (Dark, phone).
+* Live on the real backend (see the phase B2b report): one harmless setting
+  (`sticky_controls`, classic-only) toggled and reset through the UI with
+  the settings file backed up first: afterwards byte-identical; one backup
+  export (download only): the backup folder kept the same files; the
+  diagnostics ran (all checks healthy). Nothing else was changed live.
+
+## Roadmap: still in the classic UI
+
+Everything of the classic settings modal, statistics page, doctor and
+example-image showcase is now in the new UI, except:
+
+* **Settings**: sidecar storage mode / path and the sidecar migration,
+  download root rules (ordered per-type rules), the standalone-mode model
+  paths editor (`folder_paths`), the base-model checkbox picker (the new UI
+  takes the skip list as text), the "Apply to library now" button next to
+  the filename templates (use the library's Tools > Filename template), the
+  directory browser next to path fields (type the path).
+* **Updates and banners**: installing updates, switching release/nightly,
+  update notifications, the promo / bulk-fetch / cache-health banners.
+* **Example images**: the folder cleanup (`cleanup-example-image-folders`),
+  the automatic periodic check of the classic page (the server-side download
+  after each model download still works), live WebSocket progress (the new UI
+  polls), the card hover cycler and "open example folder" from cards.
+* **Metadata archive**: download progress (WebSocket only).
+* **Model management** (from earlier phases): bulk set base model / favorite
+  / content rating (no bulk endpoint), deleting a folder that exists in
+  several roots, WebSocket progress of fetch-all.
+* **Recipes**: re-import from the source, global and relaxed re-match,
+  sharing / downloading a recipe, directory batch import (server folder
+  browser), creating a recipe from an example image or the ComfyUI widget,
+  editing prompts/generation parameters, "send to workflow" with a strength
+  override per LoRA.
+* **Everything else**: WebSocket progress in general (the new UI polls),
+  "send to workflow" for checkpoints and embeddings, wildcards / workflows /
+  "other models" library pages, translations other than English.
 
 ## Phase B1 discovery: downloads and model tools (backend semantics)
 
