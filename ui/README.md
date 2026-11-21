@@ -252,6 +252,7 @@ Tailwind v4 is configured CSS-first, no `tailwind.config.*`:
 | `leading-normal`, `leading-tight` | `--lm-line-height`, `--lm-line-height-tight` |
 | `p-1` ... `p-6`, `p-8` (also `m-`, `gap-`, `inset-`, `w-`, `h-`, ...) | `--lm-space-1` ... `--lm-space-8` (density aware) |
 | `h-control`, `min-h-control`, `w-control`, `*-control-sm`, `h-topbar` | `--lm-control-height` (`-8px` for `-sm`), `--lm-topbar-height` |
+| `size-touch`, `min-h-touch`, `w-touch`, `min-w-touch` | `--lm-touch-target` (44px hit area, used with `phone:` / `touch:` in the drawer) |
 | `gap-card`, `aspect-card` | `--lm-card-gap`, `--lm-card-aspect` |
 | `rounded-sm`, `rounded-md`, `rounded-lg`, `rounded-pill` | `--lm-radius-*` |
 | `shadow-sm`, `shadow-md`, `shadow-lg` | `--lm-shadow-*` (plain `box-shadow`) |
@@ -400,7 +401,7 @@ Non-color tokens (defaults in `base.css`, any theme may override):
 | Spacing | `--lm-space-1/2/3/4/5/6/8` (compact density shrinks them) |
 | Shadows | `--lm-shadow-sm/md/lg` |
 | Motion | `--lm-motion-fast`, `--lm-motion-normal`, `--lm-fade-duration` (media fade-in), `--lm-ease` (durations zeroed for `prefers-reduced-motion`) |
-| Layout | `--lm-topbar-height`, `--lm-drawer-width`, `--lm-control-height`, `--lm-border-width`, `--lm-focus-ring-width` |
+| Layout | `--lm-topbar-height`, `--lm-drawer-width`, `--lm-control-height`, `--lm-touch-target` (44px minimum hit area on phone / touch layouts), `--lm-border-width`, `--lm-focus-ring-width` |
 | Cards | `--lm-card-aspect` (e.g. `2 / 3`), `--lm-card-gap` (card width comes from the per-library size slider), `--lm-card-zoom` (hover/focus zoom of card media, default `1.05`, `1` = off; forced to `1` for `prefers-reduced-motion`) |
 
 The virtualised grid reads `--lm-card-aspect` and `--lm-card-gap` at runtime,
@@ -490,16 +491,64 @@ read-only endpoints (`api/suggestSource.ts`):
   same `state.baseModels` of `useLibraryFilters` as the filter panel and the
   active-filter chips, so there is one source of truth and nothing extra is
   persisted. A selected base model from "More" joins the visible row.
-* **Detail drawer** tabs: Overview, Description, Versions (the Examples tab is
-  gone). The overview shows the cover with the example thumbnails beside it
-  when the drawer is wide (container query at 460px) and as a horizontal strip
-  under it when narrow. Thumbnails open `ExampleLightbox.vue` (modal `<dialog>`,
+* **Detail drawer** (`ModelDrawer.vue`). Header: title (two lines on a phone,
+  full name in the tooltip and under Specifications > File name), base-model /
+  Update / version badges (the Update badge is a button that opens the Versions
+  tab; on a phone only the base model is shown), **Favorite**, **More actions**
+  (`aria-haspopup="menu"`, the same `ModelActionMenu` as the card with the same
+  nine actions in the same order, preceded by **View on Civitai** and **Open in
+  classic UI**, both new-tab links with `rel="noopener noreferrer"`) and
+  **Close**. The menu renders next to the drawer panel (z-70 over the drawer's
+  z-60); the actions still emit `action` with the same `ModelAction` values and
+  run through `LibraryPage.runAction`. Tabs: Overview, Description, Versions
+  (the Examples tab is gone), a WAI-ARIA tablist with a label, roving tabindex
+  and ArrowLeft/Right/Home/End (`nextTab` in `utils/drawer.ts`); all three panels
+  stay in the DOM (`v-show`) so `aria-controls` is always valid, the Versions
+  data still loads the first time its tab is shown, and a tab switch scrolls the
+  body back to the top.
+  **Overview order** (LoRAs): Send block (strength, Send to ComfyUI, Replace in
+  ComfyUI, Copy LoRA syntax as an icon button; below it the model's
+  `usage_tips` as read-only chips such as "strength 0.8" / "clip 1", a click on
+  the strength chip fills the field; `usageTipEntries` in `utils/workflow.ts`),
+  Trigger words (empty text only for LoRAs, the section is hidden for empty
+  checkpoints/embeddings), Examples (cover plus thumbnails, with **Manage
+  example images...** in the heading row), Tags, Notes, Specifications.
+  Checkpoints and embeddings start at Trigger words / Examples. There is no
+  other Send button (the header Send icon is gone).
+  The cover shows beside the example thumbnails when the drawer is wide
+  (container query at 460px) and the thumbnails form a horizontal strip under it when narrow. Thumbnails open `ExampleLightbox.vue` (modal `<dialog>`,
   arrow keys, Escape, focus returns to the thumbnail) with the generation data
   of Civitai `images[].meta` normalised by `utils/generation.ts`: prompt and
   negative prompt with copy buttons, parameter chips (model, sampler,
   scheduler, steps, CFG, seed, size, clip skip, denoise, VAE) and resources;
   "No generation data" when the image has none. Thumbnails with a prompt get a
   small text badge and the prompt as tooltip.
+* **Mature content** follows the library card: with the `blur_mature_content`
+  setting on (default), a preview or example with NSFW level >= 4 is blurred
+  (`isBlurred` in `utils/mature.ts`, used by the card, the drawer cover by
+  `preview_nsfw_level`, the thumbnails by `image.nsfwLevel`). In the lightbox
+  the image stays blurred behind a **Show** button that reveals that image
+  only (not persisted).
+* **Unsaved notes**: notes are never auto-saved. While they differ from the
+  saved text the Save button is enabled and "Unsaved changes" shows next to it;
+  leaving through Escape, the backdrop, Close or a tag click opens the confirm
+  dialog "Discard unsaved notes?" (Discard / Keep editing, focus returns to the
+  notes field; `shouldConfirmClose` in `utils/drawer.ts`). A clean drawer closes
+  immediately. Opening another model through the `item` prop resets the draft.
+* **Versions tab**: the row of the file you own (`currentVersionId`: the item's
+  Civitai version, else the loaded metadata) has a **Current** badge and an
+  accent border. Each row has one **Queue download** button and a ghost icon
+  button **Download...** (opens the download dialog for the version) in a
+  fixed-width column, so rows line up; a version that is already in the library
+  only shows the "In library" badge.
+* **Touch and phone layout**: inside the drawer every control reaches
+  `--lm-touch-target` (44px) with the `phone:` and `touch:` variants (tabs,
+  header icons, chips, send buttons, versions actions, menu rows; tag chips keep
+  their 24px look and get the 44px hit area through the button box plus a
+  negative margin). `lm-btn` itself is unchanged. On a phone the pinned header
+  plus tabs take about 130px.
+* Drawer tests: `tests/drawer.test.ts` (mature-blur rule, usage-tip chips,
+  `nextTab`, `shouldConfirmClose`, `currentVersionId`), written before the UI.
 * **Tags** are uniform pills (click = filter the library by that tag and close
   the drawer, x = remove), collapsed after 12 with "+N more"
   (`utils/tags.ts`). **Specifications** (file name, path, folder, base model,
@@ -507,9 +556,9 @@ read-only endpoints (`api/suggestSource.ts`):
   section, closed by default, remembered in `localStorage`
   (`lm-ui.detail.specsOpen`, `composables/usePersistentToggle.ts`).
 * **Send to ComfyUI** (LoRAs, `config.sendToComfy`): a button on every card
-  (shown on hover/focus, always on touch devices; Shift+click replaces), one
-  in the drawer header, and Send / Replace / Copy LoRA syntax with a strength
-  field in the overview. Same flow as the classic UI
+  (shown on hover/focus, always on touch devices; Shift+click replaces), and
+  Send / Replace / Copy LoRA syntax with a strength field at the top of the
+  drawer overview. Same flow as the classic UI
   (`utils/workflow.ts`, `composables/useSendToWorkflow.ts`):
   `GET /api/lm/get-registry` lists the nodes of the open ComfyUI tabs, enabled
   LoRA-capable nodes not excluded by `send_to_workflow_exclusions` are kept,
@@ -532,7 +581,7 @@ helpers) and the typed calls in `api/endpoints.ts`.
 * **Card menu** ("..." button on every card, or right-click): Move...,
   Rename file..., Exclude from library..., Delete... (WAI-ARIA menu: arrow
   keys, Home/End, Escape returns focus to the button). The **drawer** has the
-  same four actions under the Civitai links.
+  same actions in its More actions menu.
 * **Selection mode** toolbar: count, Select all loaded (also Ctrl/Cmd+A while
   selection mode is on and focus is not in a field), Select none, Invert, then
   Move..., Add tags..., Send to ComfyUI (LoRAs; all selected LoRAs as one

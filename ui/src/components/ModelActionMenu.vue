@@ -107,7 +107,7 @@ onMounted(async () => {
       <a
         v-if="entry.href"
         role="menuitem"
-        class="lm-row flex min-h-[34px] cursor-pointer items-center gap-2 px-3 text-left text-sm touch:min-h-touch"
+        class="lm-row flex min-h-[34px] cursor-pointer items-center gap-2 px-3 text-left text-sm text-fg no-underline hover:no-underline phone:min-h-touch touch:min-h-touch"
         :class="entry.divider ? 'mt-1 hairline-t border-border' : ''"
         :href="entry.href"
         target="_blank"
@@ -120,7 +120,7 @@ onMounted(async () => {
         v-else
         type="button"
         role="menuitem"
-        class="lm-row flex min-h-[34px] cursor-pointer items-center gap-2 px-3 text-left text-sm touch:min-h-touch"
+        class="lm-row flex min-h-[34px] cursor-pointer items-center gap-2 px-3 text-left text-sm phone:min-h-touch touch:min-h-touch"
         :class="[entry.danger ? 'text-danger' : '', entry.divider ? 'mt-1 hairline-t border-border' : '']"
         @click="emit('select', entry.action); emit('close', 'select')"
       >
