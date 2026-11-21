@@ -10,6 +10,16 @@ Open it at `http://<comfyui-host>:<port>/lm-ui/` (for example
 `http://127.0.0.1:8188/lm-ui/`). Behind a reverse proxy that mounts ComfyUI
 under a prefix, use `<prefix>/lm-ui/`.
 
+The **LoRA Manager button in the ComfyUI top bar** (and "Open LoRA Manager"
+in its quick-actions dropdown) opens `/lm-ui/` as well. On page load
+`web/comfyui/modern_ui_link.js` sends one `HEAD /lm-ui/`; only a 2xx answer
+switches the button to the modern UI, so an unbuilt `ui/dist` (503), a backend
+without the route (404), a network error or a click before the probe has
+answered all open the classic `/loras` instead. Other links from the ComfyUI
+side (LoRA info card "full details", recipe links) still deep-link into the
+classic UI. The classic UI stays reachable from the modern UI's "More options"
+menu.
+
 ## Architecture
 
 ```
@@ -183,15 +193,19 @@ JavaScript toolchain. After every change under `ui/src` (or `index.html`):
 ## Syncing the fork with upstream safely
 
 Everything lives in new paths (`ui/`, `py/routes/modern_ui_routes.py`,
-`tests/routes/test_modern_ui_routes.py`), so upstream merges normally do not
-conflict. The only upstream-owned files that were touched are listed below;
-if a merge conflicts there, keep upstream's version and re-add the two lines.
+`tests/routes/test_modern_ui_routes.py`, `web/comfyui/modern_ui_link.js`,
+`tests/frontend/components/modernUiLink.test.js`), so upstream merges normally
+do not conflict. The only upstream-owned files that were touched are listed
+below; if a merge conflicts there, keep upstream's version and re-apply the
+change.
 
 | File | Change |
 | --- | --- |
 | `py/lora_manager.py` | after `PreviewRoutes.setup_routes(app)` in `LoraManager.add_routes`: a comment line plus `from .routes.modern_ui_routes import ModernUiRoutes; ModernUiRoutes.setup_routes(app)` |
 | `standalone.py` | after `PreviewRoutes.setup_routes(app)` in `StandaloneLoraManager.add_routes`: a comment line plus `from py.routes.modern_ui_routes import ModernUiRoutes; ModernUiRoutes.setup_routes(app)` |
 | `.gitignore` | `ui/node_modules/` (plus a comment) |
+| `web/comfyui/lora_canvas_api.js` | `openLoraManagerHome` builds its URL from `managerHomePath(modernUiAvailability())` (import from the fork-local `modern_ui_link.js`) instead of the fixed `/loras` |
+| `web/comfyui/top_menu_extension.js` | `setup()` starts `probeModernUi()` (import from `modern_ui_link.js`) |
 
 No templates, static files or locale files were changed. A "Modern UI" link
 in the classic UI would require editing upstream templates, so it was left

@@ -2,6 +2,7 @@ import { app } from "../../scripts/app.js";
 import { lmUrl } from "./base_path.js";
 import { openLoraManagerHome } from "./lora_canvas_api.js";
 import { toggleQuickActionsMenu } from "./quick_actions_menu.js";
+import { probeModernUi } from "./modern_ui_link.js";
 
 const BUTTON_TOOLTIP = "Open LoRA Manager (Shift+Click opens in a new window)";
 const QUICK_ACTIONS_TOOLTIP = "LoRA Manager quick actions";
@@ -163,6 +164,8 @@ const createExtensionObject = (useActionBar) => {
     const extensionObj = {
         name: "LoraManager.TopMenu",
         async setup() {
+            // Fork: find out ahead of the first click whether /lm-ui/ is served.
+            probeModernUi();
             const version = await fetchVersionInfo();
             
             if (!useActionBar) {

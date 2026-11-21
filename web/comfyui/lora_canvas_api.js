@@ -1,5 +1,6 @@
 import { api } from "../../scripts/api.js";
 import { lmUrl } from "./base_path.js";
+import { managerHomePath, modernUiAvailability } from "./modern_ui_link.js";
 
 async function readJson(response, fallbackMessage) {
   const data = await response.json().catch(() => ({}));
@@ -127,7 +128,8 @@ export async function refreshLoraMetadata(filePath) {
 }
 
 export function openLoraManagerHome(newWindow = false) {
-  const url = `${window.location.origin}${lmUrl("/loras")}`;
+  // Fork: modern UI (/lm-ui/) when it is served, classic /loras otherwise.
+  const url = `${window.location.origin}${lmUrl(managerHomePath(modernUiAvailability()))}`;
   if (newWindow) {
     window.open(url, "_blank", "width=1200,height=800,resizable=yes,scrollbars=yes,status=yes");
   } else {

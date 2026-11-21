@@ -151,6 +151,23 @@ async def test_reports_unbuilt_dist(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_head_probe_tells_built_from_unbuilt(dist_dir: Path, tmp_path: Path) -> None:
+    # The ComfyUI top-bar button (web/comfyui/modern_ui_link.js) sends
+    # HEAD /lm-ui/ and falls back to the classic UI unless it gets a 2xx.
+    built = await _client(dist_dir, None)
+    try:
+        assert (await built.head("/lm-ui/")).status == 200
+    finally:
+        await built.close()
+
+    unbuilt = await _client(tmp_path / "nope", None)
+    try:
+        assert (await unbuilt.head("/lm-ui/")).status == 503
+    finally:
+        await unbuilt.close()
+
+
+@pytest.mark.asyncio
 async def test_lists_and_serves_user_themes(dist_dir: Path, themes_dir: Path) -> None:
     client = await _client(dist_dir, themes_dir)
     try:
