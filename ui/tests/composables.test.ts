@@ -5,7 +5,8 @@ import { createPoller } from '@/composables/usePolling'
 import { clampCardSize, useLibraryFilters } from '@/composables/useLibraryFilters'
 import { LIBRARIES } from '@/config/libraries'
 import type { PagedResponse } from '@/api/types'
-import { buildSettingsPatch, draftFromSettings, validateConcurrency } from '@/utils/settingsForm'
+import { ALL_FIELDS } from '@/config/settingsSchema'
+import { buildPatch, draftFromSettings, validateDraft } from '@/utils/settingsModel'
 
 function page<T>(items: T[], pageNo: number, totalPages: number, total = 99): PagedResponse<T> {
   return { items, page: pageNo, total_pages: totalPages, total, page_size: items.length }
@@ -138,7 +139,7 @@ describe('useLibraryFilters', () => {
   })
 })
 
-describe('settings form helpers', () => {
+describe('settings form helpers (curated keys, now in the schema model)', () => {
   const settings = {
     default_lora_root: 'G:/loras',
     default_checkpoint_root: 'G:/ckpt',
@@ -154,38 +155,31 @@ describe('settings form helpers', () => {
   }
 
   it('produces an empty patch when nothing changed', () => {
-    expect(buildSettingsPatch(settings, draftFromSettings(settings))).toEqual({})
+    expect(buildPatch(settings, draftFromSettings(settings, ALL_FIELDS), ALL_FIELDS)).toEqual({})
   })
 
   it('only sends changed keys and keeps unmanaged template entries', () => {
-    const draft = draftFromSettings(settings)
-    draft.roots.default_lora_root = 'C:/other'
-    draft.filenameTemplates.lora = ''
-    draft.pathTemplates.checkpoint = ' {base_model} '
-    draft.concurrency = '2'
-    draft.toggles.blur_mature_content = false
-    expect(buildSettingsPatch(settings, draft)).toEqual({
-      default_lora_root: 'C:/other',
-      download_filename_templates: { custom: 'keep-me' },
-      download_path_templates: { checkpoint: '{base_model}' },
+    const draft = draftFromSettings(settings, ALL_FIELDS)
+    draft.default_lora_root = 'C:/other'
+    draft['download_filename_templates.lora'] = ''
+    draft['download_path_templates.checkpoint'] = ' {base_model} '
+    draft.download_queue_max_concurrent = '2'
+    draft.blur_mature_content = false
+    expect(buildPatch(settings, draft, ALL_FIELDS)).toEqual({
       download_queue_max_concurrent: 2,
+      default_lora_root: 'C:/other',
       blur_mature_content: false,
+      // Empty = an explicit '' (classic semantics: original names / flat folders).
+      download_filename_templates: { lora: '', custom: 'keep-me' },
+      download_path_templates: { checkpoint: '{base_model}' },
     })
   })
 
   it('validates concurrency', () => {
-    expect(validateConcurrency('3')).toBeNull()
-    expect(validateConcurrency('0')).not.toBeNull()
-    expect(validateConcurrency('6')).not.toBeNull()
-    expect(validateConcurrency('2.5')).not.toBeNull()
-    expect(validateConcurrency('')).not.toBeNull()
-    expect(validateConcurrency(4)).toBeNull()
-    expect(validateConcurrency(7)).not.toBeNull()
-  })
-
-  it('leaves invalid concurrency out of the patch', () => {
-    const draft = draftFromSettings(settings)
-    draft.concurrency = '99'
-    expect(buildSettingsPatch(settings, draft)).toEqual({})
+    const draft = draftFromSettings(settings, ALL_FIELDS)
+    for (const [value, ok] of [['3', true], ['0', false], ['6', false], ['2.5', false], ['', false]] as const) {
+      draft.download_queue_max_concurrent = value
+      expect(!validateDraft(ALL_FIELDS, draft).download_queue_max_concurrent).toBe(ok)
+    }
   })
 })

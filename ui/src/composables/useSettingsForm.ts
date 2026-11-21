@@ -111,7 +111,7 @@ export function useSettingsForm(fields: FieldDef[]) {
     }
   }
 
-  return { server, draft, errors, patch, changed, dirty, loadError, saveError, saving, showErrors, load, discard, resetField, setSecret, save }
+  return { server, draft, errors, patch, changed, dirty, loadError, saveError, saving, showErrors, load, reloadKeeping, discard, resetField, setSecret, save }
 }
 
 /** Confirm text for leaving the page with unsaved changes. */

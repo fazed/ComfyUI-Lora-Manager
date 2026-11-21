@@ -42,6 +42,12 @@
   --color-on-scrim: var(--lm-color-on-scrim);
   --color-skeleton: var(--lm-color-skeleton);
   --color-shadow: var(--lm-color-shadow);
+  --color-series-1: var(--lm-color-series-1);
+  --color-series-2: var(--lm-color-series-2);
+  --color-series-3: var(--lm-color-series-3);
+  --color-series-4: var(--lm-color-series-4);
+  --color-series-5: var(--lm-color-series-5);
+  --color-series-6: var(--lm-color-series-6);
 
   /* Typography */
   --font-*: initial;

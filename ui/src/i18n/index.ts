@@ -387,7 +387,7 @@ export const messages = {
   'recipes.duplicates.markDelete': 'Delete',
   'recipes.duplicates.delete': 'Delete {count}…',
   'settings.title': 'Settings',
-  'settings.intro': 'A curated subset of the LoRA Manager settings. Everything else is available in the classic UI.',
+  'settings.intro': 'All LoRA Manager settings, grouped like the classic settings window. Edits are saved together with "Save changes"; the panels (backups, archive, downloads) act right away.',
   'settings.appearance': 'Appearance',
   'settings.userThemes': 'Custom themes',
   'settings.userThemesHint': 'Drop .css theme files into {dir} and reload this page. See ui/README.md (Theming).',

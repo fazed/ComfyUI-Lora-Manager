@@ -41,7 +41,7 @@ const { backdrop } = useDismissLayer({
   >
     <form v-if="confirmState" method="dialog" @submit.prevent="answer(true)">
       <h2 id="confirm-title" class="text-lg">{{ confirmState.title }}</h2>
-      <p id="confirm-message" class="mt-3 mb-5 text-muted">{{ confirmState.message }}</p>
+      <p id="confirm-message" class="mt-3 mb-5 whitespace-pre-line text-muted">{{ confirmState.message }}</p>
       <div class="flex justify-end gap-2">
         <button type="button" class="lm-btn" autofocus @click="answer(false)">{{ t('common.cancel') }}</button>
         <button type="submit" class="lm-btn" :class="confirmState.danger ? 'lm-btn--danger' : 'lm-btn--primary'">

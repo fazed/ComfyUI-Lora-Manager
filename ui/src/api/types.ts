@@ -89,6 +89,8 @@ export interface ModelMetadata {
     tags?: string[]
   }
   images?: CivitaiImage[]
+  /** Imported example images (`custom_<id>` files in the example folder). */
+  customImages?: CivitaiImage[]
 }
 
 export interface ModelVersionInfo {

@@ -17,6 +17,10 @@ const root = ref<HTMLElement | null>(null)
 const panel = ref<HTMLElement | null>(null)
 const button = ref<HTMLButtonElement | null>(null)
 const classicUrl = withMountPrefix('/loras')
+const pages = [
+  { to: '/stats', label: 'nav.stats', icon: 'chart' },
+  { to: '/doctor', label: 'nav.doctor', icon: 'pulse' },
+] as const
 
 function onFocusOut(event: FocusEvent): void {
   const next = event.relatedTarget as Node | null
@@ -69,6 +73,18 @@ useDismissLayer({
       :aria-label="t('nav.more')"
     >
       <ThemeOptions />
+      <div class="flex flex-col hairline-t border-border pt-3">
+        <RouterLink
+          v-for="link in pages"
+          :key="link.to"
+          class="lm-row lm-row--nav flex min-h-control items-center gap-2 px-2 text-sm font-medium no-underline"
+          :to="link.to"
+          @click="close"
+        >
+          <AppIcon :name="link.icon" :size="16" />
+          <span>{{ t(link.label) }}</span>
+        </RouterLink>
+      </div>
       <div class="hairline-t border-border pt-3">
         <a
           class="lm-row lm-row--nav flex min-h-control items-center gap-2 px-2 text-sm font-medium no-underline"

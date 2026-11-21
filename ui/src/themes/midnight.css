@@ -30,6 +30,13 @@
   --lm-color-scrim: rgba(5, 8, 20, 0.78);
   --lm-color-on-scrim: #ffffff;
   --lm-color-skeleton: #18223f;
+  /* Chart series (Okabe-Ito based, colorblind-safe order). */
+  --lm-color-series-1: #6cc4f0;
+  --lm-color-series-2: #f5a524;
+  --lm-color-series-3: #3ccfa4;
+  --lm-color-series-4: #e8a8d0;
+  --lm-color-series-5: #f0e442;
+  --lm-color-series-6: #ff8a57;
   --lm-color-shadow: rgba(0, 0, 0, 0.5);
   --lm-radius-sm: 8px;
   --lm-radius-md: 14px;

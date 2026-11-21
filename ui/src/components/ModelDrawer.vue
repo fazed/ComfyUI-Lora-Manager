@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useEventListener } from '@vueuse/core'
 import AppIcon from './AppIcon.vue'
+import ExampleImagesDialog from './ExampleImagesDialog.vue'
 import ExampleLightbox from './ExampleLightbox.vue'
 import LazyMedia from './LazyMedia.vue'
 import type { ModelAction } from './ModelActionMenu.vue'
@@ -9,6 +10,8 @@ import StateBlock from './StateBlock.vue'
 import { downloadsApi, type ModelApi } from '@/api/endpoints'
 import type { ModelItem, ModelMetadata, ModelUpdateRecord } from '@/api/types'
 import { useDismissLayer } from '@/composables/useDismiss'
+import { useExampleImages } from '@/composables/useExampleImages'
+import { modelTypeOf } from '@/utils/exampleImages'
 import { copyText, useToasts } from '@/composables/useFeedback'
 import { usePersistentToggle } from '@/composables/usePersistentToggle'
 import { useSendToWorkflow } from '@/composables/useSendToWorkflow'
@@ -85,7 +88,17 @@ const triggerWords = computed(() => {
   const words = metadata.value?.trainedWords ?? props.item.civitai?.trainedWords ?? []
   return words.map((word) => word.trim()).filter(Boolean)
 })
-const images = computed(() => (metadata.value?.images ?? []).filter((image) => !!image?.url))
+// Example images: the local copy (example images folder) wins over the Civitai URL; imported images are local only.
+const examples = useExampleImages(() => props.item, { modelType: () => modelTypeOf(props.api.prefix) })
+const examplesOpen = ref(false)
+const images = computed(() =>
+  examples.media.value.map((media) => ({
+    ...media.image,
+    url: media.local ? withMountPrefix(media.url) : media.url,
+    type: media.isVideo ? 'video' : media.image.type,
+  })),
+)
+const localImages = computed(() => examples.localCount.value)
 const imageHints = computed(() => images.value.map((image) => promptHint(image.meta)))
 const shownTags = computed(() => collapseTags(tags.value, tagsExpanded.value))
 const fileType = computed(() => {
@@ -105,9 +118,12 @@ async function loadMetadata(): Promise<void> {
   metaError.value = null
   try {
     metadata.value = await props.api.metadata(props.item.file_path)
+    examples.setMetadata(metadata.value?.images, metadata.value?.customImages)
+    void examples.loadFiles()
   } catch (error) {
     // Models without Civitai metadata answer success:false; that's not an error for the user.
     metadata.value = null
+    examples.setMetadata([], [])
     if (props.item.from_civitai) metaError.value = (error as Error).message
   } finally {
     metaLoading.value = false
@@ -146,6 +162,7 @@ watch(
     tab.value = 'overview'
     tagsExpanded.value = false
     lightboxIndex.value = null
+    examplesOpen.value = false
     strength.value = loraStrengths(props.item.usage_tips).strength
     void loadMetadata()
   },
@@ -361,6 +378,7 @@ useEventListener(document, 'keydown', onKey)
                 <h3 id="drawer-examples-title" class="lm-overline flex items-center gap-2">
                   {{ t('detail.examples') }}
                   <span v-if="images.length" class="tabular-nums">{{ images.length }}</span>
+                  <span v-if="localImages" class="lm-badge lm-badge--success normal-case">{{ t('examples.localCount', { count: localImages }) }}</span>
                 </h3>
                 <div
                   class="flex gap-2 overflow-x-auto pb-1 @min-[460px]:grid @min-[460px]:max-h-[392px] @min-[460px]:content-start @min-[460px]:overflow-x-visible @min-[460px]:overflow-y-auto @min-[460px]:pb-0"
@@ -412,6 +430,9 @@ useEventListener(document, 'keydown', onKey)
               </div>
             </div>
             <p v-if="!metaLoading && !images.length && item.from_civitai" class="mt-2 text-xs text-muted">{{ t('detail.noExamples') }}</p>
+            <button type="button" class="lm-btn lm-btn--sm lm-btn--ghost mt-2" :disabled="metaLoading" @click="examplesOpen = true">
+              <AppIcon name="image" :size="14" />{{ t('examples.manage') }}
+            </button>
           </div>
 
           <div class="flex flex-wrap items-center gap-2">
@@ -690,6 +711,8 @@ useEventListener(document, 'keydown', onKey)
         </section>
       </div>
     </aside>
+
+    <ExampleImagesDialog v-if="examplesOpen" :name="displayName" :ex="examples" @close="examplesOpen = false" />
 
     <ExampleLightbox
       v-if="lightboxIndex !== null && images.length"
