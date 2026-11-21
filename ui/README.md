@@ -31,7 +31,9 @@ ui/
                           ModelCard, ModelDrawer, ExampleLightbox,
                           BaseModelQuickFilter, NodePickerDialog, FolderTree,
                           ModelActionMenu, ModalShell, InputDialog, MoveDialog,
-                          OrganizeDialog, ...
+                          OrganizeDialog, GenerationDetails, Recipe* (card,
+                          drawer, reconnect form, import / batch import /
+                          move / duplicates dialogs), ...
     pages/                LibraryPage (generic, per model type), RecipesPage,
                           SearchPage, DownloadsPage, SettingsPage, NotFoundPage
     config/libraries.ts   per-type config (loras / checkpoints / embeddings)
@@ -646,7 +648,7 @@ see "Phase B1 discovery" at the end of this file.
   renamed or deleted.
 * **Not ported on purpose**: bulk base model / favorite / content rating
   (there is no bulk endpoint; the classic UI loops `save-metadata` per model),
-  the recipe-only missing-LoRA batch download (phase B2), multi-root folder
+  the recipe-only missing-LoRA batch download (done in phase B2a), multi-root folder
   delete, WebSocket progress for fetch-all.
 
 Safety: every destructive step has a confirm that states what happens on
@@ -663,6 +665,124 @@ rating, favorite, replace preview + restore, create / rename / delete of an
 empty throwaway folder; files, API record and folder tree identical
 afterwards). Refresh/relink from Civitai was not run live (it rewrites cached
 metadata that restoring the files cannot reset).
+
+## Recipes (phase B2a)
+
+Ported from the classic UI (`RecipeCard.js`, `RecipeModal.js`,
+`ImportManager.js` + `managers/import/*`, `BatchImportManager.js`,
+`BulkMissingLoraDownloadManager.js`, `DuplicatesManager.js` in recipe mode).
+API client `api/recipes.ts` (re-exported as `recipesApi` from
+`api/endpoints.ts`), pure helpers `utils/recipes.ts`, flows
+`composables/useRecipeActions.ts` and `composables/useRecipeImport.ts`.
+Backend semantics: "Phase B2a discovery" at the end of this file.
+
+* **Library page** (`pages/RecipesPage.vue`): the same toolbar as the model
+  libraries: local search with recipe/tag autocomplete, **Import**, Folders
+  (recipe subfolders; remembered under `lm-ui.library.recipes.folders`), sort
+  (newest/oldest, name, most LoRAs, recently opened), filters (base models,
+  top tags, favorites only, **missing LoRAs only** = `lora_availability=missing`)
+  with chips, the base-model quick filter (the synthetic "Unknown" bucket is
+  left out), card size, **Tools** (Batch import..., Find duplicates...) and
+  selection mode: Select all loaded (Ctrl/Cmd+A) / none / invert, Move...,
+  Add tags... (one update per recipe, no bulk endpoint), Download missing
+  LoRAs..., Delete... . `?open=<recipe id>` opens the drawer and stays in sync.
+* **Cards** (`RecipeCard.vue`): preview, base model, LoRA status (`N LoRAs`,
+  `x of N LoRAs missing` in warning, `x of N unavailable` in danger), favorite,
+  Send to ComfyUI (Shift+click replaces) and the action menu (right-click or
+  "..."; `ModelActionMenu` now takes an `items` list): Send, Copy recipe
+  syntax, Rename..., Move..., Download missing LoRAs..., Delete... .
+* **Drawer** (`RecipeDrawer.vue`): preview; Send to ComfyUI / Copy recipe
+  syntax (`GET /recipe/{id}/syntax` through the shared send-to-workflow
+  composable and node picker, like the classic card), Load workflow in
+  ComfyUI (only when the image embeds one), source link; Rename..., Move...,
+  Re-match, Delete...; checkpoint and LoRAs with thumbnail, strength and
+  status (In library / Missing / Unavailable / Excluded), a link to the model
+  drawer (`/loras?open=<localPath>`, `/checkpoints?open=...`) when in the
+  library, **Reconnect** (inline form, `RecipeReconnectForm.vue`: ranked
+  suggestions with their match reason, search-as-you-type, free text or
+  `<lora:name:1>` syntax, the backend's error shown inline; a same-family base
+  model succeeds with a warning toast), **Restore** for a reconnected entry,
+  and "Download N missing LoRAs..."; generation data through the shared
+  `GenerationDetails.vue` (also used by the example lightbox now); tags
+  editor (click = filter); details (dates, folder, source, id, JSON path).
+  Opening the drawer stamps `POST /recipe/{id}/opened` like the classic modal
+  (feeds the "Recently opened" sort; writes only the open-stats file).
+* **Import** (`RecipeImportDialog.vue`): drop / choose / paste (Ctrl+V) an
+  image, or type an http(s) image URL, a Civitai image URL or an image path
+  on the server -> analysis (spinner; "no metadata" and backend errors stay on
+  the first step with the message) -> review: preview, title (first 10 prompt
+  words, else the file name), tags, base model, a warning listing recipes
+  with the same LoRAs, the checkpoint and LoRAs with their status, generation
+  data, **Download N missing LoRAs...** -> **Save recipe** -> done (Open
+  recipe, Import another, download missing). A newer analysis supersedes an
+  older one (`useRecipeImport` state machine: input -> analyzing -> review ->
+  saving -> done).
+* **Missing LoRAs**: every "download missing" button feeds
+  `https://civitai.com/api/download/models/<versionId>` lines (analysis rows
+  with a model id use the model URL) into the **phase B1 download dialog**
+  (`DownloadDialog` with `prefix="loras"`), so they go through the queue
+  worker with its lookups, badges and destination picker; nothing is
+  downloaded without that dialog's own confirmation. Missing entries without
+  a Civitai version id are counted in a warning; unavailable (deleted /
+  hash-invalid) ones are skipped, like the classic manager.
+* **Move** (`RecipeMoveDialog.vue`): the recipes root, its folders and an
+  optional new subfolder (validated like the model move); the target is sent
+  relative to the root (the root itself as its absolute path). Failures stay
+  listed and Move retries only those.
+* **Batch import** (`RecipeBatchImportDialog.vue`): one URL or server image
+  path per line (live preview of recognised / not recognised / duplicate
+  lines), tags, "skip images without generation data"; the backend job is
+  polled every second (visibility-aware `createPoller`) with per-item status
+  and Cancel. Directory import (server-side folder browsing) stays in the
+  classic UI.
+* **Duplicates** (`RecipeDuplicatesDialog.vue`): groups by LoRA fingerprint
+  (optionally also the prompt) and by source URL; "Keep newest, select the
+  rest"; one recipe of every group can never be selected; Delete selected
+  goes through the normal delete.
+
+### Safety
+
+* Delete (single, bulk, duplicates) always asks a danger confirm that says
+  the image and `.recipe.json` are removed, that Undo works for 20 s and that
+  LoRA/checkpoint files are not affected; the toast offers **Undo for 18 s**
+  (`POST /undo-delete`, the same staging as models). A `batch_id: null`
+  answer (hard delete) says "deleted permanently" and offers no Undo.
+* `recipesApi.update` only ever sends the editable keys (`pickRecipeUpdate`):
+  the backend would store any key it receives.
+* Re-match only touches deleted / hash-invalid entries (no "relaxed" option
+  in the new UI). Re-import (delete + re-create from the source), global
+  re-match, sharing and the recipe preview replacement (no endpoint) are not
+  ported.
+
+### Tests and verification
+
+* Backend contract tests `tests/routes/test_recipe_ui_contract.py` (written
+  before the UI; real routes, persistence, ExifUtils and RecipeScanner on temp
+  directories): save writes `<id>.webp` + `<id>.recipe.json` into the root
+  and lists enriched LoRAs, save needs a name, analyze answers HTTP 200 +
+  `error` without metadata and parses A1111 parameters offline, update writes
+  only the sent keys and refuses a body without an editable key, move to a
+  subfolder and back keeps the image bytes, reconnect + restore round trip,
+  syntax keeps missing LoRAs and skips hash-invalid ones, delete -> undo is
+  byte-identical, bulk delete merges into one batch, unknown ids are 404.
+* Frontend `tests/recipes.test.ts` (written before the UI): request builders,
+  analysis normalisation, missing-LoRA collection feeding the B1 parser,
+  reconnect/tag/batch input parsing, the import state machine (no metadata,
+  backend error, URL vs. local path, stale analysis, failed save) and the
+  delete / undo / bulk / favorite / rename / tags / reconnect / move flows.
+* Checked in a browser against a mock harness (5 mocked recipes using real
+  LoRA records): grid, drawer, reconnect with base-model warning, delete +
+  undo, import (no-metadata error, review, download dialog, save, done),
+  duplicates, batch import; Light and Dark, desktop and phone.
+* One live run on the real backend (snapshot first; see the report of phase
+  B2a): import of a generated 64x48 PNG with A1111 parameters, title / tags /
+  favorite edits, delete from the card menu; afterwards the recipes root and
+  the API list were identical to the snapshot. The backend legitimately
+  rewrote its own cache files (`cache/recipe/default.sqlite` and
+  `cache/fts/recipe_fts.sqlite`, same size, still zero recipe rows; the FTS
+  `-wal`/`-shm` files were checkpointed away) and removed the staging
+  folder after the 20 s purge. The drawer was not opened live, so no
+  open-stats entry was written.
 
 ## Phase 1 scope and roadmap
 
@@ -685,7 +805,7 @@ Covered in phase 1:
   move top/end/remove, history with retry / retry failed / delete / clear,
   global pause/resume, add by Civitai URL or model id. Polls every 1.5 s only
   while the page is open and the tab visible (5 s for the top-bar indicator).
-* Recipes: simple read-only grid linking to the classic UI.
+* Recipes: originally a read-only grid; replaced by the full recipe library in phase B2a (see "Recipes (phase B2a)").
 * Settings: theme/density, default roots, filename and folder templates,
   queue concurrency (validated 1-5), a few display toggles.
 
@@ -696,13 +816,16 @@ Left to the classic UI for now (linked from the new UI):
   from that area: bulk set base model / favorite / content rating (no bulk
   endpoint), deleting a folder that exists in several roots, WebSocket
   progress of fetch-all.
-* Phase B2: recipe details, import (image/URL/batch), editing, LoRA reconnect
-  and the missing-LoRA batch download.
-* Local example images (download, import, delete, NSFW levels), statistics
-  page, doctor/diagnostics, backups, metadata archive, LLM settings, proxy and
-  the rest of the settings.
+* Phase B2a (recipes) is done. Still classic-only for recipes: re-import
+  from the source, global and relaxed re-match, sharing / downloading a
+  recipe, directory batch import (server folder browser), creating a recipe
+  from an example image or the ComfyUI widget, editing prompts/generation
+  parameters, "send to workflow" with a strength override per LoRA.
+* Phase B2b: local example images (download, import, delete, NSFW levels),
+  statistics page, doctor/diagnostics, backups, metadata archive and the
+  remaining settings (LLM, proxy, ...).
 * WebSocket progress (the new UI polls instead), "send to workflow" for
-  checkpoints, embeddings and recipes, translations other than English.
+  checkpoints and embeddings, translations other than English.
 
 ## Phase B1 discovery: downloads and model tools (backend semantics)
 
@@ -742,8 +865,8 @@ relative to `py/`.
   "Downloads and model tools (phase B1)" above) so the new dialog's root/folder choice still goes through
   the queue worker.
 * `BulkMissingLoraDownloadManager.js` is recipe-only (missing LoRAs of
-  recipes, one `download-model` POST per LoRA with default paths) and is left
-  to phase B2 with the recipes.
+  recipes, one `download-model` POST per LoRA with default paths); phase B2a
+  routes those LoRAs through the download dialog instead.
 
 ### Model tools
 
