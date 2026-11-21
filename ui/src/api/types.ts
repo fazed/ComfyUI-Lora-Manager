@@ -186,6 +186,120 @@ export interface RecipeItem {
   modified?: number
 }
 
+/** Undo handles of a staged (pending) delete: one merged batch, or several on a merge failure. */
+export interface UndoHandle {
+  batch_id?: string | null
+  batch_ids?: string[] | null
+}
+
+/** POST /{prefix}/delete. `batch_id` is null when the backend fell back to a hard delete (no undo). */
+export interface DeleteResponse extends UndoHandle {
+  success: boolean
+  deleted_files?: string[]
+}
+
+export interface BulkDeleteEntry {
+  file_path: string
+  success: boolean
+  error?: string
+  already_missing?: boolean
+}
+
+/** POST /{prefix}/bulk-delete (success is false only when nothing was deleted). */
+export interface BulkDeleteResponse extends UndoHandle {
+  success: boolean
+  status?: string
+  total_deleted?: number
+  total_attempted?: number
+  results?: BulkDeleteEntry[]
+  error?: string
+}
+
+export interface RenameResponse {
+  success: boolean
+  new_file_path: string
+  new_preview_path?: string | null
+}
+
+/** POST /{prefix}/move_model. The backend auto-renames on a name conflict, so read `new_file_path`. */
+export interface MoveResponse {
+  success: boolean
+  original_file_path?: string
+  new_file_path?: string | null
+  message?: string
+  error?: string
+}
+
+export interface BulkMoveEntry {
+  original_file_path: string
+  new_file_path: string | null
+  success: boolean
+  message?: string
+}
+
+export interface BulkMoveResponse {
+  success: boolean
+  message?: string
+  results?: BulkMoveEntry[]
+  success_count?: number
+  failure_count?: number
+}
+
+export interface OrganizePlannedMove {
+  model: string
+  from: string
+  to: string
+  status?: string
+  reason?: string
+}
+
+export interface OrganizeResultEntry {
+  model: string
+  success: boolean
+  status?: 'skipped' | 'issue' | string
+  reason?: string | null
+  message?: string
+  from?: string
+  to?: string
+}
+
+export interface OrganizeSummary {
+  total?: number
+  success?: number
+  skipped?: number
+  failures?: number
+  organization_type?: string
+  path_template?: string | null
+  cleaned_dirs?: Record<string, number>
+  operation_type?: string
+}
+
+/** GET/POST /{prefix}/auto-organize (dry run or real run). */
+export interface OrganizeResponse {
+  success: boolean
+  status?: string
+  message?: string
+  dry_run?: boolean
+  summary?: OrganizeSummary
+  planned_moves?: OrganizePlannedMove[]
+  results?: OrganizeResultEntry[]
+  results_truncated?: boolean
+  sample_results?: OrganizeResultEntry[]
+}
+
+/** Snapshot of a running auto-organize (GET /{prefix}/auto-organize-progress). */
+export interface OrganizeProgress {
+  status?: string
+  total?: number
+  processed?: number
+  success?: number
+  failures?: number
+  skipped?: number
+  message?: string
+  error?: string
+  operation_type?: string
+}
+
 export interface WorkflowRegistry {
   nodes: Record<string, import('@/utils/workflow').RegistryNode>
   node_count?: number

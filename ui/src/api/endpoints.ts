@@ -1,13 +1,21 @@
 /**
- * Typed wrappers around the backend endpoints. Only read-only endpoints and a
- * small set of safe mutations (metadata/notes/tags/favorite, download queue
- * management, curated settings) are exposed; everything destructive stays in
- * the classic UI for now.
+ * Typed wrappers around the backend endpoints: read-only endpoints, safe
+ * mutations (metadata/notes/tags/favorite, download queue management, curated
+ * settings) and the model management actions (delete with undo, rename, move,
+ * exclude, add tags, auto-organize). The destructive ones are only called
+ * from useModelActions / OrganizeDialog after an explicit confirm.
  */
 
-import { request } from './http'
+import { ApiError, request } from './http'
 import type {
+  BulkDeleteResponse,
+  BulkMoveResponse,
   CountEntry,
+  DeleteResponse,
+  MoveResponse,
+  OrganizeProgress,
+  OrganizeResponse,
+  RenameResponse,
   FolderTree,
   HistoryResponse,
   ModelItem,
@@ -87,7 +95,60 @@ export function createModelApi(prefix: ModelPrefix) {
         method: 'POST',
         body: { file_path: filePath, ...updates },
       }),
+
+    // --- Model management (destructive: call only after a confirm) ---------
+    /** Stages the model + sidecars into a pending-delete folder (undo window) or hard-deletes as a fallback. */
+    deleteModel: (filePath: string) =>
+      request<DeleteResponse>(`${prefix}/delete`, { method: 'POST', body: { file_path: filePath } }),
+    bulkDelete: (filePaths: string[]) =>
+      request<BulkDeleteResponse>(`${prefix}/bulk-delete`, { method: 'POST', body: { file_paths: filePaths } }),
+    /** `newFileName` is the new stem; the extension is kept by the backend. */
+    rename: (filePath: string, newFileName: string) =>
+      request<RenameResponse>(`${prefix}/rename`, {
+        method: 'POST',
+        body: { file_path: filePath, new_file_name: newFileName },
+      }),
+    /** `targetPath` is an absolute directory inside a library root (created when missing). */
+    moveModel: (filePath: string, targetPath: string) =>
+      request<MoveResponse>(`${prefix}/move_model`, {
+        method: 'POST',
+        body: { file_path: filePath, target_path: targetPath },
+      }),
+    moveBulk: (filePaths: string[], targetPath: string) =>
+      request<BulkMoveResponse>(`${prefix}/move_models_bulk`, {
+        method: 'POST',
+        body: { file_paths: filePaths, target_path: targetPath },
+      }),
+    exclude: (filePath: string) =>
+      request<{ success: boolean; message?: string }>(`${prefix}/exclude`, { method: 'POST', body: { file_path: filePath } }),
+    unexclude: (filePath: string) =>
+      request<{ success: boolean; message?: string }>(`${prefix}/unexclude`, { method: 'POST', body: { file_path: filePath } }),
+    addTags: (filePath: string, tags: string[]) =>
+      request<{ success: boolean; tags?: string[] }>(`${prefix}/add-tags`, { method: 'POST', body: { file_path: filePath, tags } }),
+    /** Dry run: the plan only, nothing moves. Always sends dry_run=true. */
+    autoOrganizePreview: () =>
+      request<OrganizeResponse>(`${prefix}/auto-organize`, { query: { dry_run: 'true' } }),
+    /** REAL run: moves files of the whole library type. Only after an explicit confirm. */
+    autoOrganizeRun: () => request<OrganizeResponse>(`${prefix}/auto-organize`, { method: 'POST', body: {} }),
+    /** Latest progress snapshot, or null when no run is in progress (404). */
+    autoOrganizeProgress: async (): Promise<OrganizeProgress | null> => {
+      try {
+        const response = await request<{ progress?: OrganizeProgress }>(`${prefix}/auto-organize-progress`)
+        return response.progress ?? null
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 404) return null
+        throw error
+      }
+    },
   }
+}
+
+/** Restores a staged delete batch (POST /api/lm/undo-delete; 404 = unknown, expired or occupied). */
+export function undoDelete(batchId: string) {
+  return request<{ success: boolean; restored?: string[]; kind?: string }>('undo-delete', {
+    method: 'POST',
+    body: { batch_id: batchId },
+  })
 }
 
 export type ModelApi = ReturnType<typeof createModelApi>
