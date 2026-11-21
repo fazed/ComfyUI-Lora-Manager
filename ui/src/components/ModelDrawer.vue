@@ -17,6 +17,7 @@ import { usePersistentToggle } from '@/composables/usePersistentToggle'
 import { useSendToWorkflow } from '@/composables/useSendToWorkflow'
 import { withMountPrefix } from '@/utils/basePath'
 import { formatBytes, formatDate, isVideoUrl } from '@/utils/format'
+import { nextTab } from '@/utils/drawer'
 import { isBlurred } from '@/utils/mature'
 import { promptHint } from '@/utils/generation'
 import { sanitizeHtml } from '@/utils/sanitize'
@@ -60,6 +61,7 @@ const strength = ref(loraStrengths(props.item.usage_tips).strength)
 const sending = ref(false)
 const panel = ref<HTMLElement | null>(null)
 const closeButton = ref<HTMLButtonElement | null>(null)
+const scroller = ref<HTMLElement | null>(null)
 // "More actions" menu (the same model actions as the card menu, plus the external links).
 const menu = ref<{ x: number; y: number; opener: HTMLElement } | null>(null)
 
@@ -161,9 +163,22 @@ async function loadVersions(): Promise<void> {
   }
 }
 
+// Every panel stays in the DOM (hidden), so aria-controls is always valid; the data of the
+// Versions tab is still loaded lazily, the first time it is shown. A tab switch starts at the top.
 watch(tab, (value) => {
+  if (scroller.value) scroller.value.scrollTop = 0
   if (value === 'versions' && !versionsLoaded.value) void loadVersions()
 })
+
+/** Roving tabindex: arrows / Home / End move focus to the neighbouring tab and select it. */
+async function onTabKey(event: KeyboardEvent, index: number): Promise<void> {
+  const next = nextTab(event.key, index, TABS.length)
+  if (next === null) return
+  event.preventDefault()
+  tab.value = TABS[next].id
+  await nextTick()
+  document.getElementById(`tab-${TABS[next].id}`)?.focus()
+}
 
 watch(
   () => props.item.file_path,
@@ -174,6 +189,7 @@ watch(
     versions.value = null
     versionsLoaded.value = false
     tab.value = 'overview'
+    if (scroller.value) scroller.value.scrollTop = 0
     tagsExpanded.value = false
     lightboxIndex.value = null
     examplesOpen.value = false
@@ -288,9 +304,12 @@ function onKey(event: KeyboardEvent): void {
   if (!isTopmost() || document.querySelector('dialog[open]')) return
   if (event.key === 'Tab' && panel.value) {
     // Keep focus inside the drawer while it is open.
-    const focusable = panel.value.querySelectorAll<HTMLElement>(
-      'a[href], button:not([disabled]), input:not([disabled]), textarea, select, [tabindex]:not([tabindex="-1"])',
-    )
+    // Hidden tab panels (v-show) are not focus targets.
+    const focusable = [
+      ...panel.value.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), textarea, select, [tabindex]:not([tabindex="-1"])',
+      ),
+    ].filter((element) => element.getClientRects().length > 0)
     if (!focusable.length) return
     const first = focusable[0]
     const last = focusable[focusable.length - 1]
@@ -367,9 +386,9 @@ useEventListener(document, 'keydown', onKey)
         </button>
       </header>
 
-      <div class="flex gap-1 overflow-x-auto hairline-b border-border px-5 phone:px-3" role="tablist">
+      <div class="flex gap-1 overflow-x-auto hairline-b border-border px-5 phone:px-3" role="tablist" :aria-label="t('detail.tabsLabel')">
         <button
-          v-for="entry in TABS"
+          v-for="(entry, index) in TABS"
           :id="`tab-${entry.id}`"
           :key="entry.id"
           type="button"
@@ -378,15 +397,17 @@ useEventListener(document, 'keydown', onKey)
           :class="tab === entry.id ? 'border-accent text-fg' : 'border-transparent text-muted'"
           :aria-selected="tab === entry.id"
           :aria-controls="`panel-${entry.id}`"
+          :tabindex="tab === entry.id ? 0 : -1"
           @click="tab = entry.id"
+          @keydown="onTabKey($event, index)"
         >
           {{ t(entry.label) }}
         </button>
       </div>
 
-      <div class="flex-1 overflow-y-auto p-5 phone:px-4">
+      <div ref="scroller" class="flex-1 overflow-y-auto p-5 phone:px-4">
         <!-- Overview -->
-        <section v-if="tab === 'overview'" id="panel-overview" role="tabpanel" aria-labelledby="tab-overview" :class="sectionClass">
+        <section v-show="tab === 'overview'" id="panel-overview" role="tabpanel" aria-labelledby="tab-overview" :class="sectionClass">
           <!-- Send to ComfyUI (LoRAs): one compact row, usage tips from the metadata below it. -->
           <div v-if="canSend" class="flex flex-col gap-2 rounded-md bg-sunken p-3">
             <div class="flex flex-wrap items-end gap-2">
@@ -673,7 +694,7 @@ useEventListener(document, 'keydown', onKey)
         </section>
 
         <!-- Description -->
-        <section v-else-if="tab === 'description'" id="panel-description" role="tabpanel" aria-labelledby="tab-description" :class="sectionClass">
+        <section v-show="tab === 'description'" id="panel-description" role="tabpanel" aria-labelledby="tab-description" :class="sectionClass">
           <StateBlock v-if="metaLoading" kind="loading" />
           <!-- eslint-disable-next-line vue/no-v-html -- sanitized with an allow-list -->
           <div v-else-if="description" class="lm-prose" v-html="description"></div>
@@ -681,7 +702,7 @@ useEventListener(document, 'keydown', onKey)
         </section>
 
         <!-- Versions -->
-        <section v-else id="panel-versions" role="tabpanel" aria-labelledby="tab-versions" :class="sectionClass">
+        <section v-show="tab === 'versions'" id="panel-versions" role="tabpanel" aria-labelledby="tab-versions" :class="sectionClass">
           <StateBlock v-if="versionsLoading" kind="loading" />
           <StateBlock v-else-if="versionsError" kind="error" :message="versionsError" @retry="loadVersions" />
           <StateBlock v-else-if="!versions?.versions?.length" kind="empty" :title="t('detail.noVersions')" />
