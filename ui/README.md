@@ -547,6 +547,91 @@ suffix). The flows were also verified once against a running backend on one
 small LoRA, with a verified backup taken first (rename -> back, move -> back,
 delete -> undo; all files hash-identical afterwards).
 
+## Downloads and model tools (phase B1)
+
+Ported from the classic UI (`DownloadManager.js`, `ModelDuplicatesManager.js`,
+`SidebarManager.js` folder actions, `MoveManager.js` default path, the
+context-menu metadata actions). Flows live in
+`composables/useDownloadFlow.ts` and `composables/useModelTools.ts`, pure
+helpers in `utils/downloads.ts` and `utils/modelTools.ts`. Backend semantics:
+see "Phase B1 discovery" at the end of this file.
+
+* **Download dialog** (`components/DownloadDialog.vue`): library toolbar
+  **Tools > Download...**, the **Download...** button on the Downloads page
+  (takes the typed URL along) and **Download...** per version in the drawer's
+  Versions tab (model + version preselected). Steps: model type + Civitai
+  URL / model id / download link (`?fileId=` preselects that file) -> versions
+  with In library / Partly in library / Downloaded before / Queued / Early
+  access badges (a version fully in the library or already queued cannot be
+  queued again) and the weight files when a version has several -> library
+  root, "Use the default path template" (remembered per type) or a folder
+  (pick from the root's folders or type a new relative path; validated) with
+  the target preview -> **Add to queue** (one queue row per chosen file). The
+  queue worker downloads them; the dialog never calls the blocking
+  `download-model` endpoint.
+* **Queue destination (backend, fork-only)**: `GET /downloads/queue/add`
+  accepts `model_root`, `relative_path`, `use_default_paths`. The root must be
+  a configured LoRA / checkpoint / unet / embedding root (extra roots too),
+  the folder a relative path without `..`, drive letters or `<>:"|?*`; else
+  400 and nothing is queued. The row stores it in a new nullable
+  `destination` column (added by migration to `download_queue` and
+  `download_history`); it survives history and retry, and the worker passes
+  it on (`use_default_paths` + a chosen root = `use_save_dir_as_root`). Rows
+  without a destination behave exactly as before. Tests:
+  `tests/routes/test_download_queue_destination.py`.
+* **Tools menu** (library toolbar): Download..., Find duplicates...,
+  Excluded models..., Fetch missing Civitai metadata... (confirm; the request
+  runs until done, then a summary toast).
+* **Duplicates** (`DuplicatesDialog.vue`): hash groups side by side (preview,
+  path, size, modified, base model, Civitai version), **Verify hashes** per
+  group (files that differ are marked and cannot be selected), selection with
+  the rule that one real copy of every group stays, **Delete selected...**
+  through the phase A delete (confirm + 20 s Undo). Second tab: file name
+  conflicts (read-only; a click opens the model).
+* **Excluded models** (`ExcludedDialog.vue`): searchable paged list with
+  **Restore** (unexclude).
+* **Per model** (card menu and drawer): Apply filename template..., Replace
+  preview... (file or image URL plus the rating of the new preview; warns that
+  the old preview is deleted), Content rating... (PG ... XXX), Refresh from
+  Civitai (the confirm says model name and base model are overwritten),
+  Re-link to Civitai... (model URL with optional version).
+* **Filename template** (`TemplateDialog.vue`, also for a selection and a
+  folder): the dry run (always a POST with `dry_run: true` and an explicit
+  scope) lists the planned renames; **Rename files...** asks a danger confirm
+  with the count and the template. The API client refuses a call without
+  `file_paths` / `folder_paths` (no accidental whole-library run). The
+  template shown comes from Settings (`download_filename_templates`; the dry
+  run does not report it).
+* **Move dialog**: "Use the default path template" sends the root with
+  `use_default_paths: true`; the backend appends each model's template folder.
+* **Folder panel** ("..." in its header): New folder... (inside the selected
+  folder or a chosen root), Rename folder..., Apply filename template...,
+  Delete folder.... Delete always runs the dry run first: a folder with models
+  is refused with the count; otherwise the confirm says whether it is empty or
+  how many non-model files (and bytes) are deleted with it. A folder present
+  in several roots is not deleted from the new UI. The panel tree now
+  includes empty folders (`include_empty=true`), so a new folder can be
+  renamed or deleted.
+* **Not ported on purpose**: bulk base model / favorite / content rating
+  (there is no bulk endpoint; the classic UI loops `save-metadata` per model),
+  the recipe-only missing-LoRA batch download (phase B2), multi-root folder
+  delete, WebSocket progress for fetch-all.
+
+Safety: every destructive step has a confirm that states what happens on
+disk; the filename template and folder delete always preview first. Frontend
+tests `tests/downloadDialog.test.ts` and `tests/modelTools.test.ts` were
+written before the UI. Backend contract tests
+`tests/services/test_model_tools_contract.py`: preview replace deletes old
+previews and writes WebP (keeps GIF), `save-metadata` changes only the sent
+key but stamps `size`/`modified`, verify-duplicates writes the corrected
+hash, folder create/rename/delete, delete refuses folders with models,
+default-path moves. The flows were checked in a browser against a mock
+harness and once live on the smallest LoRA with a verified backup (content
+rating, favorite, replace preview + restore, create / rename / delete of an
+empty throwaway folder; files, API record and folder tree identical
+afterwards). Refresh/relink from Civitai was not run live (it rewrites cached
+metadata that restoring the files cannot reset).
+
 ## Phase 1 scope and roadmap
 
 Covered in phase 1:
@@ -574,16 +659,13 @@ Covered in phase 1:
 
 Left to the classic UI for now (linked from the new UI):
 
-* Phase A (done, see "Model management actions") moved delete with undo,
-  rename, move, bulk delete/move, exclude, bulk add-tags, bulk send and
-  auto-organize to the new UI. Still classic-only from that area: the
-  excluded-models list (unexclude outside the Undo toast), duplicate finder,
-  relink/refresh Civitai metadata, replace preview, set NSFW level, bulk set
-  base model / favorite / content rating, apply filename template, move with
-  "use default path", folder create/rename/delete in the sidebar.
-* Download modal with version/file/root selection (the new form always uses
-  the default root and path template).
-* Recipe details, import (image/URL/batch), editing and LoRA reconnect.
+* Phase A (model management actions) and phase B1 (download dialog and
+  model tools, see "Downloads and model tools") are done. Still classic-only
+  from that area: bulk set base model / favorite / content rating (no bulk
+  endpoint), deleting a folder that exists in several roots, WebSocket
+  progress of fetch-all.
+* Phase B2: recipe details, import (image/URL/batch), editing, LoRA reconnect
+  and the missing-LoRA batch download.
 * Local example images (download, import, delete, NSFW levels), statistics
   page, doctor/diagnostics, backups, metadata archive, LLM settings, proxy and
   the rest of the settings.
@@ -625,7 +707,7 @@ relative to `py/`.
   given `model_root`. Without default paths `model_root/relative_path` is used
   as given (traversal-checked, **not** checked against the library roots).
 * **B1 decision**: the queue now stores an optional **destination** (see
-  "Phase B1" below) so the new dialog's root/folder choice still goes through
+  "Downloads and model tools (phase B1)" above) so the new dialog's root/folder choice still goes through
   the queue worker.
 * `BulkMissingLoraDownloadManager.js` is recipe-only (missing LoRAs of
   recipes, one `download-model` POST per LoRA with default paths) and is left

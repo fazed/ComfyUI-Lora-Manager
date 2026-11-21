@@ -84,7 +84,10 @@ export function createModelApi(prefix: ModelPrefix) {
       request<{ tags: TagEntry[] }>(`${prefix}/search-tags`, { query: { q, limit }, signal }).then((r) => r.tags ?? []),
     roots: () => request<{ roots: string[] }>(`${prefix}/roots`).then((r) => r.roots ?? []),
     folderTree: () =>
-      request<{ tree: FolderTree }>(`${prefix}/unified-folder-tree`).then((r) => r.tree ?? {}),
+      // Empty folders included: a folder created in the panel must be visible to rename or delete it.
+      request<{ tree: FolderTree }>(`${prefix}/unified-folder-tree`, { query: { include_empty: 'true' } }).then(
+        (r) => r.tree ?? {},
+      ),
     /** Folders of one root, including empty ones (move targets). */
     rootFolderTree: (modelRoot: string) =>
       request<{ tree: FolderTree }>(`${prefix}/folder-tree`, { query: { model_root: modelRoot, include_empty: 'true' } }).then(

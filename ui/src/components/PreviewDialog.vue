@@ -95,7 +95,7 @@ async function save(): Promise<void> {
       <p v-else class="lm-hint">{{ t('tools.nsfw.hint') }}</p>
 
       <fieldset class="flex flex-col gap-2" :disabled="busy">
-        <legend class="lm-label mb-1">{{ mode === 'rating' ? t('tools.nsfw.open') : t('tools.preview.level') }}</legend>
+        <legend class="lm-label mb-1">{{ mode === 'rating' ? t('tools.nsfw.label') : t('tools.preview.level') }}</legend>
         <div class="flex flex-wrap gap-1" role="radiogroup">
           <label v-if="mode === 'preview'" class="lm-chip relative cursor-pointer has-focus-visible:focus-ring" :class="{ 'lm-chip--active': level === 0 }">
             <input v-model="level" class="sr-only" type="radio" name="nsfw-level" :value="0" />{{ t('tools.nsfw.unrated') }}

@@ -70,7 +70,7 @@ describe('http client', () => {
     fetchMock.mockResolvedValue(jsonResponse({ success: true, tree: { A: {} } }))
     const api = createModelApi('checkpoints')
     await expect(api.folderTree()).resolves.toEqual({ A: {} })
-    expect(fetchMock.mock.calls[0][0]).toBe('/comfy/api/lm/checkpoints/unified-folder-tree')
+    expect(fetchMock.mock.calls[0][0]).toBe('/comfy/api/lm/checkpoints/unified-folder-tree?include_empty=true')
 
     fetchMock.mockResolvedValue(jsonResponse({ success: true }))
     await api.saveMetadata('C:/m.safetensors', { notes: 'hi' })

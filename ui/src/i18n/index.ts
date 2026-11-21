@@ -430,6 +430,7 @@ export const messages = {
   'tools.nsfw.title': 'Content rating of "{name}"',
   'tools.nsfw.hint': 'The rating of the preview image; it controls blurring of mature previews.',
   'tools.nsfw.unrated': 'Unrated',
+  'tools.nsfw.label': 'Rating',
   'tools.nsfw.save': 'Save rating',
   'tools.nsfw.done': '"{name}" is now rated {level}.',
   'tools.nsfw.failed': 'Saving the rating failed: {error}',
