@@ -55,7 +55,20 @@ export function useExampleImages(model: () => ExampleModelRef, options: { modelT
     customImages.value = Array.isArray(custom) ? custom : []
   }
 
+  let filesRequest = 0
+
+  /** Forget everything about the previous model (the drawer switches models in place). */
+  function clear(): void {
+    filesRequest += 1
+    files.value = []
+    images.value = []
+    customImages.value = []
+    loading.value = false
+    error.value = null
+  }
+
   async function loadFiles(): Promise<void> {
+    const request = ++filesRequest
     if (!hash.value) {
       files.value = []
       return
@@ -63,14 +76,17 @@ export function useExampleImages(model: () => ExampleModelRef, options: { modelT
     loading.value = true
     error.value = null
     try {
-      files.value = await exampleImagesApi.files(hash.value)
+      const result = await exampleImagesApi.files(hash.value)
+      if (request !== filesRequest) return
+      files.value = result
       configured.value = true
     } catch (err) {
+      if (request !== filesRequest) return
       files.value = []
       if (isNotConfigured(err)) configured.value = false
       else error.value = (err as Error).message
     } finally {
-      loading.value = false
+      if (request === filesRequest) loading.value = false
     }
   }
 
@@ -181,7 +197,7 @@ export function useExampleImages(model: () => ExampleModelRef, options: { modelT
     }
   }
 
-  return { files, images, customImages, media, localCount, configured, loading, busy, error, hash, setMetadata, loadFiles, importFiles, remove, setNsfw, downloadThis, openFolder }
+  return { files, images, customImages, media, localCount, configured, loading, busy, error, hash, setMetadata, clear, loadFiles, importFiles, remove, setNsfw, downloadThis, openFolder }
 }
 
 // --------------------------------------------------------------------------- library-wide download

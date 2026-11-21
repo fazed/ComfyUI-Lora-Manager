@@ -92,8 +92,8 @@ export function createModelApi(prefix: ModelPrefix) {
       request<{ tree: FolderTree }>(`${prefix}/folder-tree`, { query: { model_root: modelRoot, include_empty: 'true' } }).then(
         (r) => r.tree ?? {},
       ),
-    metadata: (filePath: string) =>
-      request<{ metadata: ModelMetadata | null }>(`${prefix}/metadata`, { query: { file_path: filePath } }).then(
+    metadata: (filePath: string, signal?: AbortSignal) =>
+      request<{ metadata: ModelMetadata | null }>(`${prefix}/metadata`, { query: { file_path: filePath }, signal }).then(
         (r) => r.metadata ?? null,
       ),
     description: (filePath: string) =>
@@ -104,8 +104,8 @@ export function createModelApi(prefix: ModelPrefix) {
       request<{ civitai_url?: string }>(`${prefix}/civitai-url`, { query: { name: fileName } }).then(
         (r) => r.civitai_url ?? '',
       ),
-    versions: (modelId: number) =>
-      request<{ record: ModelUpdateRecord | null }>(`${prefix}/updates/versions/${modelId}`).then((r) => r.record ?? null),
+    versions: (modelId: number, signal?: AbortSignal) =>
+      request<{ record: ModelUpdateRecord | null }>(`${prefix}/updates/versions/${modelId}`, { signal }).then((r) => r.record ?? null),
     /** Partial metadata update (notes, tags, favorite, ...). */
     saveMetadata: (filePath: string, updates: Record<string, unknown>) =>
       request<{ success: boolean }>(`${prefix}/save-metadata`, {

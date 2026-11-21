@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useEventListener } from '@vueuse/core'
+import { useEventListener, useLocalStorage } from '@vueuse/core'
 import AppIcon from './AppIcon.vue'
 import ExampleImagesDialog from './ExampleImagesDialog.vue'
 import ExampleLightbox from './ExampleLightbox.vue'
@@ -18,6 +18,17 @@ import { useSendToWorkflow } from '@/composables/useSendToWorkflow'
 import { withMountPrefix } from '@/utils/basePath'
 import { formatBytes, formatDate, isVideoUrl } from '@/utils/format'
 import { currentVersionId, nextTab, shouldConfirmClose } from '@/utils/drawer'
+import {
+  availableTabs,
+  createRequestGuard,
+  parseStoredTab,
+  positionLabel,
+  resolveTab,
+  shouldHandleNavKey,
+  type DrawerTab,
+  type NavDirection,
+  type NavState,
+} from '@/utils/drawerNav'
 import { isBlurred } from '@/utils/mature'
 import { promptHint } from '@/utils/generation'
 import { sanitizeHtml } from '@/utils/sanitize'
@@ -26,8 +37,19 @@ import { loraStrengths, usageTipEntries, type SendMode } from '@/utils/workflow'
 import { t, type MessageKey } from '@/i18n'
 
 const props = withDefaults(
-  defineProps<{ item: ModelItem; api: ModelApi; classicUrl: string; civitaiHost?: string; canSend?: boolean; blurMature?: boolean }>(),
-  { civitaiHost: 'civitai.com', canSend: false, blurMature: false },
+  defineProps<{
+    item: ModelItem
+    api: ModelApi
+    classicUrl: string
+    civitaiHost?: string
+    canSend?: boolean
+    blurMature?: boolean
+    /** Position of this model in the displayed list (prev/next); null/absent hides the controls. */
+    nav?: NavState | null
+    /** Preview URLs of the neighbours, warmed in the background (images only, no metadata). */
+    prefetch?: string[]
+  }>(),
+  { civitaiHost: 'civitai.com', canSend: false, blurMature: false, nav: null, prefetch: () => [] },
 )
 const emit = defineEmits<{
   close: []
@@ -36,9 +58,11 @@ const emit = defineEmits<{
   action: [action: ModelAction]
   /** Open the download dialog for this Civitai model/version URL. */
   download: [input: string]
+  /** Step to the previous/next model of the list (the library page owns the list and the open item). */
+  navigate: [direction: NavDirection]
 }>()
 
-type Tab = 'overview' | 'description' | 'versions'
+type Tab = DrawerTab
 const TABS: { id: Tab; label: MessageKey }[] = [
   { id: 'overview', label: 'detail.tabs.overview' },
   { id: 'description', label: 'detail.tabs.description' },
@@ -56,7 +80,11 @@ const touchIcon = 'phone:size-touch touch:size-touch'
 const toasts = useToasts()
 const { confirm } = useConfirm()
 const workflow = useSendToWorkflow()
-const tab = ref<Tab>('overview')
+// The last selected tab is remembered across drawers and reloads (plain string, validated on read).
+// A model without that tab (Versions needs a Civitai model id) shows Overview without touching the preference.
+const preferredTab = useLocalStorage<string>('lm-ui.detail.tab', 'overview', { writeDefaults: false })
+const tabFor = (item: ModelItem): Tab => resolveTab(parseStoredTab(preferredTab.value), availableTabs(item))
+const tab = ref<Tab>(tabFor(props.item))
 const specsOpen = usePersistentToggle('lm-ui.detail.specsOpen', false)
 const tagsExpanded = ref(false)
 const lightboxIndex = ref<number | null>(null)
@@ -67,6 +95,10 @@ const panel = ref<HTMLElement | null>(null)
 const closeButton = ref<HTMLButtonElement | null>(null)
 const scroller = ref<HTMLElement | null>(null)
 const notesField = ref<HTMLTextAreaElement | null>(null)
+const prevButton = ref<HTMLButtonElement | null>(null)
+const nextButton = ref<HTMLButtonElement | null>(null)
+const announcement = ref('')
+let announceNext = false
 // "More actions" menu (the same model actions as the card menu, plus the external links).
 const menu = ref<{ x: number; y: number; opener: HTMLElement } | null>(null)
 
@@ -133,22 +165,35 @@ const description = computed(() =>
 const specsSummary = computed(() =>
   [fileType.value.toUpperCase(), props.item.file_size ? formatBytes(props.item.file_size) : ''].filter(Boolean).join(' · '),
 )
+const positionText = computed(() =>
+  props.nav
+    ? positionLabel(props.nav.ordinal, props.nav.total, (position, total) => t('detail.nav.position', { position, total }))
+    : '',
+)
 const notesDirty = computed(() => notes.value !== (props.item.notes ?? ''))
 
+// Switching models quickly: only the latest metadata / versions response is applied (earlier fetches are aborted).
+const metaGuard = createRequestGuard()
+const versionsGuard = createRequestGuard()
+
 async function loadMetadata(): Promise<void> {
+  const request = metaGuard.begin()
   metaLoading.value = true
   metaError.value = null
   try {
-    metadata.value = await props.api.metadata(props.item.file_path)
+    const result = await props.api.metadata(props.item.file_path, request.signal)
+    if (!request.isCurrent()) return
+    metadata.value = result
     examples.setMetadata(metadata.value?.images, metadata.value?.customImages)
     void examples.loadFiles()
   } catch (error) {
+    if (!request.isCurrent()) return
     // Models without Civitai metadata answer success:false; that's not an error for the user.
     metadata.value = null
     examples.setMetadata([], [])
     if (props.item.from_civitai) metaError.value = (error as Error).message
   } finally {
-    metaLoading.value = false
+    if (request.isCurrent()) metaLoading.value = false
   }
 }
 
@@ -157,15 +202,21 @@ async function loadVersions(): Promise<void> {
     versionsLoaded.value = true
     return
   }
+  const request = versionsGuard.begin()
   versionsLoading.value = true
   versionsError.value = null
   try {
-    versions.value = await props.api.versions(modelId.value)
+    const result = await props.api.versions(modelId.value, request.signal)
+    if (!request.isCurrent()) return
+    versions.value = result
   } catch (error) {
+    if (!request.isCurrent()) return
     versionsError.value = (error as Error).message
   } finally {
-    versionsLoading.value = false
-    versionsLoaded.value = true
+    if (request.isCurrent()) {
+      versionsLoading.value = false
+      versionsLoaded.value = true
+    }
   }
 }
 
@@ -178,12 +229,20 @@ watch(tab, (value) => {
 
 /** Roving tabindex: arrows / Home / End move focus to the neighbouring tab and select it. */
 async function onTabKey(event: KeyboardEvent, index: number): Promise<void> {
+  // Alt+Arrow is model navigation, not a tab move.
+  if (event.altKey || event.ctrlKey || event.metaKey) return
   const next = nextTab(event.key, index, TABS.length)
   if (next === null) return
   event.preventDefault()
-  tab.value = TABS[next].id
+  selectTab(TABS[next].id)
   await nextTick()
   document.getElementById(`tab-${TABS[next].id}`)?.focus()
+}
+
+/** A tab picked by the user: shown now and remembered for the next drawer. */
+function selectTab(id: Tab): void {
+  tab.value = id
+  preferredTab.value = id
 }
 
 watch(
@@ -194,14 +253,41 @@ watch(
     metadata.value = null
     versions.value = null
     versionsLoaded.value = false
-    tab.value = 'overview'
+    versionsLoading.value = false
+    versionsError.value = null
+    versionsGuard.cancel()
+    examples.clear()
+    // Keep the remembered tab (the tab watcher loads Versions when it changes; a Versions -> Versions step loads here).
+    const previousTab = tab.value
+    tab.value = tabFor(props.item)
+    if (tab.value === 'versions' && previousTab === 'versions') void loadVersions()
     if (scroller.value) scroller.value.scrollTop = 0
     tagsExpanded.value = false
     lightboxIndex.value = null
     examplesOpen.value = false
     strength.value = loraStrengths(props.item.usage_tips).strength
     void loadMetadata()
+    if (announceNext) {
+      announceNext = false
+      announcement.value = t('detail.nav.announce', { name: displayName.value, position: positionText.value })
+    }
   },
+)
+
+// Warm the neighbours' preview images only (no metadata requests while stepping).
+const prefetched = new Set<string>()
+watch(
+  () => props.prefetch,
+  (urls) => {
+    for (const url of urls) {
+      if (!url || prefetched.has(url)) continue
+      prefetched.add(url)
+      const image = new Image()
+      image.decoding = 'async'
+      image.src = withMountPrefix(url)
+    }
+  },
+  { immediate: true },
 )
 
 async function copy(text: string): Promise<void> {
@@ -323,6 +409,23 @@ async function confirmLeave(): Promise<boolean> {
   return discard
 }
 
+/** Previous / next model; asks first when the notes have unsaved changes. */
+async function requestNavigate(direction: NavDirection): Promise<void> {
+  const nav = props.nav
+  if (!nav || (direction === 'prev' ? !nav.hasPrev : !nav.hasNext)) return
+  if (!(await confirmLeave())) return
+  announceNext = true
+  emit('navigate', direction)
+  // At either end the pressed button becomes disabled: keep focus inside the drawer.
+  await nextTick()
+  const active = document.activeElement
+  if (!active || active === document.body || (active as HTMLButtonElement).disabled) {
+    const other = [prevButton.value, nextButton.value].find((button) => button && !button.disabled)
+    const target = other ?? closeButton.value
+    target?.focus()
+  }
+}
+
 async function requestClose(): Promise<void> {
   if (await confirmLeave()) emit('close')
 }
@@ -337,7 +440,14 @@ const { isTopmost, backdrop } = useDismissLayer({ active: () => true, close: () 
 
 function onKey(event: KeyboardEvent): void {
   // Modal dialogs on top (lightbox, node picker) handle their own keys.
-  if (!isTopmost() || document.querySelector('dialog[open]')) return
+  const dialogOpen = !!document.querySelector('dialog[open]')
+  if (!isTopmost() || dialogOpen) return
+  const direction = shouldHandleNavKey(event, { topmost: true, dialogOpen, menuOpen: !!menu.value })
+  if (direction) {
+    event.preventDefault()
+    void requestNavigate(direction)
+    return
+  }
   if (event.key === 'Tab' && panel.value) {
     // Keep focus inside the drawer while it is open.
     // Hidden tab panels (v-show) are not focus targets.
@@ -363,6 +473,7 @@ let previousFocus: HTMLElement | null = null
 onMounted(async () => {
   previousFocus = document.activeElement as HTMLElement | null
   void loadMetadata()
+  if (tab.value === 'versions') void loadVersions()
   await nextTick()
   closeButton.value?.focus()
 })
@@ -379,26 +490,68 @@ useEventListener(document, 'keydown', onKey)
       aria-modal="true"
       aria-labelledby="drawer-title"
     >
-      <header class="flex items-start gap-2 px-5 pt-4 pb-3 phone:px-4 phone:pt-3 phone:pb-2">
-        <div class="min-w-0 flex-1">
-          <h2 id="drawer-title" class="mb-2 text-xl wrap-anywhere phone:mb-1 phone:line-clamp-2 phone:text-lg" :title="displayName">{{ displayName }}</h2>
-          <div class="flex flex-wrap gap-1">
-            <span v-if="item.base_model" class="lm-badge lm-badge--accent">{{ item.base_model }}</span>
-            <button
-              v-if="item.update_available"
-              type="button"
-              class="lm-badge lm-badge--warning cursor-pointer hover:opacity-80 phone:hidden touch:min-h-touch touch:px-3"
-              :aria-label="t('detail.showUpdates')"
-              @click="tab = 'versions'"
-            >
-              {{ t('card.update') }}
-            </button>
-            <span v-if="item.civitai?.name" class="lm-badge phone:hidden">{{ item.civitai.name }}</span>
-          </div>
+      <!-- Desktop: title block, then [prev position next] favorite more close. Phone: a second row with the
+           navigation (its 44px hit areas overlap the row's padding) so the header stays slim. -->
+      <header
+        class="grid grid-cols-[minmax(0,1fr)_auto_auto_auto_auto] items-start gap-x-2 px-5 pt-4 pb-3 phone:grid-cols-[minmax(0,1fr)_auto_auto_auto] phone:px-4 phone:pt-1 phone:pb-2"
+      >
+        <h2
+          id="drawer-title"
+          class="col-start-1 row-start-1 mb-2 min-w-0 text-xl wrap-anywhere phone:mt-2 phone:mb-1 phone:line-clamp-2 phone:text-lg"
+          :title="displayName"
+        >
+          {{ displayName }}
+        </h2>
+        <div class="col-start-1 row-start-2 flex min-w-0 flex-wrap gap-1 phone:col-span-3 phone:col-start-2 phone:justify-end">
+          <span v-if="item.base_model" class="lm-badge lm-badge--accent">{{ item.base_model }}</span>
+          <button
+            v-if="item.update_available"
+            type="button"
+            class="lm-badge lm-badge--warning cursor-pointer hover:opacity-80 phone:hidden touch:min-h-touch touch:px-3"
+            :aria-label="t('detail.showUpdates')"
+            @click="tab = 'versions'"
+          >
+            {{ t('card.update') }}
+          </button>
+          <span v-if="item.civitai?.name" class="lm-badge phone:hidden">{{ item.civitai.name }}</span>
+        </div>
+        <div
+          v-if="nav"
+          class="col-start-2 row-start-1 flex items-center phone:col-start-1 phone:row-start-2 phone:-my-2 phone:justify-self-start"
+          role="group"
+          :aria-label="t('detail.nav.group')"
+        >
+          <button
+            ref="prevButton"
+            type="button"
+            class="lm-btn lm-btn--ghost lm-btn--icon"
+            :class="touchIcon"
+            :aria-label="t('detail.nav.prev')"
+            :title="t('detail.nav.prevHint')"
+            aria-keyshortcuts="Alt+ArrowLeft K"
+            :disabled="!nav.hasPrev"
+            @click="requestNavigate('prev')"
+          >
+            <AppIcon name="chevronLeft" />
+          </button>
+          <span class="min-w-[5ch] px-1 text-center text-xs whitespace-nowrap text-muted tabular-nums">{{ positionText }}</span>
+          <button
+            ref="nextButton"
+            type="button"
+            class="lm-btn lm-btn--ghost lm-btn--icon"
+            :class="touchIcon"
+            :aria-label="t('detail.nav.next')"
+            :title="t('detail.nav.nextHint')"
+            aria-keyshortcuts="Alt+ArrowRight J"
+            :disabled="!nav.hasNext"
+            @click="requestNavigate('next')"
+          >
+            <AppIcon name="chevronRight" />
+          </button>
         </div>
         <button
           type="button"
-          class="lm-btn lm-btn--ghost lm-btn--icon"
+          class="lm-btn lm-btn--ghost lm-btn--icon col-start-3 row-start-1 phone:col-start-2"
           :class="[touchIcon, { 'text-warning': item.favorite }]"
           :aria-label="t('detail.toggleFavorite')"
           :aria-pressed="!!item.favorite"
@@ -408,7 +561,7 @@ useEventListener(document, 'keydown', onKey)
         </button>
         <button
           type="button"
-          class="lm-btn lm-btn--ghost lm-btn--icon"
+          class="lm-btn lm-btn--ghost lm-btn--icon col-start-4 row-start-1 phone:col-start-3"
           :class="touchIcon"
           :aria-label="t('detail.moreActions')"
           :title="t('detail.moreActions')"
@@ -418,9 +571,17 @@ useEventListener(document, 'keydown', onKey)
         >
           <AppIcon name="more" />
         </button>
-        <button ref="closeButton" type="button" class="lm-btn lm-btn--ghost lm-btn--icon" :class="touchIcon" :aria-label="t('common.close')" @click="requestClose">
+        <button
+          ref="closeButton"
+          type="button"
+          class="lm-btn lm-btn--ghost lm-btn--icon col-start-5 row-start-1 phone:col-start-4"
+          :class="touchIcon"
+          :aria-label="t('common.close')"
+          @click="requestClose"
+        >
           <AppIcon name="close" />
         </button>
+        <p class="sr-only" role="status" aria-live="polite">{{ announcement }}</p>
       </header>
 
       <div class="flex gap-1 overflow-x-auto hairline-b border-border px-5 phone:px-3" role="tablist" :aria-label="t('detail.tabsLabel')">
@@ -435,7 +596,7 @@ useEventListener(document, 'keydown', onKey)
           :aria-selected="tab === entry.id"
           :aria-controls="`panel-${entry.id}`"
           :tabindex="tab === entry.id ? 0 : -1"
-          @click="tab = entry.id"
+          @click="selectTab(entry.id)"
           @keydown="onTabKey($event, index)"
         >
           {{ t(entry.label) }}

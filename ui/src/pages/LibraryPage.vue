@@ -5,7 +5,7 @@
  */
 import { computed, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useEventListener, useTimeoutFn } from '@vueuse/core'
+import { until, useEventListener, useTimeoutFn } from '@vueuse/core'
 import AppIcon from '@/components/AppIcon.vue'
 import BaseModelQuickFilter from '@/components/BaseModelQuickFilter.vue'
 import DownloadDialog from '@/components/DownloadDialog.vue'
@@ -43,6 +43,8 @@ import { useModelActions } from '@/composables/useModelActions'
 import { useModelTools } from '@/composables/useModelTools'
 import type { TemplateScope } from '@/api/endpoints'
 import { sortBaseModels } from '@/utils/baseModelChips'
+import { computeNav, type NavDirection } from '@/utils/drawerNav'
+import { isVideoUrl } from '@/utils/format'
 import { invertSelection, pruneSelection, validateFileName } from '@/utils/modelActions'
 import { withMountPrefix } from '@/utils/basePath'
 import { t, type MessageKey } from '@/i18n'
@@ -214,6 +216,50 @@ watch(openItem, (item) => {
   const next = item?.file_path ?? ''
   if (current !== next) void router.replace({ query: { ...route.query, open: next || undefined } })
 })
+
+// --- Drawer prev/next: steps through the list as currently displayed (filters, sort, search applied) ---
+
+const drawerNav = computed(() =>
+  computeNav(
+    list.items.value.map((item) => item.file_path),
+    openItem.value?.file_path,
+    { total: list.total.value, hasMore: list.hasMore.value && !list.error.value },
+  ),
+)
+// Neighbours' preview images are warmed by the drawer (images only, never metadata).
+const drawerPrefetch = computed(() => {
+  const nav = drawerNav.value
+  if (!nav) return []
+  return [list.items.value[nav.index - 1], list.items.value[nav.index + 1]]
+    .map((item) => item?.preview_url ?? '')
+    .filter((url) => url && !isVideoUrl(url))
+})
+
+/** Steps are queued: rapid presses each move one model from where the previous one ended, even while a page loads. */
+let navigating: Promise<void> = Promise.resolve()
+
+function navigateDrawer(direction: NavDirection): void {
+  navigating = navigating.then(() => stepDrawer(direction)).catch(() => undefined)
+}
+
+async function stepDrawer(direction: NavDirection): Promise<void> {
+  const current = openItem.value
+  if (!current) return
+  const keys = () => list.items.value.map((item) => item.file_path)
+  let index = keys().indexOf(current.file_path)
+  if (index < 0) return
+  if (direction === 'next' && index === list.items.value.length - 1 && list.hasMore.value) {
+    // End of the loaded items: fetch the next page of the infinite scroll and keep going.
+    await list.loadMore()
+    await until(list.loading).toBe(false)
+    if (list.error.value) toasts.error(list.error.value)
+    index = keys().indexOf(current.file_path)
+  }
+  const target = list.items.value[direction === 'next' ? index + 1 : index - 1]
+  if (!target || index < 0) return
+  openItem.value = target
+  grid.value?.scrollToIndex(index + (direction === 'next' ? 1 : -1))
+}
 
 function onUpdated(updated: ModelItem): void {
   list.updateItem((item) => item.file_path === updated.file_path, () => updated)
@@ -731,7 +777,10 @@ function bulkSend(event: MouseEvent): void {
       :civitai-host="civitaiHost"
       :can-send="config.sendToComfy"
       :blur-mature="blurMature"
+      :nav="drawerNav"
+      :prefetch="drawerPrefetch"
       @close="openItem = null"
+      @navigate="navigateDrawer"
       @filter-tag="filterByTag"
       @updated="onUpdated"
       @action="runAction($event, openItem!)"

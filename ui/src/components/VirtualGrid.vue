@@ -7,6 +7,7 @@
  */
 import { computed, onMounted, ref, watch } from 'vue'
 import { useEventListener, useMutationObserver, useResizeObserver } from '@vueuse/core'
+import { scrollTopToReveal } from '@/utils/drawerNav'
 
 const props = withDefaults(
   defineProps<{
@@ -117,7 +118,18 @@ function scrollToTop(): void {
   scrollTop.value = 0
 }
 
-defineExpose({ scrollToTop })
+/** Scroll the row of an item into view with the least movement (drawer prev/next). */
+function scrollToIndex(index: number): void {
+  const el = scroller.value
+  if (!el || index < 0) return
+  const rowTop = Math.floor(index / columns.value) * rowHeight.value
+  const next = scrollTopToReveal(rowTop, itemHeight.value, el.scrollTop, el.clientHeight)
+  if (next === el.scrollTop) return
+  el.scrollTop = next
+  scrollTop.value = next
+}
+
+defineExpose({ scrollToTop, scrollToIndex })
 </script>
 
 <template>
