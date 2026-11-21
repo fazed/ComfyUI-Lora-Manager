@@ -54,6 +54,8 @@
   --lm-row-height: 56px;
   --lm-row-thumb: 40px;
   --lm-row-gap: 6px;
+  /* Base-model column of a row; longer names end in an ellipsis (full name in the row tooltip). */
+  --lm-row-badge-max-width: 140px;
 
   /* Motion */
   --lm-motion-fast: 120ms;

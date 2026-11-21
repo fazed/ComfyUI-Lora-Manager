@@ -423,7 +423,7 @@ Non-color tokens (defaults in `base.css`, any theme may override):
 | Layout | `--lm-topbar-height`, `--lm-drawer-width`, `--lm-control-height`, `--lm-touch-target` (44px minimum hit area on phone / touch layouts), `--lm-border-width`, `--lm-focus-ring-width` |
 | Page | `--lm-page-max-width` (outer width of the centered content pages, default `1180px`, mapped to `max-w-page`) |
 | Cards | `--lm-card-aspect` (e.g. `2 / 3`), `--lm-card-gap` (card width comes from the per-library size slider), `--lm-card-zoom` (hover/focus zoom of card media, default `1.05`, `1` = off; forced to `1` for `prefers-reduced-motion`) |
-| List rows | `--lm-row-height` (56px, compact 46px; never below `--lm-touch-target`), `--lm-row-thumb` (thumbnail, 40px / 34px), `--lm-row-gap` (6px / 4px) |
+| List rows | `--lm-row-height` (56px, compact 46px; never below `--lm-touch-target`), `--lm-row-thumb` (thumbnail, 40px / 34px), `--lm-row-gap` (6px / 4px), `--lm-row-badge-max-width` (base-model column, 140px; longer names end in an ellipsis) |
 
 The virtualised grid reads `--lm-card-aspect`, `--lm-card-gap`,
 `--lm-row-height` and `--lm-row-gap` at runtime, so a theme or density
@@ -583,8 +583,31 @@ pages only supply data, tool entries and bulk actions through props and slots.
   model badge, size, modified date, up to three tags and always-visible Send
   (LoRAs) / Favorite / More actions buttons; a checkbox-style indicator on
   the left in selection mode. Date and tags drop out when the row is narrow
-  (container queries at 820px / 1060px of row width, so an open folder panel
-  never squeezes the name); on phones a row is the thumbnail, the name, and
+  (container queries on the row's own content width, so an open folder panel
+  never squeezes the name). **Column breakpoints** (`utils/rowColumns.ts`,
+  pinned by `tests/rowColumns.test.ts`): the date shows from **820px** and
+  the tags from **1060px** of row width. They are derived from the column
+  widths (thumbnail `--lm-row-thumb` 40, base model `--lm-row-badge-max-width`
+  140, size 72, date 150, tags 200, three 32px buttons, 12px gaps): a column
+  appears only once the name keeps at least `ROW_NAME_MIN_WIDTH` (200px, about
+  28 characters) in the worst case, selection indicator plus Send button
+  (222px at 820, 250px at 1060), and the test also checks they are not set
+  needlessly high. Below 820px only name, base model and size remain. The
+  Tailwind classes (`@max-[820px]:hidden`, `@max-[1060px]:hidden`) are literal
+  strings in the same module (Tailwind cannot see computed class names) and a
+  test checks they match the numbers. **Truncation**: name, folder, base
+  model, size, date and tags truncate with an ellipsis and carry their full
+  text in `title`; the base-model badge keeps its text in an inner truncating
+  span (an `inline-flex` badge cannot ellipsise its own text), and the cell
+  may shrink before the name drops below 96px. Because the cells are
+  `pointer-events-none` (the full-row button takes clicks and hover), their
+  own titles never show on hover, so the row button's `title` lists the whole
+  row in full (`rowTooltip`: name, folder, base model, size and date, tags -
+  also the columns hidden at the current width); screen readers get the full
+  cell text anyway (CSS truncation does not cut the DOM text). Checked at
+  1440px, 1180px with the folder panel open, 910px and 375px with a synthetic
+  67-character base model injected into the rendered rows: no overlap, the
+  action buttons stay inside the row, no horizontal page scroll. On phones a row is the thumbnail, the name, and
   base model + size on a second line, with 44px buttons (Send stays in the
   menu). Switching views keeps the first visible item at the top; scroll
   restore, drawer prev/next (`scrollToIndex`) and Shift+click ranges work the

@@ -15,6 +15,7 @@ import type { ModelItemViewEmits, ModelItemViewProps } from './modelItemView'
 import { withMountPrefix } from '@/utils/basePath'
 import { formatBytes, formatDateTime } from '@/utils/format'
 import { isBlurred } from '@/utils/mature'
+import { ROW_COLUMN_HIDE_CLASS, rowTooltip } from '@/utils/rowColumns'
 import { t } from '@/i18n'
 
 // Shared contract with ModelCard (see modelItemView.ts).
@@ -39,13 +40,19 @@ const folderText = computed(() => props.item.folder || t('row.rootFolder'))
 const sizeText = computed(() => (props.item.file_size ? formatBytes(props.item.file_size) : ''))
 const dateText = computed(() => (props.item.modified ? formatDateTime(props.item.modified) : ''))
 const tagsText = computed(() => (props.item.tags ?? []).slice(0, 3).join(' · '))
+/** Every cell in full (also hidden columns): the tooltip of the full-row button. */
+const tooltip = computed(() =>
+  rowTooltip(props.item, { folder: folderText.value, size: sizeText.value, date: dateText.value, tags: tagsText.value }),
+)
 const blurred = computed(() => isBlurred(props.item.preview_nsfw_level, props.blurMature))
 // A smaller blur than the card: the thumbnail is only --lm-row-thumb wide.
 const mediaClass = computed(() => ['lm-zoom-media size-full object-cover', blurred.value && 'scale-110 blur-[6px]'])
 
 /** Trailing icon buttons: 32px with a mouse, the 44px touch target on phones / touch screens. */
 const iconButton = 'lm-btn lm-btn--ghost lm-btn--icon size-[32px] min-h-0 phone:size-touch touch:size-touch'
-const cell = 'pointer-events-none relative flex-none text-xs text-muted tabular-nums'
+/** Cells do not take the pointer: clicks and hover go to the full-row button (its title shows the whole row). */
+const cellBase = 'pointer-events-none relative text-xs text-muted tabular-nums'
+const cell = `${cellBase} flex-none`
 
 function play(): void {
   void video.value?.play().catch(() => undefined)
@@ -70,6 +77,7 @@ function pause(): void {
       class="absolute inset-0 z-1 cursor-pointer rounded-[inherit] focus-visible:-outline-offset-3"
       :aria-label="selectionMode ? t('card.selectItem', { name: displayName }) : t('card.open', { name: displayName })"
       :aria-pressed="selectionMode ? selected : undefined"
+      :title="tooltip"
       @click="activate"
       @focus="play"
       @blur="pause"
@@ -93,23 +101,24 @@ function pause(): void {
     >
       <template #fallback><AppIcon name="image" :size="16" /></template>
     </LazyMedia>
-    <div class="pointer-events-none relative min-w-0 flex-1">
+    <div class="pointer-events-none relative min-w-[96px] flex-1">
       <p class="flex min-w-0 items-center gap-2 text-sm leading-tight font-medium">
-        <span class="truncate" :title="displayName">{{ displayName }}</span>
+        <span data-cell="name" class="truncate" :title="displayName">{{ displayName }}</span>
         <span v-if="item.update_available" class="lm-badge lm-badge--accent flex-none"><AppIcon name="arrowUp" :size="12" />{{ t('card.update') }}</span>
       </p>
-      <p class="mt-px truncate text-xs leading-tight text-muted phone:hidden" :title="folderText">{{ folderText }}</p>
+      <p data-cell="folder" class="mt-px truncate text-xs leading-tight text-muted phone:hidden" :title="folderText">{{ folderText }}</p>
       <p class="mt-px hidden min-w-0 items-center gap-2 text-xs leading-tight text-muted phone:flex">
-        <span v-if="item.base_model" class="lm-badge min-w-0 truncate">{{ item.base_model }}</span>
+        <span v-if="item.base_model" class="lm-badge min-w-0" :title="item.base_model"><span class="truncate">{{ item.base_model }}</span></span>
         <span class="flex-none tabular-nums">{{ sizeText }}</span>
       </p>
     </div>
-    <span :class="[cell, 'w-[140px] phone:hidden']">
-      <span v-if="item.base_model" class="lm-badge max-w-full truncate" :title="item.base_model">{{ item.base_model }}</span>
+    <!-- Width token --lm-row-badge-max-width; the cell may shrink (badge ellipsis) before the name drops below its minimum. -->
+    <span data-cell="base-model" :class="[cellBase, 'flex w-(--lm-row-badge-max-width) min-w-0 shrink phone:hidden']">
+      <span v-if="item.base_model" class="lm-badge max-w-full min-w-0" :title="item.base_model"><span class="truncate">{{ item.base_model }}</span></span>
     </span>
-    <span :class="[cell, 'w-[72px] text-right phone:hidden']">{{ sizeText }}</span>
-    <span :class="[cell, 'w-[150px] truncate @max-[820px]:hidden']">{{ dateText }}</span>
-    <span :class="[cell, 'w-[200px] truncate @max-[1060px]:hidden']" :title="tagsText">{{ tagsText }}</span>
+    <span data-cell="size" :class="[cell, 'w-[72px] truncate text-right phone:hidden']" :title="sizeText">{{ sizeText }}</span>
+    <span data-cell="date" :class="[cell, 'w-[150px] truncate', ROW_COLUMN_HIDE_CLASS.date]" :title="dateText">{{ dateText }}</span>
+    <span data-cell="tags" :class="[cell, 'w-[200px] truncate', ROW_COLUMN_HIDE_CLASS.tags]" :title="tagsText">{{ tagsText }}</span>
     <div class="relative z-2 flex flex-none items-center gap-1 phone:gap-0">
       <button
         v-if="canSend"
