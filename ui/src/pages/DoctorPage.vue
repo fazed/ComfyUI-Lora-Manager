@@ -56,7 +56,7 @@ onMounted(() => void doctor.run())
   <div class="min-h-0 flex-1 overflow-y-auto">
     <div class="lm-page flex w-full max-w-[980px] flex-col gap-4">
       <header class="lm-page-header mb-0 flex flex-wrap items-start gap-3">
-        <div class="min-w-0 flex-1">
+        <div class="min-w-[min(100%,260px)] flex-1">
           <h1>{{ t('doctor.title') }}</h1>
           <p class="mt-2 text-muted">{{ t('doctor.intro') }}</p>
         </div>
@@ -75,7 +75,7 @@ onMounted(() => void doctor.run())
       <template v-else-if="report">
         <section class="lm-panel flex items-center gap-3 p-4" :class="STATUS[report.status].text" aria-live="polite">
           <AppIcon :name="STATUS[report.status].icon" :size="24" />
-          <div class="min-w-0 flex-1">
+          <div class="min-w-[min(100%,260px)] flex-1">
             <p class="text-md font-bold">{{ t(`doctor.status.${report.status}` as MessageKey) }}</p>
             <p class="text-sm text-muted">
               {{ report.issueCount ? t('doctor.summary', { count: report.issueCount }) : t('doctor.summaryOk') }}

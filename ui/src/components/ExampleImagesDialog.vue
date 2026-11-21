@@ -90,8 +90,8 @@ function onDrop(event: DragEvent): void {
               type="button"
               class="lm-btn lm-btn--icon lm-btn--sm lm-btn--ghost text-danger"
               :disabled="!!ex.busy.value"
-              :aria-label="t('examples.deleteTitle')"
-              :title="t('examples.deleteTitle')"
+              :aria-label="t('examples.deleteAction')"
+              :title="t('examples.deleteAction')"
               @click="ex.remove(item)"
             >
               <AppIcon name="trash" :size="14" />

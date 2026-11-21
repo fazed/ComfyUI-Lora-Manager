@@ -6,9 +6,9 @@ import { seriesBg, seriesFill, seriesStroke } from './chartClasses'
 
 const props = defineProps<{ points: TimelinePoint[]; keys: { key: 'lora' | 'checkpoint' | 'embedding' | 'total'; name: string }[] }>()
 
-const W = 600
-const H = 180
-const PAD = { left: 36, bottom: 22, top: 8, right: 8 }
+const W = 900
+const H = 220
+const PAD = { left: 48, bottom: 24, top: 8, right: 8 }
 const chart = computed(() => linePaths(props.points, props.keys, W - PAD.left - PAD.right, H - PAD.top - PAD.bottom))
 const labelEvery = computed(() => Math.max(1, Math.ceil(props.points.length / 6)))
 const innerH = H - PAD.top - PAD.bottom
@@ -32,7 +32,7 @@ const innerH = H - PAD.top - PAD.bottom
             v-if="i % labelEvery === 0 || i === points.length - 1"
             :x="chart.series[0]?.points[i]?.x ?? 0"
             :y="innerH + 16"
-            text-anchor="middle"
+            :text-anchor="i === 0 ? 'start' : i === points.length - 1 ? 'end' : 'middle'"
             class="fill-muted text-xs"
           >{{ shortDate(point.date) }}</text>
         </g>

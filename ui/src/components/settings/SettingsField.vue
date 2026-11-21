@@ -5,7 +5,7 @@
  * pre-filled: they show "Configured" and take a new value in a password
  * input, or are removed explicitly.
  */
-import { computed, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import AppIcon from '@/components/AppIcon.vue'
 import { PATH_TEMPLATE_PRESETS } from '@/config/settingsSchema'
 import type { DraftValue, FieldDef, SecretDraft, ValidationError } from '@/utils/settingsModel'
@@ -33,6 +33,18 @@ const errorText = computed(() => (props.error ? t(props.error.key, props.error.p
 const text = computed(() => (typeof props.value === 'string' ? props.value : ''))
 const secret = computed(() => (props.field.type === 'secret' ? (props.value as SecretDraft) : { mode: 'keep' as const, value: '' }))
 const reveal = ref(false)
+const secretInput = ref<HTMLInputElement | null>(null)
+// "Set up…/Change…" replaces the button with the input: move focus into it.
+watch(
+  () => secret.value.mode,
+  async (mode, previous) => {
+    if (mode === 'set' && previous !== 'set') {
+      await nextTick()
+      secretInput.value?.focus()
+    }
+    if (mode !== 'set') reveal.value = false
+  },
+)
 const canReset = computed(() => props.field.default !== undefined && props.field.type !== 'secret')
 const options = computed(() => {
   const list = props.field.options ?? []
@@ -150,6 +162,7 @@ function toggleCheck(value: string, checked: boolean): void {
         <div v-if="secret.mode === 'set'" class="flex max-w-[480px] items-center gap-2">
           <input
             :id="id"
+            ref="secretInput"
             class="lm-input min-w-0 flex-1 font-mono text-xs"
             :type="reveal ? 'text' : 'password'"
             autocomplete="new-password"

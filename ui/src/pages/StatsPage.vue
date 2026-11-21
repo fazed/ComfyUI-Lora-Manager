@@ -206,7 +206,7 @@ const tableClass = 'w-full text-left text-sm [&_th]:py-1 [&_th]:pr-3 [&_th]:font
           </li>
         </ul>
 
-        <div role="tablist" :aria-label="t('stats.tabs')" class="flex gap-1 overflow-x-auto hairline-b border-border" @keydown="onTabKey">
+        <div role="tablist" :aria-label="t('stats.tabs')" class="flex gap-1 overflow-x-auto overflow-y-hidden hairline-b border-border" @keydown="onTabKey">
           <button
             v-for="name in TABS"
             :id="`stats-tab-${name}`"

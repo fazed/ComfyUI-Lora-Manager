@@ -6,9 +6,9 @@ import { niceTicks, scatterPoints, type StorageItem } from '@/utils/stats'
 import { seriesBg, seriesFill } from './chartClasses'
 
 const props = defineProps<{ items: StorageItem[]; names: Record<string, string> }>()
-const W = 600
-const H = 220
-const PAD = { left: 36, bottom: 24, top: 8, right: 12 }
+const W = 900
+const H = 260
+const PAD = { left: 48, bottom: 24, top: 8, right: 24 }
 const innerW = W - PAD.left - PAD.right
 const innerH = H - PAD.top - PAD.bottom
 const chart = computed(() => scatterPoints(props.items, innerW, innerH))

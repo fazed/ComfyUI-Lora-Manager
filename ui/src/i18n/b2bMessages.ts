@@ -235,6 +235,7 @@ export const b2bMessages = {
   'examples.deleteTitle': 'Delete imported image?',
   'examples.deleteMessage': '{name} is deleted from the example folder permanently. There is no undo.',
   'examples.deleteConfirm': 'Delete image',
+  'examples.deleteAction': 'Delete imported image',
   'examples.deleted': 'Image deleted',
   'examples.deleteFailed': 'Delete failed: {error}',
   'examples.deleteOnlyImported': 'Only imported images can be deleted; downloaded ones come back with the next download.',

@@ -119,6 +119,13 @@ async function save(): Promise<void> {
   if (saveError.value) await nextTick(() => document.getElementById('settings-save-error')?.focus())
 }
 
+function jumpTo(id: string): void {
+  const target = document.getElementById(`set-${id}`)
+  target?.scrollIntoView({ block: 'start' })
+  document.getElementById(`set-${id}-title`)?.focus({ preventScroll: true })
+  history.replaceState(history.state, '', `${location.pathname}${location.search}#set-${id}`)
+}
+
 function scrollToHash(): void {
   const hash = route.hash.replace(/^#/, '')
   if (!hash) return
@@ -155,7 +162,8 @@ const cardClass = 'lm-panel flex flex-col gap-4 p-5 scroll-mt-4 phone:p-4'
       <nav class="sticky top-0 max-h-[calc(100vh-var(--lm-topbar-height)-var(--lm-space-8))] w-[200px] flex-none self-start overflow-y-auto narrow:hidden" :aria-label="t('set.sections')">
         <ul class="flex flex-col gap-1">
           <li v-for="section in visibleSections" :key="section.id">
-            <a :href="`#set-${section.id}`" class="lm-row lm-row--nav flex min-h-control items-center gap-2 px-2 text-sm no-underline">
+            <!-- Not a plain #hash link: hrefs resolve against <base href>, which would leave the page. -->
+            <a :href="`${route.path.split('/').pop()}#set-${section.id}`" @click.prevent="jumpTo(section.id)" class="lm-row lm-row--nav flex min-h-control items-center gap-2 px-2 text-sm no-underline">
               <span class="min-w-0 flex-1 truncate">{{ t(section.title) }}</span>
               <span v-if="sectionChanges(section)" class="lm-badge lm-badge--accent">{{ sectionChanges(section) }}</span>
             </a>
@@ -165,7 +173,7 @@ const cardClass = 'lm-panel flex flex-col gap-4 p-5 scroll-mt-4 phone:p-4'
 
       <div class="flex min-w-0 flex-1 flex-col gap-4">
         <header class="lm-page-header mb-0 flex flex-wrap items-end gap-3">
-          <div class="min-w-0 flex-1">
+          <div class="min-w-[min(100%,260px)] flex-1">
             <h1>{{ t('settings.title') }}</h1>
             <p class="mt-2 text-muted">
               {{ t('settings.intro') }}
@@ -186,7 +194,7 @@ const cardClass = 'lm-panel flex flex-col gap-4 p-5 scroll-mt-4 phone:p-4'
           <p v-if="!visibleSections.length" class="text-muted">{{ t('set.noMatch', { query }) }}</p>
           <section v-for="section in visibleSections" :id="`set-${section.id}`" :key="section.id" :class="cardClass" :aria-labelledby="`set-${section.id}-title`">
             <div>
-              <h2 :id="`set-${section.id}-title`" class="text-lg">{{ t(section.title) }}</h2>
+              <h2 :id="`set-${section.id}-title`" class="text-lg outline-none" tabindex="-1">{{ t(section.title) }}</h2>
               <p v-if="section.description" class="mt-1 text-sm text-muted">{{ t(section.description) }}</p>
             </div>
 
