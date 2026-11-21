@@ -291,6 +291,17 @@ const actions = useModelActions(api, {
     })
     refreshFolders()
   },
+  moved: (moves) => {
+    // Keep an open drawer on the moved model (its path and folder changed).
+    const current = openItem.value
+    const move = current && moves.find((entry) => entry.from === current.file_path)
+    if (!current || !move) return
+    const dir = move.to.replace(/\/[^/]*$/, '')
+    const oldDir = current.file_path.replace(/\/[^/]*$/, '')
+    const root = current.folder && oldDir.endsWith(`/${current.folder}`) ? oldDir.slice(0, -current.folder.length - 1) : oldDir
+    const folder = dir.toLowerCase().startsWith(root.toLowerCase() + '/') ? dir.slice(root.length + 1) : dir === root ? '' : current.folder
+    openItem.value = { ...current, file_path: move.to, folder }
+  },
 })
 
 const menu = ref<{ item: ModelItem; x: number; y: number; opener: HTMLElement | null } | null>(null)

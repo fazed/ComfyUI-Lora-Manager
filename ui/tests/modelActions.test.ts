@@ -348,8 +348,12 @@ describe('useModelActions flows (mocked backend)', () => {
 
   it('a single move refreshes the grid and reports success', async () => {
     fetchMock.mockResolvedValueOnce(json({ success: true, original_file_path: 'D:/loras/a.safetensors', new_file_path: 'D:/loras/x/a.safetensors' }))
-    const { actions, changed } = setup()
+    const moved = vi.fn()
+    const changed = vi.fn()
+    const actions = useModelActions(createModelApi('loras'), { removed: vi.fn(), changed, moved })
     const summary = await actions.moveItems([item('a')], 'D:/loras/x')
+    // An open drawer follows the model to its new path.
+    expect(moved).toHaveBeenCalledWith([{ from: 'D:/loras/a.safetensors', to: 'D:/loras/x/a.safetensors' }])
     expect(lastCall(fetchMock)).toMatchObject({ url: '/api/lm/loras/move_model', body: { target_path: 'D:/loras/x' } })
     expect(summary.moved).toHaveLength(1)
     expect(summary.failed).toHaveLength(0)

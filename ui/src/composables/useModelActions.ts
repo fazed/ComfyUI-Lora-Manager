@@ -33,6 +33,8 @@ export interface ModelActionHooks {
   removed: (paths: string[]) => void
   /** Reload the grid (rename, move, undo, tags). */
   changed: () => void
+  /** Models that now live at a new path (move), so an open drawer can follow them. */
+  moved?: (moves: { from: string; to: string }[]) => void
 }
 
 const displayName = (item: ModelItem) => item.model_name || item.file_name
@@ -154,7 +156,10 @@ export function useModelActions(api: ModelApi, hooks: ModelActionHooks) {
     } else {
       toasts.success(t('actions.move.bulkDone', { count: summary.moved.length, folder }))
     }
-    if (summary.moved.length) hooks.changed()
+    if (summary.moved.length) {
+      hooks.moved?.(summary.moved)
+      hooks.changed()
+    }
     return summary
   }
 
