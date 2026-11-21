@@ -26,6 +26,13 @@
   --lm-color-warning: #fcd34d;
   --lm-color-warning-soft: rgba(252, 211, 77, 0.14);
   --lm-color-focus: #ffbb4d;
+  /* Form fields: background, outline (>= 3:1 on every surface), hover, disabled, placeholder. */
+  --lm-color-field: #18213f;
+  --lm-color-field-hover: #1e2848;
+  --lm-color-field-border: #6878a6;
+  --lm-color-field-border-hover: #8592bd;
+  --lm-color-field-disabled: #121a33;
+  --lm-color-placeholder: #97a1c6;
   --lm-color-overlay: rgba(3, 6, 15, 0.65);
   --lm-color-scrim: rgba(5, 8, 20, 0.78);
   --lm-color-on-scrim: #ffffff;

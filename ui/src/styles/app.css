@@ -124,11 +124,20 @@
     @apply inline-grid cursor-pointer place-items-center;
   }
 
-  /* Form controls */
+  /*
+   * Form controls. Fields use their own surface tokens so they never blend
+   * into the panel: --lm-color-field background, a --lm-color-field-border
+   * outline (>= 3:1 against every surface, tests/contrast.test.ts), a hover
+   * step, a solid focus ring in --lm-color-focus, a disabled background and
+   * a placeholder color with text contrast.
+   */
   .lm-input,
   .lm-select,
   .lm-textarea {
-    @apply min-h-control w-full rounded-sm hairline border-border bg-surface px-3 text-sm text-fg;
+    @apply min-h-control w-full rounded-sm hairline border-field-border bg-field px-3 text-sm text-fg;
+    transition:
+      background-color var(--lm-motion-fast) var(--lm-ease),
+      border-color var(--lm-motion-fast) var(--lm-ease);
   }
 
   .lm-textarea {
@@ -136,15 +145,39 @@
     min-height: calc(var(--lm-control-height) * 3);
   }
 
+  .lm-input::placeholder,
+  .lm-textarea::placeholder {
+    @apply text-placeholder opacity-100;
+  }
+
+  .lm-input:hover:not(:disabled, :focus),
+  .lm-select:hover:not(:disabled, :focus),
+  .lm-textarea:hover:not(:disabled, :focus) {
+    @apply border-field-border-hover bg-field-hover;
+  }
+
   .lm-input:focus,
   .lm-select:focus,
   .lm-textarea:focus {
-    @apply border-accent outline-none;
-    box-shadow: 0 0 0 var(--lm-focus-ring-width) var(--lm-color-accent-soft);
+    @apply border-focus outline-none;
+    box-shadow: 0 0 0 var(--lm-focus-ring-width) var(--lm-color-focus);
   }
 
-  .lm-input[aria-invalid='true'] {
+  .lm-input:disabled,
+  .lm-select:disabled,
+  .lm-textarea:disabled {
+    @apply cursor-not-allowed bg-field-disabled text-muted;
+  }
+
+  .lm-input[aria-invalid='true'],
+  .lm-select[aria-invalid='true'],
+  .lm-textarea[aria-invalid='true'] {
     @apply border-danger;
+  }
+
+  .lm-input[aria-invalid='true']:focus,
+  .lm-textarea[aria-invalid='true']:focus {
+    box-shadow: 0 0 0 var(--lm-focus-ring-width) var(--lm-color-danger);
   }
 
   /* Checkbox row: <label class="lm-check"><input type="checkbox" /> Text</label> */
@@ -154,6 +187,37 @@
 
   .lm-check input {
     @apply accent-accent;
+  }
+
+  /*
+   * On/off switch: <input type="checkbox" role="switch" class="lm-switch">.
+   * Track in the field tokens (outline >= 3:1), the knob is a radial
+   * gradient that slides across; accent track when on.
+   */
+  .lm-switch {
+    @apply relative inline-block h-[22px] w-[40px] flex-none cursor-pointer appearance-none rounded-pill hairline border-field-border bg-field;
+    background-image: radial-gradient(circle, var(--lm-color-muted) 0 7px, transparent 7.5px);
+    background-size: 20px 20px;
+    background-repeat: no-repeat;
+    background-position: 0 center;
+    transition:
+      background-position var(--lm-motion-fast) var(--lm-ease),
+      background-color var(--lm-motion-fast) var(--lm-ease),
+      border-color var(--lm-motion-fast) var(--lm-ease);
+  }
+
+  .lm-switch:hover:not(:disabled) {
+    @apply border-field-border-hover;
+  }
+
+  .lm-switch:checked {
+    @apply border-accent bg-accent;
+    background-image: radial-gradient(circle, var(--lm-color-on-accent) 0 7px, transparent 7.5px);
+    background-position: 100% center;
+  }
+
+  .lm-switch:disabled {
+    @apply cursor-not-allowed opacity-55;
   }
 
   .lm-label {

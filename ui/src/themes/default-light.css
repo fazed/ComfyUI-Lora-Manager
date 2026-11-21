@@ -17,9 +17,9 @@
   --lm-color-danger: #c62828;
   --lm-color-danger-soft: rgba(198, 40, 40, 0.1);
   --lm-color-on-danger: #ffffff;
-  --lm-color-success: #15803d;
+  --lm-color-success: #116b33;
   --lm-color-success-soft: rgba(21, 128, 61, 0.12);
-  --lm-color-warning: #b45309;
+  --lm-color-warning: #9a4507;
   --lm-color-warning-soft: rgba(180, 83, 9, 0.12);
   --lm-color-focus: #6366f1;
   --lm-color-overlay: rgba(15, 18, 25, 0.45);
@@ -34,4 +34,20 @@
   --lm-color-series-5: #56b4e9;
   --lm-color-series-6: #d55e00;
   --lm-color-shadow: rgba(16, 24, 40, 0.1);
+}
+
+/*
+ * Form fields: background, outline (>= 3:1 on every surface), hover,
+ * disabled, placeholder. Not on plain :root, so a user theme that predates
+ * these tokens never inherits light field colors: it gets the fallbacks in
+ * styles/tokens.css (derived from its own surface/border/muted tokens).
+ */
+:root:not([data-theme]),
+[data-theme='default-light'] {
+  --lm-color-field: #ffffff;
+  --lm-color-field-hover: #f8f9fb;
+  --lm-color-field-border: #7d8695;
+  --lm-color-field-border-hover: #5f6876;
+  --lm-color-field-disabled: #eef0f3;
+  --lm-color-placeholder: #646d7b;
 }

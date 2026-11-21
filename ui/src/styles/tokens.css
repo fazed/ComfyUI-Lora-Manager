@@ -37,6 +37,13 @@
   --color-warning: var(--lm-color-warning);
   --color-warning-soft: var(--lm-color-warning-soft);
   --color-focus: var(--lm-color-focus);
+  /* Form fields; the fallbacks keep user themes without these tokens readable. */
+  --color-field: var(--lm-color-field, var(--lm-color-surface));
+  --color-field-hover: var(--lm-color-field-hover, var(--lm-color-sunken));
+  --color-field-border: var(--lm-color-field-border, var(--lm-color-border-strong));
+  --color-field-border-hover: var(--lm-color-field-border-hover, var(--lm-color-muted));
+  --color-field-disabled: var(--lm-color-field-disabled, var(--lm-color-sunken));
+  --color-placeholder: var(--lm-color-placeholder, var(--lm-color-muted));
   --color-overlay: var(--lm-color-overlay);
   --color-scrim: var(--lm-color-scrim);
   --color-on-scrim: var(--lm-color-on-scrim);
