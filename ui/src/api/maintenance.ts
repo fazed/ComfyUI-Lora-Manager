@@ -66,7 +66,7 @@ export const statsApi = {
 
 export const doctorApi = {
   /** Read-only, but calls Civitai once when an API key is set. */
-  diagnostics: (clientVersion: string) => request<Record<string, unknown>>('doctor/diagnostics', { query: { clientVersion } }),
+  diagnostics: (clientVersion: string) => request<Record<string, unknown>>('doctor/diagnostics', { query: { clientVersion: clientVersion || undefined } }),
   /** Full rescan + rewrite of the persistent cache (no model files touched). */
   repairCache: () =>
     request<{ success: boolean; repaired: { label: string }[]; failures: { label: string; error: string }[] }>('doctor/repair-cache', {

@@ -5,7 +5,7 @@
  */
 
 import { ref, shallowRef } from 'vue'
-import { archiveApi, backupApi, doctorApi, saveBlob } from '@/api/maintenance'
+import { archiveApi, backupApi, doctorApi, saveBlob, systemApi } from '@/api/maintenance'
 import { useConfirm, useToasts } from '@/composables/useFeedback'
 import {
   filenameFromDisposition,
@@ -21,7 +21,22 @@ import {
 import { formatBytes } from '@/utils/format'
 import { t } from '@/i18n'
 
-export const CLIENT_VERSION = 'lm-ui'
+/**
+ * The doctor's ui_version check compares the page's version with the server's
+ * (it targets stale classic bundles). The new UI is served by the same
+ * backend, so it reports the server version it was loaded from.
+ */
+let clientVersion: string | null = null
+async function pageVersion(): Promise<string> {
+  if (clientVersion === null) {
+    try {
+      clientVersion = (await systemApi.versionInfo()).version || ''
+    } catch {
+      clientVersion = ''
+    }
+  }
+  return clientVersion
+}
 
 export function useDoctor() {
   const toasts = useToasts()
@@ -36,7 +51,7 @@ export function useDoctor() {
     loading.value = true
     error.value = null
     try {
-      raw.value = await doctorApi.diagnostics(CLIENT_VERSION)
+      raw.value = await doctorApi.diagnostics(await pageVersion())
       report.value = normaliseDoctor(raw.value)
     } catch (err) {
       error.value = (err as Error).message
@@ -96,7 +111,7 @@ export function useDoctor() {
         summary: raw.value?.summary ?? {},
         diagnostics: raw.value?.diagnostics ?? [],
         frontend_logs: [],
-        client_context: { url: location.href, user_agent: navigator.userAgent, language: navigator.language, app_version: CLIENT_VERSION },
+        client_context: { url: location.href, user_agent: navigator.userAgent, language: navigator.language, app_version: await pageVersion() },
       })
       saveBlob(blob, filenameFromDisposition(disposition, 'lora-manager-doctor.zip'))
       return true

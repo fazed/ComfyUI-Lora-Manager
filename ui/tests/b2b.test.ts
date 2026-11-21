@@ -594,11 +594,16 @@ describe('doctor', () => {
 
   it('runs read-only, and the rename fix needs a danger confirm with the counts', async () => {
     fetchMock.mockImplementation(async (url: string) =>
-      url.includes('resolve-filename-conflicts') ? json({ success: true, count: 1, renamed: [] }) : json(DIAGNOSTICS),
+      url.includes('resolve-filename-conflicts')
+        ? json({ success: true, count: 1, renamed: [] })
+        : url.includes('version-info')
+          ? json({ success: true, version: '1.3.0-abc' })
+          : json(DIAGNOSTICS),
     )
     const doctor = useDoctor()
     await doctor.run()
-    expect(calls(fetchMock)[0]).toMatchObject({ url: '/api/lm/doctor/diagnostics?clientVersion=lm-ui', method: 'GET' })
+    // The page reports the version of the server it was loaded from (ui_version check).
+    expect(calls(fetchMock).find((c) => c.url.includes('diagnostics'))).toMatchObject({ url: '/api/lm/doctor/diagnostics?clientVersion=1.3.0-abc', method: 'GET' })
 
     let confirm = autoConfirm(false)
     expect(await doctor.resolveConflicts()).toBe(false)
