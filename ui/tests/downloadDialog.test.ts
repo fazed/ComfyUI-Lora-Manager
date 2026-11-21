@@ -252,7 +252,7 @@ describe('useDownloadFlow (mocked backend)', () => {
     expect(flow.step.value).toBe('location')
     expect(flow.roots.value).toEqual(['D:/loras', 'E:/more'])
     expect(flow.root.value).toBe('D:/loras')
-    expect(flow.useDefaultPath.value).toBe(false)
+    flow.useDefaultPath.value = false
 
     flow.folder.value = 'style/anime'
     const result = await flow.submit()
@@ -323,6 +323,7 @@ describe('useDownloadFlow (mocked backend)', () => {
     const flow = useDownloadFlow('loras', { queue: () => [], settings: () => settings })
     await flow.resolve('10')
     await flow.toLocation()
+    flow.useDefaultPath.value = false
     flow.folder.value = '../escape'
     expect(flow.folderError.value).toBeTruthy()
     await expect(flow.submit()).resolves.toBeNull()

@@ -8,6 +8,16 @@
 
 import { ApiError, request } from './http'
 import type {
+  CivitaiVersion,
+  DeleteFolderResponse,
+  DestinationParams,
+  DownloadFileParams,
+  DuplicateGroup,
+  FetchCivitaiResponse,
+  FilenameConflict,
+  FolderCandidate,
+  PreviewResponse,
+  VerifyDuplicatesResponse,
   BulkDeleteResponse,
   BulkMoveResponse,
   CountEntry,
@@ -113,16 +123,20 @@ export function createModelApi(prefix: ModelPrefix) {
         method: 'POST',
         body: { file_path: filePath, new_file_name: newFileName },
       }),
-    /** `targetPath` is an absolute directory inside a library root (created when missing). */
-    moveModel: (filePath: string, targetPath: string) =>
+    /**
+     * `targetPath` is an absolute directory inside a library root (created when
+     * missing). With `useDefaultPaths` it must be a root: the backend appends
+     * the download path template of each model.
+     */
+    moveModel: (filePath: string, targetPath: string, useDefaultPaths = false) =>
       request<MoveResponse>(`${prefix}/move_model`, {
         method: 'POST',
-        body: { file_path: filePath, target_path: targetPath },
+        body: { file_path: filePath, target_path: targetPath, ...(useDefaultPaths ? { use_default_paths: true } : {}) },
       }),
-    moveBulk: (filePaths: string[], targetPath: string) =>
+    moveBulk: (filePaths: string[], targetPath: string, useDefaultPaths = false) =>
       request<BulkMoveResponse>(`${prefix}/move_models_bulk`, {
         method: 'POST',
-        body: { file_paths: filePaths, target_path: targetPath },
+        body: { file_paths: filePaths, target_path: targetPath, ...(useDefaultPaths ? { use_default_paths: true } : {}) },
       }),
     exclude: (filePath: string) =>
       request<{ success: boolean; message?: string }>(`${prefix}/exclude`, { method: 'POST', body: { file_path: filePath } }),
@@ -145,7 +159,116 @@ export function createModelApi(prefix: ModelPrefix) {
         throw error
       }
     },
+
+    // --- Phase B1: downloads (read-only lookups) ----------------------------
+    /** Civitai versions of a model, with local state (existsLocally, downloadedFiles, ...). */
+    civitaiVersions: (modelId: number) => request<CivitaiVersion[]>(`${prefix}/civitai/versions/${modelId}`),
+    /** Civitai version info (used to find the model id of a version / download link). */
+    civitaiVersionInfo: (versionId: number) =>
+      request<CivitaiVersion & { modelId?: number }>(`${prefix}/civitai/model/version/${versionId}`),
+
+    // --- Phase B1: model tools ----------------------------------------------
+    /** Excluded models (paged). Note: the backend may create a missing default .metadata.json. */
+    excluded: (page = 1, pageSize = 50, search = '') =>
+      request<PagedResponse<ModelItem>>(`${prefix}/excluded`, {
+        query: { page, page_size: pageSize, search: search.trim() || undefined },
+      }),
+    /** Read-only: groups of the in-memory hash index. */
+    findDuplicates: () =>
+      request<{ duplicates?: DuplicateGroup[] }>(`${prefix}/find-duplicates`).then((r) => r.duplicates ?? []),
+    /** Re-hashes the files; a wrong stored sha256 is corrected in the sidecar. */
+    verifyDuplicates: (filePaths: string[]) =>
+      request<VerifyDuplicatesResponse>(`${prefix}/verify-duplicates`, { method: 'POST', body: { file_paths: filePaths } }),
+    filenameConflicts: () =>
+      request<{ conflicts?: FilenameConflict[] }>(`${prefix}/find-filename-conflicts`).then((r) => r.conflicts ?? []),
+    /** Re-fetches the Civitai metadata by hash (overwrites model name and base model). */
+    fetchCivitai: (filePath: string) =>
+      request<FetchCivitaiResponse>(`${prefix}/fetch-civitai`, { method: 'POST', body: { file_path: filePath } }),
+    relinkCivitai: (filePath: string, modelId: number, versionId: number | null) =>
+      request<FetchCivitaiResponse>(`${prefix}/relink-civitai`, {
+        method: 'POST',
+        body: { file_path: filePath, model_id: modelId, ...(versionId ? { model_version_id: versionId } : {}) },
+      }),
+    /** Whole library type, blocks until done. Only after a confirm. */
+    fetchAllCivitai: () =>
+      request<{ success: boolean; processed?: number; updated?: number; total?: number; failure_count?: number; skipped_count?: number; message?: string }>(
+        `${prefix}/fetch-all-civitai`,
+        { method: 'POST', body: {} },
+      ),
+    /** Replaces every existing preview of the model (multipart; field order matters to the backend). */
+    replacePreview: (filePath: string, file: Blob, nsfwLevel: number) => {
+      const form = new FormData()
+      form.append('preview_file', file, (file as File).name || 'preview')
+      form.append('model_path', filePath)
+      form.append('nsfw_level', String(nsfwLevel))
+      return request<PreviewResponse>(`${prefix}/replace-preview`, { method: 'POST', body: form })
+    },
+    setPreviewFromUrl: (filePath: string, imageUrl: string, nsfwLevel: number) =>
+      request<PreviewResponse>(`${prefix}/set-preview-from-url`, {
+        method: 'POST',
+        body: { model_path: filePath, image_url: imageUrl, nsfw_level: nsfwLevel },
+      }),
+    setNsfwLevel: (filePath: string, level: number) =>
+      request<{ success: boolean }>(`${prefix}/save-metadata`, {
+        method: 'POST',
+        body: { file_path: filePath, preview_nsfw_level: level },
+      }),
+    /** Dry run of the filename template: always a POST with dry_run=true and an explicit scope. */
+    filenameTemplatePreview: (scope: TemplateScope) =>
+      request<OrganizeResponse>(`${prefix}/apply-filename-template`, {
+        method: 'POST',
+        body: { dry_run: true, ...templateScopeBody(scope) },
+      }),
+    /** REAL rename of the scoped files. Only after the preview and a danger confirm. */
+    filenameTemplateApply: (scope: TemplateScope) =>
+      request<OrganizeResponse>(`${prefix}/apply-filename-template`, {
+        method: 'POST',
+        body: { dry_run: false, ...templateScopeBody(scope) },
+      }),
+    createFolder: (folderPath: string) =>
+      request<{ success: boolean; folder?: string; created?: boolean }>(`${prefix}/create-folder`, {
+        method: 'POST',
+        body: { folder_path: folderPath },
+      }),
+    renameFolder: (folderPath: string, newName: string) =>
+      request<{ success: boolean; renamed?: boolean; folder?: string }>(`${prefix}/rename-folder`, {
+        method: 'POST',
+        body: { folder_path: folderPath, new_name: newName },
+      }),
+    /** Dry run or real delete. A refusal (409/400 with `code`) is returned, not thrown. */
+    deleteFolder: async (folderPath: string, dryRun = false): Promise<DeleteFolderResponse> => {
+      try {
+        return await request<DeleteFolderResponse>(`${prefix}/delete-folder`, {
+          method: 'POST',
+          body: dryRun ? { folder_path: folderPath, dry_run: true } : { folder_path: folderPath },
+        })
+      } catch (error) {
+        if (error instanceof ApiError && error.payload && typeof error.payload === 'object' && error.status >= 400 && error.status < 500) {
+          return { success: false, ...(error.payload as object), error: error.message } as DeleteFolderResponse
+        }
+        throw error
+      }
+    },
+    /** Absolute folder(s) behind a library-relative folder of the unified tree. */
+    resolveFolder: (folder: string) =>
+      request<{ candidates?: FolderCandidate[] }>(`${prefix}/resolve-folder`, { query: { folder } }).then(
+        (r) => r.candidates ?? [],
+      ),
   }
+}
+
+export interface TemplateScope {
+  filePaths?: string[]
+  folderPaths?: string[]
+}
+
+/** Refuses an empty scope: without one the backend renames the whole library type. */
+function templateScopeBody(scope: TemplateScope): Record<string, string[]> {
+  const body: Record<string, string[]> = {}
+  if (scope.filePaths?.length) body.file_paths = scope.filePaths
+  if (scope.folderPaths?.length) body.folder_paths = scope.folderPaths
+  if (!Object.keys(body).length) throw new Error('A filename template run needs selected files or a folder')
+  return body
 }
 
 /** Restores a staged delete batch (POST /api/lm/undo-delete; 404 = unknown, expired or occupied). */
@@ -157,6 +280,16 @@ export function undoDelete(batchId: string) {
 }
 
 export type ModelApi = ReturnType<typeof createModelApi>
+
+export interface QueueAddTarget {
+  modelId: number | null
+  versionId: number | null
+  fileParams?: DownloadFileParams | null
+  destination?: DestinationParams | null
+  modelName?: string
+  versionName?: string
+  thumbnailUrl?: string
+}
 
 export const downloadsApi = {
   queue: (signal?: AbortSignal) => request<QueueResponse>('downloads/queue', { signal }),
@@ -174,9 +307,23 @@ export const downloadsApi = {
   clearHistory: (status?: string) => request<{ cleared?: number }>('downloads/history/clear', { query: { status } }),
   deleteHistoryItem: (downloadId: string) =>
     request('downloads/history/delete', { query: { download_id: downloadId } }),
-  add: (target: { modelId: number | null; versionId: number | null }) =>
-    request<{ queued: boolean; duplicate: boolean; item: QueueItem | null }>('downloads/queue/add', {
-      query: { model_id: target.modelId ?? undefined, model_version_id: target.versionId ?? undefined, source: 'civitai' },
+  /**
+   * Adds a row to the backend queue (the worker starts it). Optional file
+   * selection and destination (root/folder); without a destination the
+   * default root and path template are used.
+   */
+  add: (target: QueueAddTarget) =>
+    request<{ queued: boolean; duplicate: boolean; reason?: string | null; item: QueueItem | null }>('downloads/queue/add', {
+      query: {
+        model_id: target.modelId ?? undefined,
+        model_version_id: target.versionId ?? undefined,
+        source: 'civitai',
+        file_params: target.fileParams ? JSON.stringify(target.fileParams) : undefined,
+        ...(target.destination ?? {}),
+        model_name: target.modelName || undefined,
+        version_name: target.versionName || undefined,
+        thumbnail_url: target.thumbnailUrl || undefined,
+      },
     }),
 }
 

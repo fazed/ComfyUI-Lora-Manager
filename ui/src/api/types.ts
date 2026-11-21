@@ -134,6 +134,8 @@ export interface QueueItem {
   added_at?: number
   started_at?: number | null
   completed_at?: number | null
+  /** JSON `{model_root, relative_path, use_default_paths}`; null = default root + template. */
+  destination?: string | null
 }
 
 export interface QueueStats {
@@ -298,6 +300,114 @@ export interface OrganizeProgress {
   message?: string
   error?: string
   operation_type?: string
+}
+
+// --- Phase B1: downloads ------------------------------------------------------
+
+export interface CivitaiFile {
+  id: number
+  name?: string
+  type?: string
+  sizeKB?: number
+  primary?: boolean
+  metadata?: { format?: string; size?: string; fp?: string } | null
+}
+
+export interface CivitaiDownloadedFile {
+  fileId?: number | null
+  fileName?: string
+  filePath?: string
+}
+
+/** One entry of GET /{prefix}/civitai/versions/{model_id} (Civitai modelVersions[] + local state). */
+export interface CivitaiVersion {
+  id: number
+  modelId?: number
+  name?: string
+  baseModel?: string
+  createdAt?: string
+  availability?: string
+  images?: { url: string; type?: string; nsfwLevel?: number }[]
+  files?: CivitaiFile[]
+  existsLocally?: boolean
+  localPath?: string
+  hasBeenDownloaded?: boolean
+  downloadedFiles?: CivitaiDownloadedFile[]
+  modelSizeKB?: number
+  modelTags?: string[]
+  model?: { name?: string; type?: string } | null
+}
+
+/** file_params of queue/add (classic DownloadManager shape). */
+export interface DownloadFileParams {
+  id: number
+  name?: string
+  type?: string
+  format?: string
+  size?: string
+  fp?: string
+}
+
+/** Destination params of queue/add (empty = default root + path template). */
+export interface DestinationParams {
+  model_root?: string
+  relative_path?: string
+  use_default_paths?: 'true' | 'false'
+}
+
+// --- Phase B1: model tools ----------------------------------------------------
+
+export interface PreviewResponse {
+  success: boolean
+  preview_url?: string
+  preview_nsfw_level?: number
+}
+
+export interface DuplicateGroup {
+  hash: string
+  models: ModelItem[]
+}
+
+export interface FilenameConflict {
+  filename: string
+  models: ModelItem[]
+}
+
+export interface VerifyDuplicatesResponse {
+  success: boolean
+  verified_as_duplicates: boolean
+  mismatched_files: string[]
+  new_hash_map: Record<string, string>
+}
+
+/** POST /{prefix}/delete-folder (dry run or real); refusals come back with `code`. */
+export interface DeleteFolderResponse {
+  success: boolean
+  dry_run?: boolean
+  folder?: string
+  folder_path?: string
+  code?: string
+  error?: string
+  already_missing?: boolean
+  model_count?: number
+  excluded_model_count?: number
+  file_count?: number
+  dir_count?: number
+  total_bytes?: number
+  restorable?: boolean
+  manifest?: { model_count?: number; excluded_model_count?: number; file_count?: number } | null
+}
+
+export interface FolderCandidate {
+  folder_path: string
+  root: string
+  is_symlink?: boolean
+}
+
+export interface FetchCivitaiResponse {
+  success: boolean
+  metadata?: Partial<ModelItem> | null
+  error?: string
 }
 
 export interface WorkflowRegistry {

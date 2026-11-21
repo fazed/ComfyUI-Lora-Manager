@@ -148,7 +148,7 @@ describe('model tool request builders', () => {
     expect(form.get('nsfw_level')).toBe('4')
     // No JSON content type: the browser sets the multipart boundary.
     const [, init] = fetchMock.mock.calls.at(-1) as [string, RequestInit]
-    expect(JSON.stringify(init.headers)).not.toContain('application/json"')
+    expect((init.headers as Record<string, string>)['Content-Type']).toBeUndefined()
   })
 
   it('preview from URL, NSFW level, refresh and relink', async () => {

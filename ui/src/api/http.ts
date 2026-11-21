@@ -57,7 +57,10 @@ function errorMessage(payload: unknown, fallback: string): string {
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { method = 'GET', query, body, signal } = options
   const init: RequestInit = { method, signal, headers: { Accept: 'application/json' } }
-  if (body !== undefined) {
+  if (typeof FormData !== 'undefined' && body instanceof FormData) {
+    // Multipart: the browser sets the Content-Type with its boundary.
+    init.body = body
+  } else if (body !== undefined) {
     init.body = JSON.stringify(body)
     init.headers = { ...init.headers, 'Content-Type': 'application/json' }
   }
