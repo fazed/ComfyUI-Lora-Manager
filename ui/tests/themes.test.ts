@@ -12,6 +12,13 @@ import {
 
 const root = resolve(__dirname, '..')
 
+/**
+ * Deliberate, documented exceptions: layout tokens a built-in theme may
+ * override (see ui/README.md, Theming). Empty: every built-in theme shares
+ * the layout tokens of base.css.
+ */
+const THEME_LAYOUT_OPT_IN: Record<string, string[]> = {}
+
 describe('theme registry', () => {
   it('resolves system to the default light/dark themes', () => {
     expect(resolveThemeId('system', false, BUILTIN_THEMES)).toBe('default-light')
@@ -55,6 +62,23 @@ describe('theme registry', () => {
     expect(reference.size).toBeGreaterThan(20)
     for (const theme of BUILTIN_THEMES) {
       expect([...tokens(theme.id)].sort()).toEqual([...reference].sort())
+    }
+  })
+
+  it('built-in themes only set color/appearance tokens; layout tokens come from base.css', () => {
+    const appearance = /^--lm-(color|radius|shadow)-[\w-]+$/
+    for (const theme of BUILTIN_THEMES) {
+      const css = readFileSync(resolve(root, `src/themes/${theme.id}.css`), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+      const declared = [...css.matchAll(/(--lm-[\w-]+)\s*:/g)].map((m) => m[1])
+      const allowed = new Set(THEME_LAYOUT_OPT_IN[theme.id] ?? [])
+      const structural = declared.filter((name) => !appearance.test(name) && !allowed.has(name))
+      expect(structural, theme.id).toEqual([])
+    }
+    // Every structural token a theme could opt into must exist in base.css.
+    const base = readFileSync(resolve(root, 'src/themes/base.css'), 'utf8')
+    for (const name of Object.values(THEME_LAYOUT_OPT_IN).flat()) expect(base).toContain(`${name}:`)
+    for (const name of ['--lm-card-gap', '--lm-card-aspect', '--lm-space-4', '--lm-control-height', '--lm-font-size-md']) {
+      expect(base).toContain(`${name}:`)
     }
   })
 

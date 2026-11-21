@@ -221,12 +221,26 @@ than the spacing tokens; there is deliberately no `dark:` variant.
   `lm-ui.density`; failures are ignored) and applied by a tiny inline script in
   `index.html` before the first paint, so there is no flash.
 
-Built-in themes: **Light**, **Dark**, **Midnight** (navy + amber, also
-overrides radii and card gap to show non-color tokens can change too).
+Built-in themes: **Light**, **Dark**, **Midnight** (navy + amber with
+rounder corners).
+
+**Rule: themes are colors and appearance; layout is shared.** Built-in theme
+files may only set `color-scheme`, `--lm-color-*`, `--lm-radius-*` and
+`--lm-shadow-*` (radii and shadows never change a box's size). All structural
+tokens - spacing, control/top-bar/drawer sizes, card aspect, card gap, border
+and focus-ring widths, fonts, font sizes/weights, line heights, motion - live
+only in `base.css` (plus the compact density block), so cards and controls
+have the same geometry in every theme. `tests/themes.test.ts` fails when a
+built-in theme sets anything else; a deliberate exception must be added to
+the explicit allow-list there (`THEME_LAYOUT_OPT_IN`, empty today) and
+documented here. (Midnight used to widen `--lm-card-gap` to 18px, which made
+its cards about 3px narrower than in the other themes.) User themes may
+still override any token - that is their own choice.
 
 To add a built-in theme: create `src/themes/<id>.css`, import it in
 `src/themes/index.ts`, add an entry to `BUILTIN_THEMES`, rebuild. The theme
-tests check that every built-in theme defines the same color tokens.
+tests check that every built-in theme defines the same color tokens and no
+layout tokens.
 
 ### User themes (no rebuild)
 

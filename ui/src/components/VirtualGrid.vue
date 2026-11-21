@@ -2,7 +2,8 @@
 /**
  * Windowed card grid: only the rows inside (or near) the viewport are
  * rendered. Card aspect ratio and gap come from the theme tokens
- * --lm-card-aspect and --lm-card-gap, so themes and density can change them.
+ * --lm-card-aspect and --lm-card-gap (base.css / density; built-in themes
+ * do not override them, user themes may).
  */
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
@@ -90,11 +91,22 @@ onMounted(() => {
     measure()
   })
   themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'data-density', 'style'] })
+  // A user theme's stylesheet arrives after data-theme flips: re-read the tokens once it has loaded.
+  onSheetLoad = (event: Event) => {
+    if ((event.target as Element | null)?.tagName === 'LINK') {
+      readTokens()
+      measure()
+    }
+  }
+  document.addEventListener('load', onSheetLoad, true)
 })
+
+let onSheetLoad: ((event: Event) => void) | null = null
 
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   themeObserver?.disconnect()
+  if (onSheetLoad) document.removeEventListener('load', onSheetLoad, true)
 })
 
 // Ask for more data when the rendered window reaches the last rows.

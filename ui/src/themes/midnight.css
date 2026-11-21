@@ -1,7 +1,8 @@
 /*
- * Midnight: example extra theme proving the mechanism. Deep navy surfaces,
- * amber accent, rounder corners and a slightly wider card gap; overrides a few
- * non-color tokens on purpose.
+ * Midnight: deep navy surfaces, amber accent and rounder corners. Like every
+ * built-in theme it only sets color/appearance tokens (colors, radii); layout
+ * tokens (spacing, card gap/aspect, sizes, fonts) come from base.css, so card
+ * geometry is identical in every theme (see tests/themes.test.ts).
  */
 [data-theme='midnight'] {
   color-scheme: dark;
@@ -33,5 +34,4 @@
   --lm-radius-sm: 8px;
   --lm-radius-md: 14px;
   --lm-radius-lg: 20px;
-  --lm-card-gap: 18px;
 }
