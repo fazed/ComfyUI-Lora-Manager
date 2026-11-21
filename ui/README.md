@@ -766,3 +766,77 @@ relative to `py/`.
 | Rename folder | `POST /{prefix}/rename-folder {folder_path, new_name}` | One segment; renames on disk **with its models** and rewrites cache entries and on-disk sidecars. 409 `target_exists`/`busy`; 400 root, symlink, recipes dir, missing. |
 | Delete folder | `POST /{prefix}/delete-folder {folder_path, dry_run?}` | **Refuses (409 `not_empty`) when any model file is inside** (excluded ones count); otherwise removes the folder **recursively including leftover non-model files** (`manifest`: `file_count`, `dir_count`, `total_bytes`, `restorable`). 400 for a root, symlink, the recipes dir; a missing folder is forgotten. |
 | Move with default path | `move_model` / `move_models_bulk` with `use_default_paths: true` and `target_path` = a root | The server joins the download path template for each model (falls back to the root when it yields nothing). |
+
+## Phase B2a discovery: recipes (backend semantics)
+
+Read from `py/routes/recipe_route_registrar.py`, `py/routes/handlers/recipe_handlers.py`,
+`py/services/recipes/{analysis,persistence}_service.py`, `py/services/recipe_scanner.py`,
+`py/services/pending_delete_service.py` and the classic `static/js` recipe flows
+(`RecipeCard.js`, `RecipeModal.js`, `ImportManager.js` + `managers/import/*`,
+`BatchImportManager.js`, `BulkMissingLoraDownloadManager.js`, `DuplicatesManager.js`)
+before any B2a code was written. Pinned by `tests/routes/test_recipe_ui_contract.py`.
+
+### Storage
+
+* **Root**: the `recipes_path` setting, else `<first LoRA root>/recipes`
+  (`GET /api/lm/recipes/roots` returns it; `py/utils/recipes_paths.py`).
+  Subfolders of the root are the recipe "folders" (`GET /recipes/folders`,
+  `/recipes/folder-tree`, `/recipes/unified-folder-tree`; `folder` is relative
+  to the root, `/`-separated).
+* **One recipe = two files side by side**, both named after the recipe id (a
+  UUID): `<id>.recipe.json` (the record: `id`, `file_path` of the image,
+  `title`, `tags`, `favorite`, `base_model`, `loras[]`, `checkpoint`,
+  `gen_params`, `fingerprint`, `source_path`, `folder`, `created_date`,
+  `modified`, `import_info`, ...) and the image `<id>.webp` (re-encoded to the
+  card width, quality 85; videos keep `.mp4`/`.webm`). The recipe record is
+  also **embedded in the image's EXIF** (`append_recipe_metadata`), so every
+  metadata edit rewrites the image file too (pixels untouched for WebP).
+* **Caches outside the root** (settings/cache dir): the persistent SQLite
+  recipe cache (`recipe_cache.sqlite`), the FTS index (`recipe_fts.sqlite`)
+  and `stats/recipe_last_opened.json` (written by `POST /recipe/{id}/opened`).
+  The UI never touches them directly; the backend updates them on every
+  mutation.
+* **LoRA entries** (`loras[]`): `file_name`, `hash`, `strength`,
+  `modelVersionId`, `modelName`, `modelVersionName`, `isDeleted`,
+  `hashInvalid`, `exclude`, optional `reconnectSnapshot`. On read (list and
+  detail) the scanner adds `inLibrary`, `localPath` and `preview_url` from the
+  LoRA hash index (fallback: the Civitai version id). The checkpoint entry is
+  enriched the same way. A recipe's library status is "ready" when every
+  non-excluded LoRA is in the library (`lora_availability=ready|missing|deleted`).
+
+### Endpoints the new UI uses
+
+| Action | Endpoint | Behaviour |
+| --- | --- | --- |
+| List | `GET /recipes` (`page`, `page_size`, `sort_by` = `date`, `name`, `loras_count`, `opened` or `random` plus `:asc`/`:desc`; `search` + `search_title/tags/lora_name/lora_model/prompt`; `folder` + `recursive`; `base_models` **comma-joined**; `tag_include` / `tag_exclude` repeated; `favorite=true`; `lora_availability`; `has_workflow=true`) | Read-only. Items carry `file_url` (static preview URL), `width`/`height`, enriched `loras[]`. `sort_by=opened` hides never-opened recipes. |
+| Detail | `GET /recipe/{id}` | Mostly read-only: a prompt ending in the legacy scraped `...` is **repaired and saved** on first open. Adds `recipe_json_path`. |
+| Tags / base models | `GET /recipes/top-tags`, `/recipes/search-tags?q=`, `/recipes/base-models` | Read-only; base models include a synthetic "Unknown" bucket with a `value` filter marker. |
+| Analyze upload | `POST /recipes/analyze-image` multipart, **first field `image`** | Writes only a temp file. Parses the embedded generation metadata, matches LoRAs/checkpoint against the library (`existsLocally`, `localPath`, `thumbnailUrl`, Civitai `id`/`modelId` when known; Civitai lookups by hash for unknown ones). **No metadata = HTTP 200 with `{error: "No metadata found in this image", loras: []}`**: the UI must check `error`, not only the status. |
+| Analyze URL | `POST /recipes/analyze-image` JSON `{url}` | Downloads the image (temp file) and, for a Civitai image page/URL, reads the image info from the Civitai API (network). Same response plus `image_base64` and `extension`. |
+| Analyze local file | `POST /recipes/analyze-local-image` JSON `{path}` | A path on the server's disk; read-only. |
+| Save | `POST /recipes/save` multipart: `image` (file) or `image_base64`, `name`, `tags` (JSON array), `metadata` (JSON: `base_model`, `loras`, `gen_params`, `raw_metadata`, `checkpoint`, `source_path`, `diagnostics`, `workflow`, `preview_nsfw_level`), `extension` | Writes `<id>.webp` + `<id>.recipe.json` into the **root** (no folder choice; move afterwards), embeds the record in the image, adds it to the caches. 400 without `name` or `metadata`. Returns `recipe_id`, `image_path`, `json_path`, `matching_recipes` (same LoRAs + strengths). An `image_url` field is ignored by the backend. |
+| Edit | `PUT /recipe/{id}/update` JSON | Needs at least one of `title`, `tags`, `source_path`, `preview_nsfw_level`, `favorite`, `gen_params` (object), `base_model`, but **writes every key it is sent** into the JSON (so the UI only ever sends those keys). Rewrites the JSON and the image's embedded record. "Rename" = a new `title`; files keep their id names. |
+| Delete | `DELETE /recipe/{id}` | **Staged, undoable**: the JSON and image are **copied** to `<settings dir>/.lm-pending-delete/<batch_id>/` with a manifest (20 s window), then the originals are removed. `POST /api/lm/undo-delete {batch_id}` restores them and re-adds the cache entry; afterwards the batch is purged permanently. `batch_id: null` = staging failed and it was a hard delete. |
+| Bulk delete | `POST /recipes/bulk-delete {recipe_ids}` | Same staging, merged into one `batch_id` (fallback `batch_ids[]`); `deleted[]`, `failed[{id, reason}]`. |
+| Move | `POST /recipe/move {recipe_id, target_path}`, `POST /recipes/move-bulk {recipe_ids, target_path}` | `target_path` absolute or relative to the root, must stay inside it, created when missing. Moves JSON + image, rewrites `file_path`/`folder`. Same folder = success no-op. Bulk: per-recipe `results[]`, HTTP 200. |
+| Reconnect LoRA | `GET /recipe/{id}/lora/{index}/reconnect-suggestions?query=` then `POST /recipe/lora/reconnect {recipe_id, lora_index, target_name}` | Suggestions are read-only (ranked, `match_reason` same_hash / same_version / similar_filename / similar_name, `target_name` = stem or `folder/stem` when ambiguous). Reconnect resolves `target_name` against the LoRA library: 404 no match, 400 ambiguous or incompatible base model; a same-family base model succeeds with `base_model_mismatch`. The previous entry is kept in `reconnectSnapshot`; `POST /recipe/lora/restore {recipe_id, lora_index}` puts it back. Checkpoint: `/recipe/{id}/checkpoint/reconnect-suggestions`, `/recipe/checkpoint/reconnect` and `/restore`. |
+| Re-match | `POST /recipe/{id}/rematch {relaxed?}` | Local re-matching of deleted / hash-invalid entries (relaxed: healthy ones too); returns `matched_entries`, `unresolved_entries`, `errors`; 409 while a global rematch runs. |
+| Syntax | `GET /recipe/{id}/syntax` | `<lora:...>` tokens of the LoRAs found in the library, space-joined; 400 "No LoRAs found in this recipe". The classic UI copies this or sends it through `update-lora-code` (append; Shift = replace). |
+| Send workflow | `POST /recipe/{id}/send-workflow` | Pushes the workflow embedded in the image to the open ComfyUI tab (`lm_load_workflow`); 404 `no_workflow`, 400 in standalone mode. |
+| Duplicates | `GET /recipes/find-duplicates` (`include_prompt=1`) | Read-only groups by fingerprint (same LoRAs + strengths) and by source URL; deletion goes through bulk delete. |
+| Batch import | `POST /recipes/batch-import/start {items:[{source, type}], tags, skip_no_metadata}` (`type` = `url` or `local_path`), `GET /recipes/batch-import/progress?operation_id=`, `POST /recipes/batch-import/cancel {operation_id}` | Background job (409 when one runs); every successful item is a saved recipe; URL items use the network. Directory import (`batch-import/directory`, `browse-directory`) walks the server disk. |
+
+Not used by the new UI: `import-remote` / `import-from-url` / `reimport` (browser
+extension flows; re-import deletes and re-creates the recipe and fetches the
+source from the network), `create-from-example`, `save-from-widget`, `share`,
+global `rematch`, `scan`. There is **no endpoint to replace a recipe's
+preview image**.
+
+### Missing LoRAs
+
+The classic `BulkMissingLoraDownloadManager` collects every LoRA that is not
+in the library and not `isDeleted` / `hashInvalid`, de-duplicated by hash or
+version id, and calls the blocking `POST /download-model` once per LoRA. The
+new UI instead feeds the version ids into the phase B1 download dialog as
+Civitai download links (`/api/download/models/<versionId>`), so they go
+through the queue worker like every other download.
