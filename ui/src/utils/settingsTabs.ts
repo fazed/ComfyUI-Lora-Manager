@@ -238,3 +238,29 @@ export function applyReset(draft: Draft, plan: ResetItem[], fields: FieldDef[]):
   }
   return next
 }
+
+// --------------------------------------------------------------------------- keyboard
+
+/**
+ * Roving focus in the tab list (WAI-ARIA tabs): arrows move to the
+ * previous/next tab with wrap-around (both axes, so the vertical desktop list
+ * and the horizontal phone strip behave the same), Home/End jump to the ends.
+ * Returns null for keys the tab list does not handle.
+ */
+export function rovingIndex(key: string, index: number, count: number): number | null {
+  if (count <= 0) return null
+  switch (key) {
+    case 'ArrowDown':
+    case 'ArrowRight':
+      return (index + 1) % count
+    case 'ArrowUp':
+    case 'ArrowLeft':
+      return (index - 1 + count) % count
+    case 'Home':
+      return 0
+    case 'End':
+      return count - 1
+    default:
+      return null
+  }
+}

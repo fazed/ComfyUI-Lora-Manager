@@ -13,6 +13,7 @@ import {
   fieldDomId,
   formatDraftValue,
   resolveSettingsLocation,
+  rovingIndex,
   searchSettings,
   settingsTabPath,
   tabChangeCounts,
@@ -225,5 +226,18 @@ describe('reset to default', () => {
   it('every field of the schema either has a default or is a secret / free text without one', () => {
     const noDefault = ALL_FIELDS.filter((f: FieldDef) => f.default === undefined).map((f) => f.key)
     for (const key of noDefault) expect(['secret', 'textarea']).toContain(byKey(key).type)
+  })
+})
+
+describe('tab list keyboard', () => {
+  it('moves with arrows (wrapping), Home and End; ignores other keys', () => {
+    expect(rovingIndex('ArrowDown', 0, 9)).toBe(1)
+    expect(rovingIndex('ArrowRight', 8, 9)).toBe(0)
+    expect(rovingIndex('ArrowUp', 0, 9)).toBe(8)
+    expect(rovingIndex('ArrowLeft', 4, 9)).toBe(3)
+    expect(rovingIndex('Home', 4, 9)).toBe(0)
+    expect(rovingIndex('End', 4, 9)).toBe(8)
+    expect(rovingIndex('Enter', 4, 9)).toBeNull()
+    expect(rovingIndex('ArrowDown', 0, 0)).toBeNull()
   })
 })

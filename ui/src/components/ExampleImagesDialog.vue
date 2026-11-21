@@ -39,7 +39,7 @@ function onDrop(event: DragEvent): void {
       <p v-if="!ex.hash.value" class="text-muted">{{ t('examples.noHash') }}</p>
       <div v-else-if="!ex.configured.value" class="flex flex-col items-start gap-2 rounded-md bg-warning-soft p-3 text-sm" role="note">
         <p>{{ t('examples.notConfigured') }}</p>
-        <RouterLink class="lm-btn lm-btn--sm" to="/settings#set-example-images" @click="emit('close')">{{ t('examples.openSettings') }}</RouterLink>
+        <RouterLink class="lm-btn lm-btn--sm" to="/settings/example-images" @click="emit('close')">{{ t('examples.openSettings') }}</RouterLink>
       </div>
       <template v-else>
         <div class="flex flex-wrap gap-2">

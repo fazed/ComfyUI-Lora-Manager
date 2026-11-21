@@ -1,7 +1,6 @@
 <script setup lang="ts">
 /** Metadata archive database: status, download (multi-GB, confirm) and removal (confirm). */
 import { onMounted } from 'vue'
-import AppIcon from '@/components/AppIcon.vue'
 import { useMetadataArchive } from '@/composables/useMaintenance'
 import { formatBytes } from '@/utils/format'
 import { t } from '@/i18n'
@@ -21,9 +20,7 @@ onMounted(() => void archive.load())
 </script>
 
 <template>
-  <div class="flex flex-col gap-2 rounded-md hairline border-border p-3">
-    <h3 class="flex items-center gap-2 text-sm font-medium"><AppIcon name="archive" :size="16" />{{ t('archive.title') }}</h3>
-    <p class="lm-hint">{{ t('archive.hint') }}</p>
+  <div class="flex flex-col gap-2">
     <p v-if="error" class="lm-error-text" role="alert">{{ error }}</p>
     <div v-if="status" class="flex flex-wrap gap-2 text-sm">
       <span class="lm-badge" :class="status.available ? 'lm-badge--success' : ''">{{ status.available ? t('archive.available', { size: formatBytes(status.size) }) : t('archive.missing') }}</span>

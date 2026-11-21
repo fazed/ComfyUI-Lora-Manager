@@ -20,7 +20,7 @@ void props
 </script>
 
 <template>
-  <div class="flex flex-col gap-2 rounded-md hairline border-border p-3">
+  <div class="flex flex-col gap-2">
     <p v-if="!savedPath" class="text-sm text-muted">{{ t('examples.needPath') }}</p>
     <div class="flex flex-wrap items-center gap-2">
       <button v-if="!running" type="button" class="lm-btn lm-btn--sm lm-btn--primary" :disabled="!savedPath || actionBusy" @click="dl.start(optimize)">{{ t('examples.allStart') }}</button>

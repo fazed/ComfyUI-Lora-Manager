@@ -50,7 +50,7 @@ export const routes: RouteRecordRaw[] = [
     meta: { title: 'nav.downloads' },
   },
   {
-    path: '/settings',
+    path: '/settings/:tab?',
     name: 'settings',
     component: () => import('@/pages/SettingsPage.vue'),
     meta: { title: 'nav.settings' },
