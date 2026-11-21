@@ -17,7 +17,7 @@ import { usePersistentToggle } from '@/composables/usePersistentToggle'
 import { useSendToWorkflow } from '@/composables/useSendToWorkflow'
 import { withMountPrefix } from '@/utils/basePath'
 import { formatBytes, formatDate, isVideoUrl } from '@/utils/format'
-import { nextTab, shouldConfirmClose } from '@/utils/drawer'
+import { currentVersionId, nextTab, shouldConfirmClose } from '@/utils/drawer'
 import { isBlurred } from '@/utils/mature'
 import { promptHint } from '@/utils/generation'
 import { sanitizeHtml } from '@/utils/sanitize'
@@ -49,6 +49,9 @@ const TABS: { id: Tab; label: MessageKey }[] = [
 const sectionClass = 'flex flex-col gap-5'
 const blockTitleClass = 'mb-2 text-sm'
 const chipsClass = 'flex flex-wrap items-center gap-2'
+// Touch / phone layouts: every control gets a 44px hit area (--lm-touch-target); mouse layouts keep the compact sizes.
+const touchHit = 'phone:min-h-touch touch:min-h-touch'
+const touchIcon = 'phone:size-touch touch:size-touch'
 
 const toasts = useToasts()
 const { confirm } = useConfirm()
@@ -92,6 +95,7 @@ const civitaiUrl = computed(() => {
   return `https://${host}/models/${modelId.value}${version ? `?modelVersionId=${version}` : ''}`
 })
 // External links (new tab) first, then the same model actions as the card menu.
+const currentVersion = computed(() => currentVersionId(props.item, metadata.value))
 const menuItems = computed<ActionMenuItem[]>(() => {
   const links: ActionMenuItem[] = []
   if (civitaiUrl.value) links.push({ action: 'civitai', label: t('detail.civitai'), icon: 'external', href: civitaiUrl.value })
@@ -383,7 +387,7 @@ useEventListener(document, 'keydown', onKey)
             <button
               v-if="item.update_available"
               type="button"
-              class="lm-badge lm-badge--warning cursor-pointer hover:opacity-80 phone:hidden"
+              class="lm-badge lm-badge--warning cursor-pointer hover:opacity-80 phone:hidden touch:min-h-touch touch:px-3"
               :aria-label="t('detail.showUpdates')"
               @click="tab = 'versions'"
             >
@@ -395,7 +399,7 @@ useEventListener(document, 'keydown', onKey)
         <button
           type="button"
           class="lm-btn lm-btn--ghost lm-btn--icon"
-          :class="{ 'text-warning': item.favorite }"
+          :class="[touchIcon, { 'text-warning': item.favorite }]"
           :aria-label="t('detail.toggleFavorite')"
           :aria-pressed="!!item.favorite"
           @click="toggleFavorite"
@@ -405,6 +409,7 @@ useEventListener(document, 'keydown', onKey)
         <button
           type="button"
           class="lm-btn lm-btn--ghost lm-btn--icon"
+          :class="touchIcon"
           :aria-label="t('detail.moreActions')"
           :title="t('detail.moreActions')"
           aria-haspopup="menu"
@@ -413,7 +418,7 @@ useEventListener(document, 'keydown', onKey)
         >
           <AppIcon name="more" />
         </button>
-        <button ref="closeButton" type="button" class="lm-btn lm-btn--ghost lm-btn--icon" :aria-label="t('common.close')" @click="requestClose">
+        <button ref="closeButton" type="button" class="lm-btn lm-btn--ghost lm-btn--icon" :class="touchIcon" :aria-label="t('common.close')" @click="requestClose">
           <AppIcon name="close" />
         </button>
       </header>
@@ -425,7 +430,7 @@ useEventListener(document, 'keydown', onKey)
           :key="entry.id"
           type="button"
           role="tab"
-          class="inline-flex cursor-pointer items-center gap-1 border-b-2 px-3 py-2 font-medium whitespace-nowrap"
+          class="inline-flex cursor-pointer items-center gap-1 border-b-2 px-3 py-2 font-medium whitespace-nowrap phone:min-h-touch touch:min-h-touch"
           :class="tab === entry.id ? 'border-accent text-fg' : 'border-transparent text-muted'"
           :aria-selected="tab === entry.id"
           :aria-controls="`panel-${entry.id}`"
@@ -449,21 +454,23 @@ useEventListener(document, 'keydown', onKey)
                   id="drawer-strength"
                   v-model.number="strength"
                   class="lm-input w-[84px] tabular-nums"
+                  :class="touchHit"
                   type="number"
                   step="0.05"
                   min="-10"
                   max="10"
                 />
               </label>
-              <button type="button" class="lm-btn lm-btn--primary" :disabled="sending" @click="sendToComfy('append')">
+              <button type="button" class="lm-btn lm-btn--primary" :class="touchHit" :disabled="sending" @click="sendToComfy('append')">
                 <AppIcon name="send" :size="16" />{{ t('detail.sendAppend') }}
               </button>
-              <button type="button" class="lm-btn" :disabled="sending" @click="sendToComfy('replace')">
+              <button type="button" class="lm-btn" :class="touchHit" :disabled="sending" @click="sendToComfy('replace')">
                 {{ t('detail.sendReplace') }}
               </button>
               <button
                 type="button"
                 class="lm-btn lm-btn--ghost lm-btn--icon"
+                :class="touchIcon"
                 :aria-label="t('detail.copySyntax')"
                 :title="t('detail.copySyntax')"
                 @click="copySyntax"
@@ -477,6 +484,7 @@ useEventListener(document, 'keydown', onKey)
                   v-if="entry.strength !== null"
                   type="button"
                   class="lm-chip tabular-nums"
+                  :class="touchHit"
                   :title="t('detail.useStrength', { value: entry.strength })"
                   @click="strength = entry.strength"
                 >
@@ -490,7 +498,7 @@ useEventListener(document, 'keydown', onKey)
           <div v-if="canSend || triggerWords.length || metaError">
             <div class="flex items-center justify-between">
               <h3 :class="blockTitleClass">{{ t('detail.triggerWords') }}</h3>
-              <button v-if="triggerWords.length > 1" type="button" class="lm-btn lm-btn--sm" @click="copy(triggerWords.join(', '))">
+              <button v-if="triggerWords.length > 1" type="button" class="lm-btn lm-btn--sm" :class="touchHit" @click="copy(triggerWords.join(', '))">
                 <AppIcon name="copy" :size="14" />{{ t('detail.copyAll') }}
               </button>
             </div>
@@ -501,6 +509,7 @@ useEventListener(document, 'keydown', onKey)
                 :key="word"
                 type="button"
                 class="lm-chip text-left font-mono whitespace-normal"
+                :class="touchHit"
                 :title="t('common.copy')"
                 @click="copy(word)"
               >
@@ -519,7 +528,7 @@ useEventListener(document, 'keydown', onKey)
                 <span v-if="images.length" class="tabular-nums">{{ images.length }}</span>
                 <span v-if="localImages" class="lm-badge lm-badge--success normal-case">{{ t('examples.localCount', { count: localImages }) }}</span>
               </h3>
-              <button type="button" class="lm-btn lm-btn--sm lm-btn--ghost ml-auto" :disabled="metaLoading" @click="examplesOpen = true">
+              <button type="button" class="lm-btn lm-btn--sm lm-btn--ghost ml-auto" :class="touchHit" :disabled="metaLoading" @click="examplesOpen = true">
                 <AppIcon name="image" :size="14" />{{ t('examples.manage') }}
               </button>
             </div>
@@ -597,15 +606,15 @@ useEventListener(document, 'keydown', onKey)
           <!-- Tags: uniform neutral pills; click filters the library, x removes. -->
           <div>
             <h3 :class="blockTitleClass">{{ t('detail.tags') }}</h3>
-            <ul v-if="tags.length" class="flex flex-wrap items-center gap-1" :aria-label="t('detail.tags')">
+            <ul v-if="tags.length" class="flex flex-wrap items-center gap-1 phone:gap-y-4 touch:gap-y-4" :aria-label="t('detail.tags')">
               <li
                 v-for="tag in shownTags.visible"
                 :key="tag"
-                class="inline-flex h-[26px] max-w-full items-center overflow-hidden rounded-pill hairline border-border bg-sunken text-xs text-fg"
+                class="inline-flex h-[26px] max-w-full items-center rounded-pill hairline border-border bg-sunken text-xs text-fg"
               >
                 <button
                   type="button"
-                  class="h-full cursor-pointer truncate pr-1 pl-3 hover:text-accent"
+                  class="h-full min-w-0 cursor-pointer truncate rounded-l-pill pr-1 pl-3 hover:text-accent phone:h-touch phone:min-w-touch phone:pr-3 touch:h-touch touch:min-w-touch touch:pr-3"
                   :title="t('detail.filterByTag', { tag })"
                   @click="filterTag(tag)"
                 >
@@ -613,7 +622,7 @@ useEventListener(document, 'keydown', onKey)
                 </button>
                 <button
                   type="button"
-                  class="inline-grid h-full w-[24px] flex-none cursor-pointer place-items-center text-muted hover:text-danger"
+                  class="inline-grid h-full w-[24px] flex-none cursor-pointer place-items-center rounded-r-pill text-muted hover:text-danger phone:-mx-[10px] phone:h-touch phone:w-touch touch:-mx-[10px] touch:h-touch touch:w-touch"
                   :aria-label="t('detail.removeTag', { tag })"
                   :disabled="savingTags"
                   @click="removeTag(tag)"
@@ -624,7 +633,7 @@ useEventListener(document, 'keydown', onKey)
               <li v-if="shownTags.collapsible">
                 <button
                   type="button"
-                  class="inline-flex h-[26px] cursor-pointer items-center rounded-pill px-2 text-xs font-medium text-accent hover:bg-accent-soft"
+                  class="inline-flex h-[26px] cursor-pointer items-center rounded-pill px-2 text-xs font-medium text-accent hover:bg-accent-soft phone:h-touch touch:h-touch"
                   :aria-expanded="tagsExpanded"
                   @click="tagsExpanded = !tagsExpanded"
                 >
@@ -638,13 +647,14 @@ useEventListener(document, 'keydown', onKey)
               <input
                 id="drawer-new-tag"
                 v-model="newTag"
-                class="lm-input min-h-control-sm text-xs"
+                class="lm-input min-h-control-sm text-xs phone:min-h-touch touch:min-h-touch"
                 :placeholder="t('detail.addTag')"
                 :disabled="savingTags"
               />
               <button
                 type="submit"
                 class="lm-btn lm-btn--sm lm-btn--icon flex-none"
+                :class="touchIcon"
                 :aria-label="t('detail.addTag')"
                 :disabled="savingTags || !newTag.trim()"
               >
@@ -658,7 +668,7 @@ useEventListener(document, 'keydown', onKey)
             <textarea id="drawer-notes" ref="notesField" v-model="notes" class="lm-textarea" :placeholder="t('detail.notesPlaceholder')"></textarea>
             <div class="mt-2 flex flex-wrap items-center justify-end gap-2">
               <span class="mr-auto text-xs text-muted" aria-live="polite">{{ notesDirty ? t('detail.unsavedNotes') : '' }}</span>
-              <button type="button" class="lm-btn lm-btn--primary" :disabled="!notesDirty || savingNotes" @click="saveNotes">
+              <button type="button" class="lm-btn lm-btn--primary" :class="touchHit" :disabled="!notesDirty || savingNotes" @click="saveNotes">
                 {{ t('common.save') }}
               </button>
             </div>
@@ -669,7 +679,7 @@ useEventListener(document, 'keydown', onKey)
             <h3>
               <button
                 type="button"
-                class="flex w-full cursor-pointer items-center gap-2 rounded-md px-4 py-3 text-left text-sm font-bold"
+                class="flex w-full cursor-pointer items-center gap-2 rounded-md px-4 py-3 text-left text-sm font-bold phone:min-h-touch touch:min-h-touch"
                 :aria-expanded="specsOpen"
                 aria-controls="drawer-specs"
                 @click="specsOpen = !specsOpen"
@@ -693,6 +703,7 @@ useEventListener(document, 'keydown', onKey)
                   <button
                     type="button"
                     class="lm-btn lm-btn--ghost lm-btn--icon lm-btn--sm flex-none"
+                    :class="touchIcon"
                     :aria-label="t('detail.copyPath')"
                     @click="copy(item.file_path)"
                   >
@@ -715,6 +726,7 @@ useEventListener(document, 'keydown', onKey)
                   <button
                     type="button"
                     class="lm-btn lm-btn--ghost lm-btn--icon lm-btn--sm flex-none"
+                    :class="touchIcon"
                     :aria-label="t('detail.copyHash')"
                     @click="copy(item.sha256!)"
                   >
@@ -743,7 +755,9 @@ useEventListener(document, 'keydown', onKey)
             <li
               v-for="version in versions.versions"
               :key="version.versionId"
-              class="flex items-center gap-3 rounded-md hairline border-border p-2"
+              class="flex items-center gap-3 rounded-md hairline p-2 phone:flex-wrap"
+              :class="version.versionId === currentVersion ? 'border-accent' : 'border-border'"
+              :aria-current="version.versionId === currentVersion ? 'true' : undefined"
             >
               <LazyMedia
                 class="lm-thumb h-[72px] w-[56px]"
@@ -752,30 +766,36 @@ useEventListener(document, 'keydown', onKey)
                 :icon-size="18"
               />
               <div class="flex min-w-0 flex-1 flex-col gap-[2px]">
-                <strong>{{ version.name }}</strong>
+                <strong class="wrap-anywhere">{{ version.name }}</strong>
                 <div class="flex flex-wrap gap-2 text-xs text-muted">
                   <span v-if="version.baseModel">{{ version.baseModel }}</span>
                   <span v-if="version.releasedAt">{{ formatDate(version.releasedAt) }}</span>
                   <span v-if="version.sizeBytes">{{ formatBytes(version.sizeBytes) }}</span>
                 </div>
                 <div class="flex flex-wrap gap-1">
+                  <span v-if="version.versionId === currentVersion" class="lm-badge lm-badge--accent">{{ t('detail.current') }}</span>
                   <span v-if="version.isInLibrary" class="lm-badge lm-badge--success">{{ t('detail.inLibrary') }}</span>
                   <span v-else-if="version.hasBeenDownloaded" class="lm-badge">{{ t('detail.downloaded') }}</span>
                   <span v-if="version.isEarlyAccess" class="lm-badge lm-badge--warning">{{ t('detail.earlyAccess') }}</span>
                 </div>
               </div>
-              <div class="flex flex-col gap-1">
-                <button v-if="!version.isInLibrary" type="button" class="lm-btn lm-btn--sm" @click="queueVersion(version.versionId)">
-                  <AppIcon name="download" :size="14" />{{ t('detail.queueVersion') }}
-                </button>
-                <button
-                  type="button"
-                  class="lm-btn lm-btn--sm"
-                  :title="t('download.title')"
-                  @click="emit('download', `https://civitai.com/models/${modelId}?modelVersionId=${version.versionId}`)"
-                >
-                  <AppIcon name="folder" :size="14" />{{ t('download.fromVersion') }}
-                </button>
+              <!-- Fixed-width actions column so every row lines up; a version already in the library keeps the space empty. -->
+              <div class="flex w-[168px] flex-none items-center justify-end gap-1 phone:w-full" :class="version.isInLibrary && 'phone:hidden'">
+                <template v-if="!version.isInLibrary">
+                  <button type="button" class="lm-btn lm-btn--sm" :class="touchHit" @click="queueVersion(version.versionId)">
+                    <AppIcon name="download" :size="14" />{{ t('detail.queueVersion') }}
+                  </button>
+                  <button
+                    type="button"
+                    class="lm-btn lm-btn--ghost lm-btn--icon lm-btn--sm"
+                    :class="touchIcon"
+                    :aria-label="t('download.fromVersion')"
+                    :title="t('download.title')"
+                    @click="emit('download', `https://civitai.com/models/${modelId}?modelVersionId=${version.versionId}`)"
+                  >
+                    <AppIcon name="folder" :size="14" />
+                  </button>
+                </template>
               </div>
             </li>
           </ul>

@@ -97,7 +97,7 @@ onMounted(async () => {
 <template>
   <div
     ref="menu"
-    class="fixed z-70 flex flex-col rounded-md hairline border-border bg-elevated p-1 shadow-lg"
+    class="fixed z-70 flex max-h-[calc(100dvh-16px)] flex-col overflow-y-auto rounded-md hairline border-border bg-elevated p-1 shadow-lg"
     :style="style"
     role="menu"
     :aria-label="label"

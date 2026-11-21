@@ -18,5 +18,4 @@ export const drawerMessages = {
   'detail.discardNotes.confirm': 'Discard',
   'detail.discardNotes.keep': 'Keep editing',
   'detail.current': 'Current',
-  'detail.downloadToFolder': 'Download to folder…',
 } as const
