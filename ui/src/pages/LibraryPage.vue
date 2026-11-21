@@ -28,6 +28,7 @@ import LibrarySelectionBar from '@/components/LibrarySelectionBar.vue'
 import LibraryToolbar from '@/components/LibraryToolbar.vue'
 import StateBlock from '@/components/StateBlock.vue'
 import VirtualGrid from '@/components/VirtualGrid.vue'
+import type { VirtualGridExposed } from '@/utils/gridLayout'
 import { createModelApi } from '@/api/endpoints'
 import type { CountEntry, FolderTree as FolderTreeData, ModelItem, ModelPrefix, TagEntry } from '@/api/types'
 import { LIBRARIES } from '@/config/libraries'
@@ -123,7 +124,7 @@ const list = useInfiniteList<ModelItem>((page, signal) =>
   ),
 )
 
-const grid = ref<InstanceType<typeof VirtualGrid> | null>(null)
+const grid = ref<VirtualGridExposed | null>(null)
 const tree = shallowRef<FolderTreeData>({})
 const baseModels = ref<CountEntry[]>([])
 const topTags = ref<TagEntry[]>([])
@@ -798,8 +799,22 @@ function bulkSend(event: MouseEvent): void {
         @reach-end="list.loadMore()"
       >
         <template #default="{ item }">
-          <component
-            :is="filters.view.value === 'list' ? ModelRow : ModelCard"
+          <!-- Explicit branches (not <component :is>) so vue-tsc checks every prop and handler on both views. -->
+          <ModelRow
+            v-if="filters.view.value === 'list'"
+            :item="item"
+            :selection-mode="selectionMode"
+            :selected="selected.has(item.file_path)"
+            :blur-mature="blurMature"
+            :can-send="config.sendToComfy"
+            @open="openItem = $event"
+            @send="sendToComfy"
+            @toggle-select="toggleSelect"
+            @toggle-favorite="toggleFavorite"
+            @menu="openMenu"
+          />
+          <ModelCard
+            v-else
             :item="item"
             :selection-mode="selectionMode"
             :selected="selected.has(item.file_path)"

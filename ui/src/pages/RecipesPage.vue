@@ -13,7 +13,7 @@ import BaseModelQuickFilter from '@/components/BaseModelQuickFilter.vue'
 import DownloadDialog from '@/components/DownloadDialog.vue'
 import FolderTree from '@/components/FolderTree.vue'
 import InputDialog from '@/components/InputDialog.vue'
-import MenuButton, { type MenuEntry } from '@/components/MenuButton.vue'
+import type { MenuEntry } from '@/components/MenuButton.vue'
 import ModelActionMenu, { type ActionMenuItem } from '@/components/ModelActionMenu.vue'
 import RecipeBatchImportDialog from '@/components/RecipeBatchImportDialog.vue'
 import RecipeCard from '@/components/RecipeCard.vue'
@@ -26,6 +26,7 @@ import LibrarySelectionBar from '@/components/LibrarySelectionBar.vue'
 import LibraryToolbar from '@/components/LibraryToolbar.vue'
 import StateBlock from '@/components/StateBlock.vue'
 import VirtualGrid from '@/components/VirtualGrid.vue'
+import type { VirtualGridExposed } from '@/utils/gridLayout'
 import { recipesApi } from '@/api/recipes'
 import type { CountEntry, FolderTree as FolderTreeData, RecipeItem, TagEntry } from '@/api/types'
 import type { SortOption } from '@/config/libraries'
@@ -104,7 +105,7 @@ const list = useInfiniteList<RecipeItem>((page, signal) =>
   ),
 )
 
-const grid = ref<InstanceType<typeof VirtualGrid> | null>(null)
+const grid = ref<VirtualGridExposed | null>(null)
 const tree = shallowRef<FolderTreeData>({})
 const baseModels = ref<CountEntry[]>([])
 const topTags = ref<TagEntry[]>([])

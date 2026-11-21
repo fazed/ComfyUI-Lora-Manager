@@ -62,3 +62,15 @@ export function parseLength(value: string, fallback: number): number {
   const parsed = Number.parseFloat(value)
   return Number.isFinite(parsed) ? parsed : fallback
 }
+
+/**
+ * What `VirtualGrid.vue` exposes to its page (`defineExpose`). Declared here
+ * because `InstanceType<typeof VirtualGrid>` does not work for a generic
+ * component; pages type their template ref with this interface.
+ */
+export interface VirtualGridExposed {
+  scrollToTop(): void
+  scrollToIndex(index: number): void
+  scrollTo(top: number): void
+  scrollOffset(): number
+}

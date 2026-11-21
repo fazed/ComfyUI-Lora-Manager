@@ -67,7 +67,8 @@ export interface NavKeyEvent {
   shiftKey: boolean
   isComposing?: boolean
   defaultPrevented?: boolean
-  target: { tagName?: string; isContentEditable?: boolean } | null
+  /** A DOM `EventTarget` (a real KeyboardEvent) or a plain stand-in in tests. */
+  target: EventTarget | { tagName?: string; isContentEditable?: boolean } | null
 }
 
 export interface NavKeyContext {
@@ -90,8 +91,9 @@ const EDITABLE_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT'])
 export function shouldHandleNavKey(event: NavKeyEvent, context: NavKeyContext): NavDirection | null {
   if (!context.topmost || context.dialogOpen || context.menuOpen) return null
   if (event.defaultPrevented || event.isComposing) return null
-  const tag = event.target?.tagName?.toUpperCase()
-  if ((tag && EDITABLE_TAGS.has(tag)) || event.target?.isContentEditable) return null
+  const target = event.target as { tagName?: string; isContentEditable?: boolean } | null
+  const tag = target?.tagName?.toUpperCase()
+  if ((tag && EDITABLE_TAGS.has(tag)) || target?.isContentEditable) return null
   if (event.ctrlKey || event.metaKey || event.shiftKey) return null
   if (event.altKey) {
     if (event.key === 'ArrowLeft') return 'prev'

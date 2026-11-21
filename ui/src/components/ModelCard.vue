@@ -3,30 +3,15 @@ import { computed, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
 import LazyMedia from './LazyMedia.vue'
 import type { ModelItem } from '@/api/types'
-import { useCardInteractions, type MenuPoint } from '@/composables/useCardInteractions'
+import { useCardInteractions } from '@/composables/useCardInteractions'
+import type { ModelItemViewEmits, ModelItemViewProps } from './modelItemView'
 import { withMountPrefix } from '@/utils/basePath'
 import { isBlurred } from '@/utils/mature'
 import { t } from '@/i18n'
 
-const props = defineProps<{
-  item: ModelItem
-  selectionMode: boolean
-  selected: boolean
-  blurMature: boolean
-  /** Show the "Send to ComfyUI" button (LoRAs). */
-  canSend?: boolean
-}>()
-
-const emit = defineEmits<{
-  open: [item: ModelItem]
-  /** shift = Shift+click: select a range from the last toggled card (Ctrl/Cmd+click also toggles outside selection mode). */
-  'toggle-select': [item: ModelItem, shift: boolean]
-  'toggle-favorite': [item: ModelItem]
-  /** replace = Shift+click (replace the node's LoRAs instead of appending). */
-  send: [item: ModelItem, replace: boolean]
-  /** Open the context menu at a viewport point (also in selection mode); `opener` gets focus back when it closes. */
-  menu: [item: ModelItem, point: MenuPoint, opener: HTMLElement | null]
-}>()
+// Shared contract with ModelRow (see modelItemView.ts).
+const props = defineProps<ModelItemViewProps>()
+const emit = defineEmits<ModelItemViewEmits>()
 
 const { activate, openMenuFromButton, openContextMenu } = useCardInteractions<ModelItem>({
   item: () => props.item,

@@ -3,7 +3,7 @@
  * maths, the persisted per-library view mode, the row component and the
  * toolbar's view switch. Written before the implementation.
  */
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, expectTypeOf, it } from 'vitest'
 import { nextTick } from 'vue'
 import { mount } from '@vue/test-utils'
 import type { ModelItem } from '@/api/types'
@@ -11,6 +11,8 @@ import { gridMetrics, parseLength, rowTop, type LayoutTokens } from '@/utils/gri
 import { useLibraryFilters, VIEW_MODES } from '@/composables/useLibraryFilters'
 import { LIBRARIES } from '@/config/libraries'
 import ModelRow from '@/components/ModelRow.vue'
+import ModelCard from '@/components/ModelCard.vue'
+import type { ModelItemViewEmits, ModelItemViewProps } from '@/components/modelItemView'
 import LibraryToolbar from '@/components/LibraryToolbar.vue'
 import VirtualGrid from '@/components/VirtualGrid.vue'
 
@@ -147,6 +149,19 @@ describe('ModelRow', () => {
     expect(blurred.find('[data-blurred]').exists()).toBe(true)
     const clear = mount(ModelRow, { props: { ...rowProps, item: item({ preview_nsfw_level: 8 }), blurMature: false } })
     expect(clear.find('[data-blurred]').exists()).toBe(false)
+  })
+})
+
+describe('ModelRow / ModelCard contract', () => {
+  // Compile-time: checked by `bun run typecheck` / `bun run build` (vue-tsc), a no-op at runtime.
+  // Props and emitted events (the `onX` handler props) must be identical, so LibraryPage can bind
+  // the same handlers to both views and a drift in either component fails the type check.
+  it('exposes exactly the same props and events on both views', () => {
+    expectTypeOf<InstanceType<typeof ModelRow>['$props']>().toEqualTypeOf<InstanceType<typeof ModelCard>['$props']>()
+    expectTypeOf<InstanceType<typeof ModelRow>['$props']>().toMatchTypeOf<ModelItemViewProps>()
+    expectTypeOf<NonNullable<InstanceType<typeof ModelRow>['$props']['onToggle-select']>>().parameters.toEqualTypeOf<
+      ModelItemViewEmits['toggle-select']
+    >()
   })
 })
 

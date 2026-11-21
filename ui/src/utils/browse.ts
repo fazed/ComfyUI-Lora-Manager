@@ -21,7 +21,8 @@ export interface ShortcutEventLike {
   isComposing?: boolean
   defaultPrevented?: boolean
   repeat?: boolean
-  target?: { closest?: (selector: string) => unknown } | null
+  /** A DOM `EventTarget` (a real KeyboardEvent) or a plain stand-in in tests. */
+  target?: EventTarget | { closest?: (selector: string) => unknown } | null
 }
 
 /** Typing targets and containers that own their keys (dialogs, menus, listboxes). */
@@ -36,7 +37,8 @@ export function shouldHandleShortcut(event: ShortcutEventLike, key: string, over
   if (overlayOpen || event.defaultPrevented || event.isComposing || event.repeat) return false
   if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return false
   if (event.key.toLowerCase() !== key) return false
-  return !event.target?.closest?.(BLOCKING_TARGETS)
+  const target = event.target as { closest?: (selector: string) => unknown } | null | undefined
+  return !target?.closest?.(BLOCKING_TARGETS)
 }
 
 /** What a browse page remembers while another tab is shown. */

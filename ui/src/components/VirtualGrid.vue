@@ -10,7 +10,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useEventListener, useMutationObserver, useResizeObserver } from '@vueuse/core'
 import { scrollTopToReveal } from '@/utils/drawerNav'
-import { gridMetrics, parseLength, rowTop, type GridLayout, type LayoutTokens } from '@/utils/gridLayout'
+import { gridMetrics, parseLength, rowTop, type GridLayout, type LayoutTokens, type VirtualGridExposed } from '@/utils/gridLayout'
 import { t } from '@/i18n'
 
 const props = withDefaults(
@@ -154,7 +154,7 @@ function scrollTo(top: number): void {
 /** Placeholder cells that fill the viewport at the real column count. */
 const skeletonCount = computed(() => columns.value * (Math.ceil(viewportHeight.value / rowHeight.value) + 1))
 
-defineExpose({ scrollToTop, scrollToIndex, scrollTo, scrollOffset })
+defineExpose<VirtualGridExposed>({ scrollToTop, scrollToIndex, scrollTo, scrollOffset })
 </script>
 
 <template>
