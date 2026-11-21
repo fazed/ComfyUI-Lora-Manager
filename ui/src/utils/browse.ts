@@ -52,6 +52,8 @@ export interface BrowseViewState {
   scrollTop: number
   /** Items that were loaded, so the scroll position can be restored. */
   loadedCount: number
+  /** Count seen while nothing was filtered, for the "N of total" cue. */
+  knownTotal: number | null
 }
 
 const views = new Map<string, BrowseViewState>()

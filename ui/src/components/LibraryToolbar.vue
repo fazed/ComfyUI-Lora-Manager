@@ -114,13 +114,27 @@ defineExpose({ foldersToggle })
     <slot name="selection" />
   </div>
 
-  <!-- Phone: title and one button on the first row, full-width search below. -->
-  <div v-else-if="isPhone" class="grid gap-2 px-3 pt-4 pb-2" role="toolbar" :aria-label="t('library.toolbar', { section: title })">
+  <!-- Phone: one row with the search and a single "Filters and sort" button. The tabs above already name
+       the page, so the title is read by screen readers only; the count shows in the chips row while filtered. -->
+  <div v-else-if="isPhone" class="px-3 pt-3 pb-2" role="toolbar" :aria-label="t('library.toolbar', { section: title })">
+    <h1 class="sr-only">{{ title }}</h1>
+    <span class="sr-only" aria-live="polite">{{ countText }}</span>
     <div class="flex items-center gap-2">
-      <div class="lm-toolbar-title mr-auto min-w-0">
-        <h1 class="truncate">{{ title }}</h1>
-        <span class="flex-none truncate text-sm text-muted tabular-nums" aria-live="polite">{{ countText }}</span>
-      </div>
+      <SearchCombobox
+        :id="searchId"
+        v-model="search"
+        :scope="searchScope"
+        class="min-w-0 flex-1"
+        input-class="min-h-touch"
+        :label="searchLabel"
+        :placeholder="searchPlaceholder"
+        :max-per-group="LOCAL_PER_GROUP"
+        :max-tags="MAX_TAGS"
+        :active-tags="activeTags"
+        :panel-class="SEARCH_PANEL"
+        @commit="emit('commit', $event)"
+        @choose="emit('choose', $event)"
+      />
       <slot name="leading" />
       <button
         type="button"
@@ -134,21 +148,6 @@ defineExpose({ foldersToggle })
         <span v-if="filterCount" class="lm-badge lm-badge--accent">{{ filterCount }}</span>
       </button>
     </div>
-    <SearchCombobox
-      :id="searchId"
-      v-model="search"
-      :scope="searchScope"
-      class="w-full"
-      input-class="min-h-touch"
-      :label="searchLabel"
-      :placeholder="searchPlaceholder"
-      :max-per-group="LOCAL_PER_GROUP"
-      :max-tags="MAX_TAGS"
-      :active-tags="activeTags"
-      :panel-class="SEARCH_PANEL"
-      @commit="emit('commit', $event)"
-      @choose="emit('choose', $event)"
-    />
   </div>
 
   <!-- Desktop / tablet. -->
@@ -159,7 +158,7 @@ defineExpose({ foldersToggle })
     :aria-label="t('library.toolbar', { section: title })"
   >
     <div class="lm-toolbar-title mr-auto min-w-0 shrink">
-      <h1 class="min-w-0 truncate">{{ title }}</h1>
+      <h1 class="flex-none">{{ title }}</h1>
       <span class="min-w-0 truncate text-sm text-muted tabular-nums" aria-live="polite">{{ countText }}</span>
     </div>
     <slot name="leading" />
@@ -208,7 +207,7 @@ defineExpose({ foldersToggle })
       :title="t(foldersOpen ? 'library.hideFolders' : 'library.showFolders')"
       @click="emit('toggle-folders')"
     >
-      <AppIcon name="folder" :size="16" />{{ t('library.folders') }}
+      <AppIcon name="folder" :size="16" /><span class="max-[1279px]:sr-only">{{ t('library.folders') }}</span>
       <span v-if="folderActive && !foldersOpen" class="size-[6px] rounded-pill bg-accent" aria-hidden="true"></span>
     </button>
     <button
@@ -218,7 +217,7 @@ defineExpose({ foldersToggle })
       :title="`${t('library.select')} (S)`"
       @click="emit('toggle-select')"
     >
-      <AppIcon name="checkSquare" :size="16" />{{ t('library.select') }}
+      <AppIcon name="checkSquare" :size="16" /><span class="max-[1279px]:sr-only">{{ t('library.select') }}</span>
     </button>
     <MenuButton :label="t('library.toolsMenu')" icon="wrench" align="right" :items="toolItems" @select="emit('tool', $event)" />
   </div>
@@ -237,6 +236,7 @@ defineExpose({ foldersToggle })
     :aria-label="t('library.filters')"
   >
     <template v-if="chips.length">
+      <span v-if="isPhone" class="text-xs text-muted tabular-nums" aria-hidden="true">{{ countText }}</span>
       <span v-for="chip in chips" :key="chip.key" class="lm-chip lm-chip--active">
         {{ chip.label }}
         <button type="button" class="lm-icon-btn phone:min-h-touch phone:min-w-touch" :aria-label="t('library.removeFilter', { name: chip.label })" @click="chip.remove()">

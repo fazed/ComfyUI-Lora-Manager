@@ -86,6 +86,7 @@ describe('browse view store', () => {
     missingOnly: false,
     scrollTop: 640,
     loadedCount: 120,
+    knownTotal: 1041,
   }
   beforeEach(() => clearBrowseView())
   it('keeps one snapshot per prefix, copied on save', () => {

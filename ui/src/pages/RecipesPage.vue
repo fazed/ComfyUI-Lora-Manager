@@ -129,7 +129,7 @@ function clearAll(): void {
 }
 
 // "N of total" while filtered: the total is the count seen the last time nothing was filtered.
-const knownTotal = ref<number | null>(null)
+const knownTotal = ref<number | null>(restored?.knownTotal ?? null)
 watch(
   () => [list.loaded.value, list.total.value, chips.value.length] as const,
   ([loaded, total, active]) => {
@@ -181,6 +181,7 @@ onBeforeUnmount(() => {
     missingOnly: missingOnly.value,
     scrollTop: grid.value?.scrollOffset() ?? 0,
     loadedCount: list.items.value.length,
+    knownTotal: knownTotal.value,
   })
 })
 
