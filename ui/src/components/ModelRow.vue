@@ -21,8 +21,10 @@ import { t } from '@/i18n'
 const props = defineProps<ModelItemViewProps>()
 const emit = defineEmits<ModelItemViewEmits>()
 
+const root = ref<HTMLElement | null>(null)
 const { activate, openMenuFromButton, openContextMenu } = useCardInteractions<ModelItem>({
   item: () => props.item,
+  target: root,
   selectionMode: () => props.selectionMode,
   open: (item) => emit('open', item),
   toggle: (item, shift) => emit('toggle-select', item, shift),
@@ -56,7 +58,8 @@ function pause(): void {
 
 <template>
   <article
-    class="group @container lm-zoom-host relative flex h-full items-center gap-3 rounded-md hairline px-2 transition-[background-color,border-color] phone:gap-2"
+    ref="root"
+    class="group select-none [-webkit-touch-callout:none] @container lm-zoom-host relative flex h-full items-center gap-3 rounded-md hairline px-2 transition-[background-color,border-color] phone:gap-2"
     :class="selected ? 'border-accent bg-accent-soft ring-selected' : 'border-border bg-surface hover:bg-sunken'"
     @mouseenter="play"
     @mouseleave="pause"

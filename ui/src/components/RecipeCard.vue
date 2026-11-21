@@ -46,8 +46,10 @@ const pillClass =
 const roundClass = 'inline-grid size-[28px] cursor-pointer place-items-center rounded-pill'
 const revealClass = 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 touch:opacity-100'
 
+const root = ref<HTMLElement | null>(null)
 const { activate, openMenuFromButton, openContextMenu } = useCardInteractions<RecipeItem>({
   item: () => props.item,
+  target: root,
   selectionMode: () => props.selectionMode,
   open: (item) => emit('open', item),
   toggle: (item, shift) => emit('toggle-select', item, shift),
@@ -57,7 +59,8 @@ const { activate, openMenuFromButton, openContextMenu } = useCardInteractions<Re
 
 <template>
   <article
-    class="group lm-zoom-host relative h-full overflow-hidden rounded-md hairline bg-sunken transition-[box-shadow,border-color]"
+    ref="root"
+    class="group select-none [-webkit-touch-callout:none] lm-zoom-host relative h-full overflow-hidden rounded-md hairline bg-sunken transition-[box-shadow,border-color]"
     :class="selected ? 'border-accent ring-selected' : 'border-border shadow-sm hover:shadow-md'"
     @mouseenter="video?.play().catch(() => undefined)"
     @mouseleave="video?.pause()"

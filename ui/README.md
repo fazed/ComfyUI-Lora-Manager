@@ -77,7 +77,9 @@ cleans up with the component scope. Currently used:
 - `useLocalStorage` (theme choice, density, remembered toggles such as the
   drawer specifications, the drawer's last tab; same keys and plain-string values as before, written
   on change only, blocked storage ignored);
-- `usePreferredDark` (the "System" theme follows the OS live).
+- `usePreferredDark` (the "System" theme follows the OS live);
+- `onLongPress` (touch long press opens the item menu on cards, rows and
+  recipe cards; see Context menus).
 
 Kept custom on purpose: `createPoller` (shared, scope-less download poller with
 no-overlap rescheduling and visibility pause; `useIntervalFn` cannot express
@@ -657,12 +659,24 @@ pages only supply data, tool entries and bulk actions through props and slots.
     renaming it keeps the selection on the new name (`renamedFolderPath`).
   Every destructive entry runs through the existing flows (danger confirm,
   20 s staged delete with Undo); there are no Delete/F2 shortcuts and no drag
-  and drop. The pointer helpers are shared by both card types
-  (`composables/useCardInteractions.ts`): a keyboard context-menu key anchors
-  the menu at the focused element. On touch, the "..." button is always
-  visible (Android also fires `contextmenu` on a long press); there is no
-  separate long-press handler, because the click that follows a long press
-  would also open the drawer.
+  and drop. The pointer helpers are shared by model cards, list rows and
+  recipe cards (`composables/useCardInteractions.ts`): a keyboard
+  context-menu key anchors the menu at the focused element. On touch, the
+  "..." button is always visible, and a **long press** (touch or pen, VueUse
+  `onLongPress`, `LONG_PRESS_DELAY_MS` 500 ms) opens the same item/selection
+  menu at the touch point - iOS fires no `contextmenu` on a long press. The
+  pure `createPressMenuGuard` (tests in `tests/cardInteractions.test.ts`,
+  written first, fake timers) keeps it from colliding with the browser:
+  moving more than `LONG_PRESS_DISTANCE_PX` (10px) or a `pointercancel`
+  (the browser started scrolling) cancels it; the click that follows a long
+  press is swallowed once (no drawer, no selection toggle; the swallow expires
+  `LONG_PRESS_CLICK_SUPPRESS_MS` after the finger lifts); Android's own
+  `contextmenu` for the same press opens no second menu, in either order
+  (`CONTEXTMENU_DEDUPE_MS`, 700 ms). Mouse presses never trigger it
+  (right-click is the mouse menu), and a long press that starts on an inner
+  action button (Send, Favorite, "...") is ignored. Cards and rows set
+  `select-none` and `-webkit-touch-callout: none` so iOS shows no text
+  selection or callout instead.
 * **Ctrl/Cmd+click** on a card toggles it in the selection (and turns
   selection mode on when it is off); Shift+click in selection mode still
   selects a range.
