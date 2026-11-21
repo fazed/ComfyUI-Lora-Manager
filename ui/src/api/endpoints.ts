@@ -165,10 +165,11 @@ export function createModelApi(prefix: ModelPrefix) {
 
     // --- Phase B1: downloads (read-only lookups) ----------------------------
     /** Civitai versions of a model, with local state (existsLocally, downloadedFiles, ...). */
-    civitaiVersions: (modelId: number) => request<CivitaiVersion[]>(`${prefix}/civitai/versions/${modelId}`),
-    /** Civitai version info (used to find the model id of a version / download link). */
-    civitaiVersionInfo: (versionId: number) =>
-      request<CivitaiVersion & { modelId?: number }>(`${prefix}/civitai/model/version/${versionId}`),
+    civitaiVersions: (modelId: number, signal?: AbortSignal) =>
+      request<CivitaiVersion[]>(`${prefix}/civitai/versions/${modelId}`, { signal }),
+    /** Civitai version info (model id and model name of a version / download link). */
+    civitaiVersionInfo: (versionId: number, signal?: AbortSignal) =>
+      request<CivitaiVersion & { modelId?: number }>(`${prefix}/civitai/model/version/${versionId}`, { signal }),
 
     // --- Phase B1: model tools ----------------------------------------------
     /** Excluded models (paged). Note: the backend may create a missing default .metadata.json. */

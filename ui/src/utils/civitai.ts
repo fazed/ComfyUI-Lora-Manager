@@ -10,7 +10,8 @@ const POSITIVE_INT = /^\d{1,12}$/
 /**
  * Accepts a Civitai model URL (any civitai host, e.g. civitai.com or
  * civitai.red), "models/123?modelVersionId=456", an "api/download/models/456"
- * URL, or a bare numeric model id. Returns null when nothing usable is found.
+ * URL, a "model-versions/456" URL (web or api/v1), or a bare numeric model
+ * id. Returns null when nothing usable is found.
  */
 export function parseCivitaiInput(input: string): CivitaiTarget | null {
   const value = input.trim()
@@ -27,6 +28,8 @@ export function parseCivitaiInput(input: string): CivitaiTarget | null {
 
   const downloadMatch = url.pathname.match(/\/api\/download\/models\/(\d+)/)
   if (downloadMatch) return { modelId: null, versionId: Number(downloadMatch[1]) }
+  const versionPathMatch = url.pathname.match(/\/model-versions\/(\d+)/)
+  if (versionPathMatch) return { modelId: null, versionId: Number(versionPathMatch[1]) }
 
   const versionParam = url.searchParams.get('modelVersionId')
   const versionId = versionParam && POSITIVE_INT.test(versionParam) ? Number(versionParam) : null
