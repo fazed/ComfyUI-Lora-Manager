@@ -15,10 +15,27 @@ in its quick-actions dropdown) opens `/lm-ui/` as well. On page load
 `web/comfyui/modern_ui_link.js` sends one `HEAD /lm-ui/`; only a 2xx answer
 switches the button to the modern UI, so an unbuilt `ui/dist` (503), a backend
 without the route (404), a network error or a click before the probe has
-answered all open the classic `/loras` instead. Other links from the ComfyUI
-side (LoRA info card "full details", recipe links) still deep-link into the
-classic UI. The classic UI stays reachable from the modern UI's "More options"
-menu.
+answered all open the classic `/loras` instead. The classic UI stays reachable
+from the modern UI's "More options" menu.
+
+The **deep links from the ComfyUI canvas** use the same cached probe
+(`modelDeepLinkPath` / `recipeDeepLinkPath` in `modern_ui_link.js`), opened
+synchronously in the named `lm-lora-manager` tab:
+
+| Link | Modern UI (probe 2xx) | Classic fallback |
+| --- | --- | --- |
+| LoRA info card / quick panel "full details" (`openLoraManager`) | `/lm-ui/loras?open=<file_path>` | `/loras#model=<file_path>` |
+| Recipe picker row, "Open LoRA Manager" on an empty recipe list (`openRecipeManager`) | `/lm-ui/recipes?open=<id>` (bare `/lm-ui/recipes` without an id) | `/loras/recipes#recipe=<id>` |
+
+`?open=` is URI-encoded and read by vue-router. The library page matches it
+exactly against the item's `file_path` (absolute, forward slashes, as the
+cache stores it and as `/api/lm/loras/details` returns it; the link turns any
+backslashes into `/` for the modern UI only), after a file-name search of the
+first 50 results; the recipes page loads the id via `GET /api/lm/recipe/<id>`.
+An unknown path or id just drops `?open=` and shows the list. The builder also
+supports the `checkpoints` and `embeddings` routes, but no ComfyUI-side link
+uses them yet. The wildcard links (`/wildcards#model=`) stay classic: the
+modern UI has no wildcards page.
 
 ## Architecture
 
@@ -205,6 +222,8 @@ change.
 | `standalone.py` | after `PreviewRoutes.setup_routes(app)` in `StandaloneLoraManager.add_routes`: a comment line plus `from py.routes.modern_ui_routes import ModernUiRoutes; ModernUiRoutes.setup_routes(app)` |
 | `.gitignore` | `ui/node_modules/` (plus a comment) |
 | `web/comfyui/lora_canvas_api.js` | `openLoraManagerHome` builds its URL from `managerHomePath(modernUiAvailability())` (import from the fork-local `modern_ui_link.js`) instead of the fixed `/loras` |
+| `web/comfyui/lora_canvas_api.js` | `openLoraManager` builds its URL from `modelDeepLinkPath(filePath, modernUiAvailability())` instead of the fixed `/loras#model=` |
+| `web/comfyui/recipe_canvas_api.js` | `openRecipeManager` builds its URL from `recipeDeepLinkPath(recipeId, modernUiAvailability())` (import from `modern_ui_link.js`) instead of the fixed `/loras/recipes#recipe=` |
 | `web/comfyui/top_menu_extension.js` | `setup()` starts `probeModernUi()` (import from `modern_ui_link.js`) |
 
 No templates, static files or locale files were changed. A "Modern UI" link
