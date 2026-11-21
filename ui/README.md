@@ -479,6 +479,60 @@ read-only endpoints (`api/suggestSource.ts`):
   (`search_tags`, `search_creator`, `search_trigger_words`, `fuzzy_search`) are
   not exposed yet.
 
+## Browse pages: toolbar, filters, selection (LoRAs, Checkpoints, Embeddings, Recipes)
+
+All four browse pages share their chrome (`components/LibraryToolbar.vue`,
+`LibraryFilterPanel.vue`, `LibrarySelectionBar.vue`, `BottomSheet.vue`); the
+pages only supply data, tool entries and bulk actions through props and slots.
+
+* **Toolbar layout.** One fixed 68px row from 901px up: title and count on the
+  left, then (Recipes: the primary **Import** button), search (320px, shrinks
+  instead of wrapping), Sort, **Filters** (badge = panel filters, search and
+  folder excluded), card size (from 1280px), Folders, Select and one **Tools**
+  menu that holds *Organize...* and the page's tools. Below 1280px the Folders
+  and Select labels become icon-only with a tooltip. At 900px and below the
+  search takes its own second row (documented 2-row layout, about 112px).
+  Title and count never move to their own row when the folder panel opens.
+* **Phone (<= 720px).** One row: search plus a single **Filters** button
+  (accessible name "Filters and sort", badge = active count) that opens a bottom
+  sheet (native modal `<dialog>`, focus trap, Escape and backdrop close, on the
+  dismiss stack) with sort, show/hide folders, Select, the tool entries as
+  labelled rows, the filter groups and a **Done** button. The page title is
+  screen-reader only (the tabs above name the page); while filtered the count
+  shows in the chips row. Controls here are `min-h-touch` (44px).
+* **Filters.** The base-model group is left out of the panel wherever the quick
+  filter row exists (all pages except Embeddings); the tag group gets a text
+  filter once it has 8 or more tags. The chips row has reserved height on
+  desktop, so adding a filter does not move the grid (on phones it appears
+  only while filtering). While filtered the count reads "85 of 1,041 models",
+  using the total seen the last time nothing was filtered. The empty state has a
+  **Clear filters** button.
+* **Selection.** The selection bar replaces the toolbar row at the same height
+  (the grid does not jump). Shift+click selects a range from the last toggled
+  card (`selectRange` in `utils/modelActions.ts`), the bar shows how many
+  selected items are not in view ("3 selected (2 not in view)"), Escape leaves
+  selection mode when no drawer, dialog or menu is above it (dismiss stack).
+  Ctrl+A, delete/undo and the other bulk flows are unchanged.
+* **Shortcuts.** Bare `f` toggles Filters (the sheet on phones) and `s` toggles
+  selection mode. They are ignored with a modifier, while typing in a field,
+  inside a dialog, menu or listbox, and while a drawer is open
+  (`shouldHandleShortcut` in `utils/browse.ts`). The toolbars have
+  `role="toolbar"` and an `aria-label`; the buttons carry `aria-keyshortcuts`.
+* **State across tabs.** Filters, search, folder, the recipes "missing only"
+  toggle, the unfiltered total and the scroll position are kept per library in a
+  module-level store (`utils/browse.ts`, saved on unmount) and restored when you
+  come back (the list is re-fetched; pages are loaded until the old scroll
+  position exists, up to 600 items). A deep link (`?q=`, `?tag=`, `?open=`)
+  clears the stored state first. Selection is not kept. Sort and card size keep
+  their existing localStorage keys.
+* **Loading and end of list.** While the first page loads, `VirtualGrid` renders
+  placeholder cells with the real columns, gap and aspect (`utils/gridLayout.ts`
+  is shared with the grid maths) and `aria-busy`; when everything is loaded the
+  grid footer says "You've reached the end: N models".
+* **Cards.** Tags are one ellipsised line (no dangling separator), the scrim
+  behind titles is taller, card titles are paragraphs (no heading flood) and the
+  recipe card's send button is hidden on phones (it stays in the menu).
+
 ## Library quick filter, detail drawer and "Send to ComfyUI"
 
 * **Base-model quick filter** (`components/BaseModelQuickFilter.vue`): a
