@@ -16,27 +16,29 @@ under a prefix, use `<prefix>/lm-ui/`.
 ui/
   index.html              pre-paint theme bootstrap (inline script) + app mount
   src/
-    main.ts, App.vue      app shell (sidebar, top bar, toasts, confirm dialog)
+    main.ts, App.vue      app shell (top bar, full-width content, toasts, confirm dialog)
     router.ts             history routes below the app base (/lm-ui/...)
     api/                  typed client: http.ts (fetch wrapper, ApiError),
                           endpoints.ts (model/download/settings/recipe/theme APIs),
                           types.ts (response shapes)
     composables/          useInfiniteList, usePolling (visibility-aware),
                           useDownloadQueue (shared poller), useTheme,
-                          useLibraryFilters, useAppSettings, useFeedback, useSearch
-    components/           AppSidebar, TopBar, ThemeMenu/ThemeOptions, VirtualGrid,
+                          useLibraryFilters, useAppSettings, useFeedback, useSearch,
+                          useFolderPanel
+    components/           TopBar, AppMenu/ThemeOptions, SearchCombobox, VirtualGrid,
                           ModelCard, ModelDrawer, ExampleLightbox,
                           BaseModelQuickFilter, NodePickerDialog, FolderTree, ...
     pages/                LibraryPage (generic, per model type), RecipesPage,
-                          DownloadsPage, SettingsPage, NotFoundPage
+                          SearchPage, DownloadsPage, SettingsPage, NotFoundPage
     config/libraries.ts   per-type config (loras / checkpoints / embeddings)
+    config/navigation.ts  top-bar tabs, active state, search route targets
     themes/               design tokens + themes + registry.ts
     styles/main.css       stylesheet entry: Tailwind + tokens.css + app.css
     styles/tokens.css     Tailwind theme mapped onto the design tokens
     styles/app.css        base rules + shared classes (buttons, inputs, chips)
     i18n/index.ts         all English UI strings in one table, t(key, params)
     utils/                basePath, format, civitai URL parsing, query builder,
-                          HTML sanitizer, settings form helpers
+                          HTML sanitizer, settings form helpers, suggest (autocomplete core)
   tests/                  vitest (jsdom): API client, helpers, composables,
                           theme registry, style-token lint
   dist/                   build output - COMMITTED (users have no Node/Bun)
@@ -212,7 +214,7 @@ than the spacing tokens; there is deliberately no `dark:` variant.
 * Each theme is one CSS file that sets tokens on `[data-theme='<id>']`
   (`default-light.css` also targets `:root` as the fallback).
 * `src/themes/registry.ts` lists the built-in themes (`id`, `label`,
-  `scheme: 'light' | 'dark'`, `description`). The picker in the top bar and on
+  `scheme: 'light' | 'dark'`, `description`). The picker in the top-bar "More options" menu and on
   the Settings page lists every registered theme plus **System** (follows
   `prefers-color-scheme`, mapping to `default-light` / `default-dark`).
 * The choice is stored in `localStorage` (`lm-ui.theme`, `lm-ui.theme.user`,
@@ -267,12 +269,12 @@ Colors (set by every theme):
 | Token | Used for |
 | --- | --- |
 | `--lm-color-bg` | page background |
-| `--lm-color-surface` | sidebar, top bar, panels, inputs |
+| `--lm-color-surface` | top bar, folder panel, panels, inputs |
 | `--lm-color-elevated` | drawer, menus, dialogs, toasts |
 | `--lm-color-sunken` | wells, hover backgrounds, image placeholders |
 | `--lm-color-border` / `--lm-color-border-strong` | hairlines / emphasised borders |
 | `--lm-color-text` / `--lm-color-muted` | primary / secondary text |
-| `--lm-color-accent`, `-accent-hover`, `-accent-soft` | primary actions, selection, active nav |
+| `--lm-color-accent`, `-accent-hover`, `-accent-soft` | primary actions, selection, active tab |
 | `--lm-color-on-accent` | text/icons on accent backgrounds |
 | `--lm-color-danger`, `-danger-soft`, `--lm-color-on-danger` | destructive actions, errors |
 | `--lm-color-success`, `-success-soft` | success states |
@@ -292,11 +294,82 @@ Non-color tokens (defaults in `base.css`, any theme may override):
 | Spacing | `--lm-space-1/2/3/4/5/6/8` (compact density shrinks them) |
 | Shadows | `--lm-shadow-sm/md/lg` |
 | Motion | `--lm-motion-fast`, `--lm-motion-normal`, `--lm-ease` (zeroed for `prefers-reduced-motion`) |
-| Layout | `--lm-sidebar-width`, `--lm-topbar-height`, `--lm-drawer-width`, `--lm-control-height`, `--lm-border-width`, `--lm-focus-ring-width` |
-| Cards | `--lm-card-aspect` (e.g. `2 / 3`), `--lm-card-gap` (card width comes from the per-library size slider) |
+| Layout | `--lm-topbar-height`, `--lm-drawer-width`, `--lm-control-height`, `--lm-border-width`, `--lm-focus-ring-width` |
+| Cards | `--lm-card-aspect` (e.g. `2 / 3`), `--lm-card-gap` (card width comes from the per-library size slider), `--lm-card-zoom` (hover/focus zoom of card media, default `1.05`, `1` = off; forced to `1` for `prefers-reduced-motion`) |
 
 The virtualised grid reads `--lm-card-aspect` and `--lm-card-gap` at runtime,
 so a theme or density switch re-lays out the grid.
+
+## Navigation and layout
+
+There is no sidebar: the content area uses the full width.
+
+* **Top bar** (`components/TopBar.vue`): logo (links to LoRAs), the library
+  tabs LoRAs / Checkpoints / Embeddings / Recipes (`<nav aria-label="Libraries">`
+  with links; the active one is highlighted and has `aria-current="page"`;
+  `isNavActive` in `config/navigation.ts` also matches sub-paths), the global
+  search, and on the right the Downloads indicator (live `active/total`
+  badge, links to the Downloads page), Settings, and a **More options** menu
+  (`components/AppMenu.vue`) with the theme and density pickers and the
+  **Classic UI** link. Theme/density are also on the Settings page.
+* Responsive: one row on desktop; at the `tablet:` breakpoint the search moves
+  to a second full-width row; on `phone:` the tabs become a full-width
+  segmented strip on the second row (scrolls horizontally if it ever does not
+  fit) and the search sits next to the logo. No hamburger menu.
+* **Folders**: the folder tree of a library page is hidden by default. The
+  **Folders** toolbar button (`aria-expanded`, `aria-controls`) shows/hides it;
+  the state is remembered **per library** in `localStorage`
+  (`lm-ui.library.<prefix>.folders`, `composables/useFolderPanel.ts`, storage
+  errors ignored). At the `narrow:` breakpoint the panel overlays the grid, so
+  it always starts closed there and toggling it is not remembered. An active
+  folder filter is always shown as a "Folder: x" chip (plus a dot on the
+  button while the panel is hidden).
+* **Card hover**: cards never move or resize on hover. Only the image/video
+  inside zooms slightly (`lm-zoom-host` / `lm-zoom-media` in `app.css`, factor
+  `--lm-card-zoom`), on hover only under `@media (hover: hover)` and on
+  keyboard focus; the drawer's example thumbnails use the same classes.
+
+## Search
+
+Two entry points with clear scopes, sharing one autocomplete component
+(`components/SearchCombobox.vue`, WAI-ARIA combobox: `role="combobox"` +
+`listbox` / `group` / `option`, `aria-activedescendant`; Up/Down wrap, Enter
+picks or searches, Escape closes then clears, Tab closes) and one core
+(`utils/suggest.ts`: highlight splitting into text parts (no `v-html`),
+ranking, grouped merge, LRU cache, abortable suggester;
+`composables/useSearch.ts`: 150 ms debounce, minimum 2 characters, shared
+cache, stale answers dropped). Errors are silent: a failed group is just empty
+and the plain-search row always remains.
+
+The backend has **no dedicated suggest endpoint**; suggestions use existing
+read-only endpoints (`api/suggestSource.ts`):
+
+| Data | Endpoint |
+| --- | --- |
+| model hits | `GET /api/lm/{loras,checkpoints,embeddings}/list?search=...&page_size=N&sort_by=name:asc` (default search fields: file name + model name) |
+| recipe hits | `GET /api/lm/recipes?search=...&page_size=N` (title, tags, LoRA names, prompt) |
+| tags | `GET /api/lm/{prefix}/search-tags?q=...&limit=N`, `GET /api/lm/recipes/search-tags?q=...` |
+
+* **Global search** (top bar, every page, "Search everything...", `/` or
+  Ctrl/Cmd+K focuses it): one lookup fires the list requests of all four
+  libraries plus the LoRA `search-tags` in parallel (the previous lookup is
+  aborted). Sections LoRAs, Checkpoints, Embeddings, Recipes (top 4 each, type
+  icon, base-model badge, "See all N results in ...") and Tags, then "Search
+  all for ...". A model hit opens `/<library>?open=<file_path>` (the drawer;
+  the parameter stays in sync with the drawer, so reloads and shared links
+  work), a recipe hit searches the recipes page for its title, "See all" opens
+  `/<library>?q=<text>` (prefills the local search), a tag opens
+  `/loras?tag=<tag>`, and Enter / "Search all" opens **`/search?q=...`**
+  (`pages/SearchPage.vue`: per-library sections with up to 12 hits and "See
+  all").
+* **Local search** (library and recipes toolbars, "Search LoRAs..."): filters
+  the grid while typing (250 ms) through the list endpoint's `search`; it is
+  part of the library filter state (chip "Search: x", cleared by "Clear
+  all"). Its autocomplete is scoped to that library (Models/Recipes + Tags +
+  "Search for ..."): a model opens the drawer, a tag adds the tag filter
+  (recipes: searches for the tag). The list endpoint's extra search fields
+  (`search_tags`, `search_creator`, `search_trigger_words`, `fuzzy_search`) are
+  not exposed yet.
 
 ## Library quick filter, detail drawer and "Send to ComfyUI"
 
@@ -346,11 +419,12 @@ so a theme or density switch re-lays out the grid.
 
 Covered in phase 1:
 
-* App shell: sidebar navigation, global search, download-queue indicator,
-  theme/density picker, responsive layout with off-canvas navigation, skip
-  link, keyboard focus styles, aria labels.
+* App shell: top-bar tabs, global search with autocomplete and a results
+  page, download-queue indicator, More menu (theme/density, Classic UI),
+  responsive layout, skip link, keyboard focus styles, aria labels.
 * Library pages for LoRAs, checkpoints and embeddings (one generic page):
-  virtualised infinite grid, folder tree, search, sort, base-model and tag
+  virtualised infinite grid, folder tree (hidden by default), local search
+  with autocomplete, sort, base-model and tag
   filters with active-filter chips and a base-model quick filter,
   favorites/updates toggles, card-size
   slider, selection mode (copy file names; bulk actions link to classic UI),

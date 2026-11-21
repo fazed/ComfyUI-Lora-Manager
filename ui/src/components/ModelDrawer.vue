@@ -368,14 +368,14 @@ onBeforeUnmount(() => {
                       v-for="(image, index) in images"
                       :key="`${index}-${image.url}`"
                       type="button"
-                      class="group/thumb relative size-[88px] flex-none cursor-pointer overflow-hidden rounded-sm bg-sunken @min-[460px]:aspect-square @min-[460px]:size-auto"
+                      class="group/thumb lm-zoom-host relative size-[88px] flex-none cursor-pointer overflow-hidden rounded-sm bg-sunken @min-[460px]:aspect-square @min-[460px]:size-auto"
                       :aria-label="t('detail.openExample', { index: index + 1, count: images.length })"
                       :title="imageHints[index] || undefined"
                       @click="openLightbox(index, $event)"
                     >
                       <video
                         v-if="image.type === 'video' || isVideoUrl(image.url)"
-                        class="size-full object-cover"
+                        class="lm-zoom-media size-full object-cover"
                         :src="image.url"
                         muted
                         playsinline
@@ -383,7 +383,7 @@ onBeforeUnmount(() => {
                       ></video>
                       <img
                         v-else
-                        class="size-full object-cover transition-transform group-hover/thumb:scale-105"
+                        class="lm-zoom-media size-full object-cover"
                         :src="image.url"
                         alt=""
                         loading="lazy"

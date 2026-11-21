@@ -31,7 +31,8 @@ const displayName = computed(() => props.item.model_name || props.item.file_name
 // Civitai NSFW levels: 1 PG, 2 PG-13, 4 R, 8 X, 16 XXX.
 const blurred = computed(() => props.blurMature && (props.item.preview_nsfw_level ?? 0) >= 4)
 const tags = computed(() => (props.item.tags ?? []).slice(0, 3))
-const mediaClass = computed(() => ['size-full object-cover', blurred.value && 'scale-110 blur-[18px]'])
+// Blurred media keeps its own fixed scale (the utility wins over the hover zoom).
+const mediaClass = computed(() => ['lm-zoom-media size-full object-cover', blurred.value && 'scale-110 blur-[18px]'])
 
 const pillClass =
   'inline-flex max-w-[60%] items-center gap-[2px] overflow-hidden rounded-pill px-2 py-px text-xs font-medium text-ellipsis whitespace-nowrap'
@@ -56,7 +57,7 @@ function pause(): void {
 
 <template>
   <article
-    class="group relative h-full overflow-hidden rounded-md hairline bg-sunken transition-[translate,box-shadow,border-color] hover:-translate-y-[2px]"
+    class="group lm-zoom-host relative h-full overflow-hidden rounded-md hairline bg-sunken transition-[box-shadow,border-color]"
     :class="selected ? 'border-accent ring-selected' : 'border-border shadow-sm hover:shadow-md'"
     @mouseenter="play"
     @mouseleave="pause"

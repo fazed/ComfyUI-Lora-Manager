@@ -150,3 +150,19 @@ describe('the token lint itself', () => {
     expect(declarationViolations('a { color: var(--lm-color-text); border-radius: var(--lm-radius-sm); }')).toEqual([])
   })
 })
+
+describe('card hover never moves the card', () => {
+  const read = (path: string) => readFileSync(join(SRC, path), 'utf8')
+
+  it('has no hover lift or scale on cards and tiles; media zoom uses the token', () => {
+    for (const file of ['components/ModelCard.vue', 'components/ModelDrawer.vue', 'pages/RecipesPage.vue', 'pages/SearchPage.vue']) {
+      const source = read(file)
+      expect(source, file).not.toMatch(/hover:-?translate|hover:scale|group-hover(\/\w+)?:scale|hover:-?translate-y/)
+    }
+    expect(read('components/ModelCard.vue')).toContain('lm-zoom-host')
+    expect(read('components/ModelCard.vue')).toContain('lm-zoom-media')
+    const css = read('styles/app.css')
+    expect(css).toMatch(/@media \(hover: hover\)\s*{\s*\.lm-zoom-host:hover \.lm-zoom-media\s*{\s*scale: var\(--lm-card-zoom\)/)
+    expect(read('themes/base.css')).toMatch(/prefers-reduced-motion: reduce[\s\S]*--lm-card-zoom: 1;/)
+  })
+})

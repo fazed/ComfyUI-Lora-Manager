@@ -221,6 +221,29 @@
   }
 
   /*
+   * Media zoom on hover / keyboard focus: put lm-zoom-host on the card (which
+   * clips with overflow-hidden + its radius) and lm-zoom-media on the img/video.
+   * Only the media scales; the card's size and position never change.
+   * --lm-card-zoom (1 = off) is reset to 1 for prefers-reduced-motion.
+   */
+  .lm-zoom-media {
+    transform-origin: center;
+    transition: scale var(--lm-motion-normal) var(--lm-ease);
+  }
+
+  @media (hover: hover) {
+    .lm-zoom-host:hover .lm-zoom-media {
+      scale: var(--lm-card-zoom);
+      will-change: scale;
+    }
+  }
+
+  .lm-zoom-host:has(:focus-visible) .lm-zoom-media,
+  .lm-zoom-host:focus-visible .lm-zoom-media {
+    scale: var(--lm-card-zoom);
+  }
+
+  /*
    * Selectable row (menu links, folder tree, "all folders", theme options).
    * .is-selected comes last so a selected row keeps its colors on hover.
    */
