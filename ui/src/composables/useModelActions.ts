@@ -133,14 +133,15 @@ export function useModelActions(api: ModelApi, hooks: ModelActionHooks) {
     return null
   }
 
-  async function moveItems(items: ModelItem[], targetPath: string, roots: string[] = []): Promise<MoveSummary> {
+  /** With `useDefaultPaths`, `targetPath` is a library root and the backend appends each model's template folder. */
+  async function moveItems(items: ModelItem[], targetPath: string, roots: string[] = [], useDefaultPaths = false): Promise<MoveSummary> {
     let summary: MoveSummary
     try {
       if (items.length === 1) {
-        const result = await api.moveModel(items[0].file_path, targetPath)
+        const result = await api.moveModel(items[0].file_path, targetPath, useDefaultPaths)
         summary = { moved: [{ from: items[0].file_path, to: result.new_file_path || items[0].file_path }], failed: [] }
       } else {
-        summary = summarizeBulkMove(await api.moveBulk(items.map((item) => item.file_path), targetPath))
+        summary = summarizeBulkMove(await api.moveBulk(items.map((item) => item.file_path), targetPath, useDefaultPaths))
       }
     } catch (error) {
       summary = { moved: [], failed: items.map((item) => ({ path: item.file_path, message: message(error) })) }

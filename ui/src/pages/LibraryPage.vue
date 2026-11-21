@@ -8,6 +8,13 @@ import { useRoute, useRouter } from 'vue-router'
 import { useEventListener, useTimeoutFn } from '@vueuse/core'
 import AppIcon from '@/components/AppIcon.vue'
 import BaseModelQuickFilter from '@/components/BaseModelQuickFilter.vue'
+import DownloadDialog from '@/components/DownloadDialog.vue'
+import DuplicatesDialog from '@/components/DuplicatesDialog.vue'
+import ExcludedDialog from '@/components/ExcludedDialog.vue'
+import FolderDialog from '@/components/FolderDialog.vue'
+import MenuButton, { type MenuEntry } from '@/components/MenuButton.vue'
+import PreviewDialog from '@/components/PreviewDialog.vue'
+import TemplateDialog from '@/components/TemplateDialog.vue'
 import FolderTree from '@/components/FolderTree.vue'
 import InputDialog from '@/components/InputDialog.vue'
 import ModelActionMenu, { type ModelAction } from '@/components/ModelActionMenu.vue'
@@ -33,6 +40,8 @@ import { queryParam } from '@/config/navigation'
 import type { SuggestOption } from '@/utils/suggest'
 import { useSendToWorkflow } from '@/composables/useSendToWorkflow'
 import { useModelActions } from '@/composables/useModelActions'
+import { useModelTools } from '@/composables/useModelTools'
+import type { TemplateScope } from '@/api/endpoints'
 import { sortBaseModels } from '@/utils/baseModelChips'
 import { invertSelection, pruneSelection, validateFileName } from '@/utils/modelActions'
 import { withMountPrefix } from '@/utils/basePath'
@@ -304,6 +313,104 @@ const actions = useModelActions(api, {
   },
 })
 
+// --- Phase B1: download dialog and model tools -------------------------------
+
+const tools = useModelTools(api, {
+  updated: onUpdated,
+  changed: () => {
+    grid.value?.scrollToTop()
+    void list.reset()
+    refreshFolders()
+  },
+})
+
+const downloadInput = ref<string | null>(null)
+const duplicatesOpen = ref(false)
+const excludedOpen = ref(false)
+const previewTarget = ref<{ item: ModelItem; mode: 'preview' | 'rating' } | null>(null)
+const relinkTarget = ref<ModelItem | null>(null)
+const templateTarget = ref<{ scope: TemplateScope; label: string } | null>(null)
+const folderDialog = ref<{ mode: 'create' | 'rename'; locations: string[]; currentName?: string } | null>(null)
+
+const template = computed(() => {
+  const templates = settings.value?.download_path_templates
+  return templates && typeof templates === 'object' ? String((templates as Record<string, unknown>)[config.singular] ?? '') : ''
+})
+
+const toolItems = computed<MenuEntry[]>(() => [
+  { id: 'download', label: t('download.open'), icon: 'download' },
+  { id: 'duplicates', label: t('tools.duplicates'), icon: 'files' },
+  { id: 'excluded', label: t('tools.excluded'), icon: 'eyeOff' },
+  { id: 'fetchAll', label: t('tools.fetchAll.open'), icon: 'refresh' },
+])
+
+function runTool(id: string): void {
+  if (id === 'download') downloadInput.value = ''
+  else if (id === 'duplicates') duplicatesOpen.value = true
+  else if (id === 'excluded') excludedOpen.value = true
+  else if (id === 'fetchAll') void tools.fetchAll(t(config.title))
+}
+
+const folderLabel = computed(() => state.folder.split('/').pop() ?? state.folder)
+const folderItems = computed<MenuEntry[]>(() => [
+  { id: 'create', label: t('folders.new'), icon: 'folderPlus' },
+  { id: 'rename', label: t('folders.rename'), icon: 'pencil', disabled: !state.folder },
+  { id: 'template', label: t('folders.template'), icon: 'type', disabled: !state.folder },
+  { id: 'delete', label: t('folders.delete'), icon: 'trash', danger: true, disabled: !state.folder },
+])
+
+/** Absolute paths of the selected folder (one per root that holds it). */
+async function folderCandidates(): Promise<string[] | null> {
+  try {
+    const candidates = await api.resolveFolder(state.folder)
+    if (!candidates.length) {
+      toasts.error(t('folders.refused.missing', { name: folderLabel.value }))
+      return null
+    }
+    return candidates.map((candidate) => candidate.folder_path)
+  } catch (error) {
+    toasts.error(t('folders.resolveFailed', { error: (error as Error).message }))
+    return null
+  }
+}
+
+async function runFolderAction(id: string): Promise<void> {
+  if (id === 'create') {
+    const locations = state.folder ? await folderCandidates() : await api.roots().catch(() => null)
+    if (locations?.length) folderDialog.value = { mode: 'create', locations }
+    return
+  }
+  if (!state.folder) {
+    toasts.error(t('folders.noFolder'))
+    return
+  }
+  const locations = await folderCandidates()
+  if (!locations) return
+  if (id === 'rename') folderDialog.value = { mode: 'rename', locations, currentName: folderLabel.value }
+  else if (id === 'template') {
+    templateTarget.value = { scope: { folderPaths: locations }, label: t('tools.template.scopeFolder', { folder: state.folder }) }
+  } else if (id === 'delete') {
+    if (locations.length > 1) {
+      toasts.error(t('folders.refused.refused', { name: folderLabel.value, error: locations.join(', ') }))
+      return
+    }
+    if (await tools.deleteFolder(locations[0], folderLabel.value)) state.folder = ''
+  }
+}
+
+function onFolderDone(name: string): void {
+  // A renamed selected folder keeps the selection on its new name.
+  if (folderDialog.value?.mode === 'rename' && state.folder) {
+    const parent = state.folder.includes('/') ? state.folder.slice(0, state.folder.lastIndexOf('/')) : ''
+    state.folder = parent ? `${parent}/${name}` : name
+  }
+}
+
+async function submitRelink(value: string): Promise<string | null> {
+  const item = relinkTarget.value
+  return item ? tools.relink(item, value) : null
+}
+
 const menu = ref<{ item: ModelItem; x: number; y: number; opener: HTMLElement | null } | null>(null)
 const renameTarget = ref<ModelItem | null>(null)
 const moveTargets = ref<ModelItem[] | null>(null)
@@ -324,6 +431,11 @@ function runAction(action: ModelAction, item: ModelItem): void {
   if (action === 'rename') renameTarget.value = item
   else if (action === 'move') moveTargets.value = [item]
   else if (action === 'exclude') void actions.excludeItem(item)
+  else if (action === 'template') {
+    templateTarget.value = { scope: { filePaths: [item.file_path] }, label: item.model_name || item.file_name }
+  } else if (action === 'preview' || action === 'rating') previewTarget.value = { item, mode: action }
+  else if (action === 'refresh') void tools.refreshFromCivitai(item)
+  else if (action === 'relink') relinkTarget.value = item
   else void actions.deleteItems([item])
 }
 
@@ -379,9 +491,20 @@ function bulkSend(event: MouseEvent): void {
     >
       <div class="mb-2 flex items-center justify-between">
         <h2 class="lm-overline text-sm">{{ t('library.folders') }}</h2>
-        <button type="button" class="lm-btn lm-btn--ghost lm-btn--icon lm-btn--sm" :aria-label="t('library.hideFolders')" :title="t('library.hideFolders')" @click="folders.set(false)">
-          <AppIcon name="close" :size="14" />
-        </button>
+        <div class="flex items-center gap-1">
+          <MenuButton
+            :label="t('folders.manage')"
+            icon="more"
+            compact
+            align="right"
+            button-class="lm-btn lm-btn--ghost lm-btn--icon lm-btn--sm"
+            :items="folderItems"
+            @select="runFolderAction"
+          />
+          <button type="button" class="lm-btn lm-btn--ghost lm-btn--icon lm-btn--sm" :aria-label="t('library.hideFolders')" :title="t('library.hideFolders')" @click="folders.set(false)">
+            <AppIcon name="close" :size="14" />
+          </button>
+        </div>
       </div>
       <button
         type="button"
@@ -452,6 +575,7 @@ function bulkSend(event: MouseEvent): void {
           <button type="button" class="lm-btn" @click="organizeOpen = true">
             <AppIcon name="wand" :size="16" /><span class="phone:sr-only">{{ t('organize.open') }}</span>
           </button>
+          <MenuButton :label="t('tools.menu')" icon="wrench" align="right" :items="toolItems" @select="runTool" />
           <button type="button" class="lm-btn" :aria-pressed="selectionMode" @click="setSelectionMode(!selectionMode)">
             <AppIcon :name="selectionMode ? 'check' : 'checkSquare'" :size="16" />
             <span class="phone:sr-only">{{ selectionMode ? t('library.selectDone') : t('library.select') }}</span>
@@ -532,6 +656,14 @@ function bulkSend(event: MouseEvent): void {
           >
             <AppIcon name="send" :size="14" />{{ t('selection.send') }}
           </button>
+          <button
+            type="button"
+            class="lm-btn lm-btn--sm"
+            :disabled="!selected.size"
+            @click="templateTarget = { scope: { filePaths: selectedItems.map((item) => item.file_path) }, label: t('tools.template.scopeFiles', { count: selectedItems.length }) }"
+          >
+            <AppIcon name="type" :size="14" />{{ t('selection.template') }}
+          </button>
           <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="copySelectedNames">
             <AppIcon name="copy" :size="14" />{{ t('selection.copyNames') }}
           </button>
@@ -597,6 +729,7 @@ function bulkSend(event: MouseEvent): void {
       @filter-tag="filterByTag"
       @updated="onUpdated"
       @action="runAction($event, openItem!)"
+      @download="downloadInput = $event"
     />
 
     <ModelActionMenu
@@ -635,8 +768,41 @@ function bulkSend(event: MouseEvent): void {
       :api="api"
       :actions="actions"
       :default-root="String(settings?.[`default_${config.singular}_root`] ?? '')"
+      :template="template"
       @close="onMoveClosed"
     />
     <OrganizeDialog v-if="organizeOpen" :prefix="prefix" @close="organizeOpen = false" @organized="onOrganized" />
+    <DownloadDialog v-if="downloadInput !== null" :prefix="prefix" :initial-input="downloadInput" @close="downloadInput = null" />
+    <DuplicatesDialog
+      v-if="duplicatesOpen"
+      :api="api"
+      :actions="actions"
+      :blur-mature="blurMature"
+      @close="duplicatesOpen = false"
+      @open="(item) => { duplicatesOpen = false; openItem = item }"
+    />
+    <ExcludedDialog v-if="excludedOpen" :api="api" :tools="tools" @close="excludedOpen = false" />
+    <PreviewDialog v-if="previewTarget" :item="previewTarget.item" :mode="previewTarget.mode" :tools="tools" @close="previewTarget = null" />
+    <InputDialog
+      v-if="relinkTarget"
+      :title="t('tools.relink.title')"
+      :label="t('tools.relink.label')"
+      :hint="t('tools.relink.hint')"
+      initial=""
+      :confirm-label="t('tools.relink.confirm')"
+      :validate="(value) => (value.trim() ? null : t('tools.relink.invalid'))"
+      :submit="submitRelink"
+      @close="relinkTarget = null"
+    />
+    <TemplateDialog v-if="templateTarget" :tools="tools" :scope="templateTarget.scope" :scope-label="templateTarget.label" @close="templateTarget = null" />
+    <FolderDialog
+      v-if="folderDialog"
+      :mode="folderDialog.mode"
+      :locations="folderDialog.locations"
+      :current-name="folderDialog.currentName"
+      :tools="tools"
+      @done="onFolderDone"
+      @close="folderDialog = null"
+    />
   </div>
 </template>

@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from 'vue'
 import AppIcon from '@/components/AppIcon.vue'
 import LazyMedia from '@/components/LazyMedia.vue'
 import StateBlock from '@/components/StateBlock.vue'
+import DownloadDialog from '@/components/DownloadDialog.vue'
 import { downloadsApi } from '@/api/endpoints'
 import type { QueueItem } from '@/api/types'
 import { useConfirm, useToasts } from '@/composables/useFeedback'
@@ -36,6 +37,8 @@ const historyError = ref<string | null>(null)
 const busy = ref<string | null>(null)
 
 const addInput = ref('')
+/** Full download dialog (version, file, root and folder); null = closed. */
+const dialogInput = ref<string | null>(null)
 const addError = ref('')
 const adding = ref(false)
 
@@ -195,6 +198,9 @@ watch(finishedCount, (value) => {
         <button type="submit" class="lm-btn lm-btn--primary" :disabled="adding || !addInput.trim()">
           <AppIcon name="plus" :size="16" />{{ t('downloads.addButton') }}
         </button>
+        <button type="button" class="lm-btn" :title="t('download.title')" @click="dialogInput = addInput">
+          <AppIcon name="folder" :size="16" />{{ t('download.open') }}
+        </button>
       </div>
       <p v-if="addError" class="lm-error-text" role="alert">{{ addError }}</p>
       <p id="add-download-hint" class="lm-hint">{{ t('downloads.addHint') }}</p>
@@ -337,5 +343,6 @@ watch(finishedCount, (value) => {
         </li>
       </ul>
     </section>
+    <DownloadDialog v-if="dialogInput !== null" prefix="loras" :initial-input="dialogInput" @close="dialogInput = null" />
   </div>
 </template>

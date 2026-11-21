@@ -19,6 +19,8 @@ const props = defineProps<{
   api: ModelApi
   actions: ReturnType<typeof useModelActions>
   defaultRoot?: string
+  /** Download path template of the type (preview of "use default path"). */
+  template?: string
 }>()
 const emit = defineEmits<{ close: [] }>()
 
@@ -32,6 +34,8 @@ const loading = ref(true)
 const loadError = ref<string | null>(null)
 const busy = ref(false)
 const failures = ref<Failure[]>([])
+// The backend joins each model's download path template below the root.
+const useDefaultPath = ref(false)
 
 // Models still to move: after a partial bulk move only the failed ones remain (retry).
 const pending = ref<ModelItem[]>([...props.items])
@@ -53,7 +57,12 @@ const folderError = computed(() => {
 const relativeTarget = computed(() =>
   [folder.value, newFolder.value.trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '')].filter(Boolean).join('/'),
 )
-const targetPath = computed(() => (root.value ? joinTargetPath(root.value, relativeTarget.value) : ''))
+const targetPath = computed(() =>
+  root.value ? joinTargetPath(root.value, useDefaultPath.value ? '' : relativeTarget.value) : '',
+)
+const targetPreview = computed(() =>
+  useDefaultPath.value && targetPath.value && props.template ? `${targetPath.value}/${props.template}` : targetPath.value,
+)
 /** Every selected model already lives in the destination. */
 const sameFolder = computed(() =>
   pending.value.every((item) => {
@@ -61,7 +70,9 @@ const sameFolder = computed(() =>
     return dir.toLowerCase() === targetPath.value.toLowerCase()
   }),
 )
-const canMove = computed(() => !!targetPath.value && !folderError.value && !sameFolder.value && !busy.value && !loading.value)
+const canMove = computed(
+  () => !!targetPath.value && (useDefaultPath.value || (!folderError.value && !sameFolder.value)) && !busy.value && !loading.value,
+)
 
 async function loadTree(): Promise<void> {
   if (!root.value) return
@@ -108,7 +119,7 @@ async function onSubmit(): Promise<void> {
   busy.value = true
   failures.value = []
   try {
-    const summary = await props.actions.moveItems(pending.value, targetPath.value, roots.value)
+    const summary = await props.actions.moveItems(pending.value, targetPath.value, roots.value, useDefaultPath.value)
     if (summary.failed.length) {
       failures.value = summary.failed
       const failed = new Set(summary.failed.map((entry) => entry.path))
@@ -134,7 +145,15 @@ const rowClass = 'lm-row flex min-h-[30px] cursor-pointer items-center gap-2 px-
         </select>
       </div>
 
-      <fieldset class="flex min-w-0 flex-col gap-2" :disabled="busy">
+      <label class="flex items-start gap-2 text-sm">
+        <input v-model="useDefaultPath" class="lm-check mt-1" type="checkbox" :disabled="busy" />
+        <span>
+          {{ t('move.useDefault') }}
+          <span class="block text-xs text-muted">{{ template ? t('move.useDefaultHint', { template }) : t('move.useDefaultFlat') }}</span>
+        </span>
+      </label>
+
+      <fieldset v-if="!useDefaultPath" class="flex min-w-0 flex-col gap-2" :disabled="busy">
         <legend class="lm-label mb-1">{{ t('actions.move.folder') }}</legend>
         <label class="sr-only" for="move-filter">{{ t('actions.move.filter') }}</label>
         <input id="move-filter" v-model="filter" class="lm-input" type="search" :placeholder="t('actions.move.filter')" />
@@ -163,7 +182,7 @@ const rowClass = 'lm-row flex min-h-[30px] cursor-pointer items-center gap-2 px-
         </div>
       </fieldset>
 
-      <div class="flex flex-col gap-1">
+      <div v-if="!useDefaultPath" class="flex flex-col gap-1">
         <label class="lm-label" for="move-new-folder">{{ t('actions.move.newFolder') }}</label>
         <input
           id="move-new-folder"
@@ -181,7 +200,7 @@ const rowClass = 'lm-row flex min-h-[30px] cursor-pointer items-center gap-2 px-
 
       <div class="rounded-md bg-sunken p-3 text-sm">
         <p class="lm-overline mb-1">{{ t('actions.move.target') }}</p>
-        <p class="lm-mono wrap-anywhere" data-testid="move-target">{{ targetPath || '-' }}</p>
+        <p class="lm-mono wrap-anywhere" data-testid="move-target">{{ targetPreview || '-' }}</p>
         <p class="mt-2 text-xs text-muted">{{ t('actions.move.hint') }}</p>
       </div>
 

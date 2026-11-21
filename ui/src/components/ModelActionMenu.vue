@@ -10,7 +10,16 @@ import AppIcon, { type IconName } from './AppIcon.vue'
 import { useDismissLayer } from '@/composables/useDismiss'
 import { t, type MessageKey } from '@/i18n'
 
-export type ModelAction = 'move' | 'rename' | 'exclude' | 'delete'
+export type ModelAction =
+  | 'move'
+  | 'rename'
+  | 'template'
+  | 'preview'
+  | 'rating'
+  | 'refresh'
+  | 'relink'
+  | 'exclude'
+  | 'delete'
 
 const props = defineProps<{ x: number; y: number; label: string }>()
 const emit = defineEmits<{ select: [action: ModelAction]; close: [reason: 'escape' | 'outside' | 'select'] }>()
@@ -18,11 +27,16 @@ const emit = defineEmits<{ select: [action: ModelAction]; close: [reason: 'escap
 const ITEMS: { action: ModelAction; label: MessageKey; icon: IconName; danger?: boolean }[] = [
   { action: 'move', label: 'actions.move', icon: 'folderMove' },
   { action: 'rename', label: 'actions.rename', icon: 'pencil' },
+  { action: 'template', label: 'tools.template.open', icon: 'type' },
+  { action: 'preview', label: 'tools.preview.open', icon: 'image' },
+  { action: 'rating', label: 'tools.nsfw.open', icon: 'shield' },
+  { action: 'refresh', label: 'tools.refresh.open', icon: 'refresh' },
+  { action: 'relink', label: 'tools.relink.open', icon: 'link' },
   { action: 'exclude', label: 'actions.exclude', icon: 'eyeOff' },
   { action: 'delete', label: 'actions.delete', icon: 'trash', danger: true },
 ]
-const MENU_WIDTH = 220
-const MENU_HEIGHT = 4 * 36 + 16
+const MENU_WIDTH = 240
+const MENU_HEIGHT = ITEMS.length * 36 + 16
 
 const menu = ref<HTMLElement | null>(null)
 const style = computed(() => {

@@ -24,7 +24,14 @@ const props = withDefaults(
   defineProps<{ item: ModelItem; api: ModelApi; classicUrl: string; civitaiHost?: string; canSend?: boolean }>(),
   { civitaiHost: 'civitai.com', canSend: false },
 )
-const emit = defineEmits<{ close: []; updated: [item: ModelItem]; 'filter-tag': [tag: string]; action: [action: ModelAction] }>()
+const emit = defineEmits<{
+  close: []
+  updated: [item: ModelItem]
+  'filter-tag': [tag: string]
+  action: [action: ModelAction]
+  /** Open the download dialog for this Civitai model/version URL. */
+  download: [input: string]
+}>()
 
 type Tab = 'overview' | 'description' | 'versions'
 const TABS: { id: Tab; label: MessageKey }[] = [
@@ -424,6 +431,21 @@ useEventListener(document, 'keydown', onKey)
             <button type="button" class="lm-btn lm-btn--sm" @click="emit('action', 'move')">
               <AppIcon name="folderMove" :size="14" />{{ t('actions.move') }}
             </button>
+            <button type="button" class="lm-btn lm-btn--sm" @click="emit('action', 'template')">
+              <AppIcon name="type" :size="14" />{{ t('tools.template.open') }}
+            </button>
+            <button type="button" class="lm-btn lm-btn--sm" @click="emit('action', 'preview')">
+              <AppIcon name="image" :size="14" />{{ t('tools.preview.open') }}
+            </button>
+            <button type="button" class="lm-btn lm-btn--sm" @click="emit('action', 'rating')">
+              <AppIcon name="shield" :size="14" />{{ t('tools.nsfw.open') }}
+            </button>
+            <button type="button" class="lm-btn lm-btn--sm" @click="emit('action', 'refresh')">
+              <AppIcon name="refresh" :size="14" />{{ t('tools.refresh.open') }}
+            </button>
+            <button type="button" class="lm-btn lm-btn--sm" @click="emit('action', 'relink')">
+              <AppIcon name="link" :size="14" />{{ t('tools.relink.open') }}
+            </button>
             <button type="button" class="lm-btn lm-btn--sm" @click="emit('action', 'exclude')">
               <AppIcon name="eyeOff" :size="14" />{{ t('actions.exclude') }}
             </button>
@@ -650,9 +672,19 @@ useEventListener(document, 'keydown', onKey)
                   <span v-if="version.isEarlyAccess" class="lm-badge lm-badge--warning">{{ t('detail.earlyAccess') }}</span>
                 </div>
               </div>
-              <button v-if="!version.isInLibrary" type="button" class="lm-btn lm-btn--sm" @click="queueVersion(version.versionId)">
-                <AppIcon name="download" :size="14" />{{ t('detail.queueVersion') }}
-              </button>
+              <div class="flex flex-col gap-1">
+                <button v-if="!version.isInLibrary" type="button" class="lm-btn lm-btn--sm" @click="queueVersion(version.versionId)">
+                  <AppIcon name="download" :size="14" />{{ t('detail.queueVersion') }}
+                </button>
+                <button
+                  type="button"
+                  class="lm-btn lm-btn--sm"
+                  :title="t('download.title')"
+                  @click="emit('download', `https://civitai.com/models/${modelId}?modelVersionId=${version.versionId}`)"
+                >
+                  <AppIcon name="folder" :size="14" />{{ t('download.fromVersion') }}
+                </button>
+              </div>
             </li>
           </ul>
         </section>
