@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useEventListener, useLocalStorage } from '@vueuse/core'
+import { useEventListener, useLocalStorage, useTimeoutFn } from '@vueuse/core'
 import AppIcon from './AppIcon.vue'
 import ExampleImagesDialog from './ExampleImagesDialog.vue'
 import ExampleLightbox from './ExampleLightbox.vue'
@@ -98,7 +98,9 @@ const notesField = ref<HTMLTextAreaElement | null>(null)
 const prevButton = ref<HTMLButtonElement | null>(null)
 const nextButton = ref<HTMLButtonElement | null>(null)
 const announcement = ref('')
-let announceNext = false
+// Time of the last prev/next request: a model change shortly after it is announced (a page load may take a moment).
+let lastNavigateAt = -Infinity
+const ANNOUNCE_WINDOW_MS = 5000
 // "More actions" menu (the same model actions as the card menu, plus the external links).
 const menu = ref<{ x: number; y: number; opener: HTMLElement } | null>(null)
 
@@ -224,7 +226,7 @@ async function loadVersions(): Promise<void> {
 // Versions tab is still loaded lazily, the first time it is shown. A tab switch starts at the top.
 watch(tab, (value) => {
   if (scroller.value) scroller.value.scrollTop = 0
-  if (value === 'versions' && !versionsLoaded.value) void loadVersions()
+  if (value === 'versions' && !versionsLoaded.value && !versionsLoading.value) void loadVersions()
 })
 
 /** Roving tabindex: arrows / Home / End move focus to the neighbouring tab and select it. */
@@ -245,6 +247,30 @@ function selectTab(id: Tab): void {
   preferredTab.value = id
 }
 
+// While stepping through models quickly, the metadata (and versions) fetch waits until the user pauses:
+// holding j/k never requests every model, and a request for a model that was left is aborted.
+const STEP_LOAD_DELAY_MS = 150
+const { start: startStepLoad, stop: stopStepLoad } = useTimeoutFn(
+  () => {
+    void loadMetadata()
+    if (tab.value === 'versions' && !versionsLoaded.value && !versionsLoading.value) void loadVersions()
+  },
+  STEP_LOAD_DELAY_MS,
+  { immediate: false },
+)
+
+function loadForItem(stepping: boolean): void {
+  stopStepLoad()
+  if (!stepping) {
+    void loadMetadata()
+    if (tab.value === 'versions' && !versionsLoading.value) void loadVersions()
+    return
+  }
+  metaGuard.cancel()
+  metaLoading.value = true
+  startStepLoad()
+}
+
 watch(
   () => props.item.file_path,
   () => {
@@ -257,18 +283,15 @@ watch(
     versionsError.value = null
     versionsGuard.cancel()
     examples.clear()
-    // Keep the remembered tab (the tab watcher loads Versions when it changes; a Versions -> Versions step loads here).
-    const previousTab = tab.value
+    // Keep the remembered tab (the tab watcher loads Versions when it changes; otherwise the deferred load below does).
     tab.value = tabFor(props.item)
-    if (tab.value === 'versions' && previousTab === 'versions') void loadVersions()
     if (scroller.value) scroller.value.scrollTop = 0
     tagsExpanded.value = false
     lightboxIndex.value = null
     examplesOpen.value = false
     strength.value = loraStrengths(props.item.usage_tips).strength
-    void loadMetadata()
-    if (announceNext) {
-      announceNext = false
+    loadForItem(performance.now() - lastNavigateAt < ANNOUNCE_WINDOW_MS)
+    if (performance.now() - lastNavigateAt < ANNOUNCE_WINDOW_MS) {
       announcement.value = t('detail.nav.announce', { name: displayName.value, position: positionText.value })
     }
   },
@@ -414,17 +437,22 @@ async function requestNavigate(direction: NavDirection): Promise<void> {
   const nav = props.nav
   if (!nav || (direction === 'prev' ? !nav.hasPrev : !nav.hasNext)) return
   if (!(await confirmLeave())) return
-  announceNext = true
+  lastNavigateAt = performance.now()
   emit('navigate', direction)
-  // At either end the pressed button becomes disabled: keep focus inside the drawer.
-  await nextTick()
-  const active = document.activeElement
-  if (!active || active === document.body || (active as HTMLButtonElement).disabled) {
+}
+
+// At either end the pressed button becomes disabled (after the library has stepped): keep focus inside the drawer.
+watch(
+  () => [props.nav?.hasPrev, props.nav?.hasNext],
+  async () => {
+    await nextTick()
+    const active = document.activeElement
+    if (active && active !== document.body && !(active as HTMLButtonElement).disabled) return
     const other = [prevButton.value, nextButton.value].find((button) => button && !button.disabled)
     const target = other ?? closeButton.value
     target?.focus()
-  }
-}
+  },
+)
 
 async function requestClose(): Promise<void> {
   if (await confirmLeave()) emit('close')
@@ -497,7 +525,7 @@ useEventListener(document, 'keydown', onKey)
       >
         <h2
           id="drawer-title"
-          class="col-start-1 row-start-1 mb-2 min-w-0 text-xl wrap-anywhere phone:mt-2 phone:mb-1 phone:line-clamp-2 phone:text-lg"
+          class="col-start-1 row-start-1 mb-2 min-w-0 text-xl wrap-anywhere phone:mt-1 phone:mb-0 phone:line-clamp-2 phone:text-lg"
           :title="displayName"
         >
           {{ displayName }}

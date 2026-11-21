@@ -75,7 +75,7 @@ cleans up with the component scope. Currently used:
 - `useTimeoutFn` (search-suggestion debounce, library/recipes search apply,
   LazyMedia placeholder removal);
 - `useLocalStorage` (theme choice, density, remembered toggles such as the
-  drawer specifications; same keys and plain-string values as before, written
+  drawer specifications, the drawer's last tab; same keys and plain-string values as before, written
   on change only, blocked storage ignored);
 - `usePreferredDark` (the "System" theme follows the OS live).
 
@@ -547,6 +547,35 @@ read-only endpoints (`api/suggestSource.ts`):
   their 24px look and get the 44px hit area through the button box plus a
   negative margin). `lm-btn` itself is unchanged. On a phone the pinned header
   plus tabs take about 130px.
+* **Prev/next and the remembered tab** (`utils/drawerNav.ts`, tests in
+  `tests/drawerNav.test.ts`, written first). The header has a **Previous model** and
+  **Next model** icon button around a position label ("3 of 120"; just the ordinal
+  when the total is unknown). They step through the list as it is currently displayed
+  (filters, sort and search applied); `LibraryPage` owns the list and the open item,
+  passes `nav` (`computeNav`) plus the neighbours' preview URLs to the drawer and
+  handles its `navigate` event. Buttons are disabled at both ends (no wrapping);
+  at the last loaded item Next stays enabled while more pages exist: the page loads
+  the next page and continues. Each step replaces `?open=` (Back leaves the
+  drawer instead of walking through models), keeps the tab, scrolls the drawer body
+  and the grid (`VirtualGrid.scrollToIndex`) so the card is in view, and announces
+  "Showing <name>, <position>" in a polite live region. When the notes are dirty the
+  same "Discard unsaved notes?" confirm appears first. Rapid presses are queued by
+  the page; metadata/versions are fetched only after a 150 ms pause (a held key
+  requests nothing per step), stale responses are dropped and in-flight requests are
+  aborted (`createRequestGuard`); only the neighbours' preview images are warmed.
+  When the focused button becomes disabled at an end, focus moves to the other one.
+  **Shortcuts** (`shouldHandleNavKey`): Alt+ArrowLeft / Alt+ArrowRight, and plain
+  `k` (previous) / `j` (next); only while the drawer is the topmost layer (`useDismiss`
+  stack) with no dialog (lightbox, confirm, example images) or its More actions menu
+  open, never while typing in an input, textarea, select or contenteditable (Alt+Arrow
+  is word movement on macOS), and no Ctrl/Meta/Shift. The tab list ignores Alt+Arrow.
+  On a phone the navigation sits on a second header row (left of the base-model
+  badge); its 44px hit areas overlap the row's padding so header + tabs stay at about
+  129px at 375px wide. The recipe drawer does not have prev/next yet.
+  **Last tab**: the selected tab is stored in `localStorage` (`lm-ui.detail.tab`,
+  validated against Overview / Description / Versions, default Overview) and applied
+  to every model you open; a model that lacks the tab (Versions needs a Civitai model
+  id) shows Overview without overwriting the preference.
 * Drawer tests: `tests/drawer.test.ts` (mature-blur rule, usage-tip chips,
   `nextTab`, `shouldConfirmClose`, `currentVersionId`), written before the UI.
 * **Tags** are uniform pills (click = filter the library by that tag and close
