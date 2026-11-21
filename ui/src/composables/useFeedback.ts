@@ -24,6 +24,8 @@ export interface ConfirmRequest {
   title: string
   message: string
   confirmLabel: string
+  /** Label of the dismiss button (default: Cancel). */
+  cancelLabel?: string
   danger: boolean
   resolve: (value: boolean) => void
 }
@@ -55,13 +57,14 @@ export function useToasts() {
 }
 
 export function useConfirm() {
-  function confirm(options: { message: string; title?: string; confirmLabel?: string; danger?: boolean }): Promise<boolean> {
+  function confirm(options: { message: string; title?: string; confirmLabel?: string; cancelLabel?: string; danger?: boolean }): Promise<boolean> {
     confirmState.value?.resolve(false)
     return new Promise((resolve) => {
       confirmState.value = {
         title: options.title ?? t('confirm.title'),
         message: options.message,
         confirmLabel: options.confirmLabel ?? t('common.confirm'),
+        cancelLabel: options.cancelLabel,
         danger: options.danger ?? false,
         resolve: (value) => {
           confirmState.value = null

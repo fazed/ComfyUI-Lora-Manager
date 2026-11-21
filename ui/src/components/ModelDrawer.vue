@@ -12,12 +12,12 @@ import type { ModelItem, ModelMetadata, ModelUpdateRecord } from '@/api/types'
 import { useDismissLayer } from '@/composables/useDismiss'
 import { useExampleImages } from '@/composables/useExampleImages'
 import { modelTypeOf } from '@/utils/exampleImages'
-import { copyText, useToasts } from '@/composables/useFeedback'
+import { copyText, useConfirm, useToasts } from '@/composables/useFeedback'
 import { usePersistentToggle } from '@/composables/usePersistentToggle'
 import { useSendToWorkflow } from '@/composables/useSendToWorkflow'
 import { withMountPrefix } from '@/utils/basePath'
 import { formatBytes, formatDate, isVideoUrl } from '@/utils/format'
-import { nextTab } from '@/utils/drawer'
+import { nextTab, shouldConfirmClose } from '@/utils/drawer'
 import { isBlurred } from '@/utils/mature'
 import { promptHint } from '@/utils/generation'
 import { sanitizeHtml } from '@/utils/sanitize'
@@ -51,6 +51,7 @@ const blockTitleClass = 'mb-2 text-sm'
 const chipsClass = 'flex flex-wrap items-center gap-2'
 
 const toasts = useToasts()
+const { confirm } = useConfirm()
 const workflow = useSendToWorkflow()
 const tab = ref<Tab>('overview')
 const specsOpen = usePersistentToggle('lm-ui.detail.specsOpen', false)
@@ -62,6 +63,7 @@ const sending = ref(false)
 const panel = ref<HTMLElement | null>(null)
 const closeButton = ref<HTMLButtonElement | null>(null)
 const scroller = ref<HTMLElement | null>(null)
+const notesField = ref<HTMLTextAreaElement | null>(null)
 // "More actions" menu (the same model actions as the card menu, plus the external links).
 const menu = ref<{ x: number; y: number; opener: HTMLElement } | null>(null)
 
@@ -295,9 +297,39 @@ function copySyntax(): void {
   void workflow.copyLora(props.item, sendOptions('append'))
 }
 
+/**
+ * Leaving with unsaved notes asks first (nothing is auto-saved). Every way out goes through
+ * this: Escape, the backdrop, the Close button and filtering by a tag (the library closes the
+ * drawer for that). Switching to another model through the `item` prop resets the draft
+ * without asking (the watcher above), like the tag list.
+ */
+async function confirmLeave(): Promise<boolean> {
+  if (!shouldConfirmClose(notesDirty.value)) return true
+  const discard = await confirm({
+    title: t('detail.discardNotes.title'),
+    message: t('detail.discardNotes.message'),
+    confirmLabel: t('detail.discardNotes.confirm'),
+    cancelLabel: t('detail.discardNotes.keep'),
+    danger: true,
+  })
+  if (!discard) {
+    await nextTick()
+    notesField.value?.focus()
+  }
+  return discard
+}
+
+async function requestClose(): Promise<void> {
+  if (await confirmLeave()) emit('close')
+}
+
+async function filterTag(tag: string): Promise<void> {
+  if (await confirmLeave()) emit('filter-tag', tag)
+}
+
 // Escape and backdrop clicks close the drawer only while it is the topmost overlay
 // (not while the lightbox, confirm or node picker dialog is open on top of it).
-const { isTopmost, backdrop } = useDismissLayer({ active: () => true, close: () => emit('close') })
+const { isTopmost, backdrop } = useDismissLayer({ active: () => true, close: () => void requestClose() })
 
 function onKey(event: KeyboardEvent): void {
   // Modal dialogs on top (lightbox, node picker) handle their own keys.
@@ -381,7 +413,7 @@ useEventListener(document, 'keydown', onKey)
         >
           <AppIcon name="more" />
         </button>
-        <button ref="closeButton" type="button" class="lm-btn lm-btn--ghost lm-btn--icon" :aria-label="t('common.close')" @click="emit('close')">
+        <button ref="closeButton" type="button" class="lm-btn lm-btn--ghost lm-btn--icon" :aria-label="t('common.close')" @click="requestClose">
           <AppIcon name="close" />
         </button>
       </header>
@@ -575,7 +607,7 @@ useEventListener(document, 'keydown', onKey)
                   type="button"
                   class="h-full cursor-pointer truncate pr-1 pl-3 hover:text-accent"
                   :title="t('detail.filterByTag', { tag })"
-                  @click="emit('filter-tag', tag)"
+                  @click="filterTag(tag)"
                 >
                   {{ tag }}
                 </button>
@@ -623,8 +655,9 @@ useEventListener(document, 'keydown', onKey)
 
           <div>
             <label class="lm-label" for="drawer-notes"><h3 :class="blockTitleClass">{{ t('detail.notes') }}</h3></label>
-            <textarea id="drawer-notes" v-model="notes" class="lm-textarea" :placeholder="t('detail.notesPlaceholder')"></textarea>
-            <div class="mt-2 flex flex-wrap justify-end gap-2">
+            <textarea id="drawer-notes" ref="notesField" v-model="notes" class="lm-textarea" :placeholder="t('detail.notesPlaceholder')"></textarea>
+            <div class="mt-2 flex flex-wrap items-center justify-end gap-2">
+              <span class="mr-auto text-xs text-muted" aria-live="polite">{{ notesDirty ? t('detail.unsavedNotes') : '' }}</span>
               <button type="button" class="lm-btn lm-btn--primary" :disabled="!notesDirty || savingNotes" @click="saveNotes">
                 {{ t('common.save') }}
               </button>
