@@ -2,9 +2,13 @@
  * All user-facing strings of the modern UI, in one place (English only for
  * now). `t('key', { name })` replaces `{name}` placeholders. Adding another
  * language later means adding a second message table and a locale switch.
+ * Phase B2b strings live in ./b2bMessages.ts and are merged in below.
  */
 
+import { b2bMessages } from './b2bMessages'
+
 export const messages = {
+  ...b2bMessages,
   'app.title': 'LoRA Manager',
   'app.skipToContent': 'Skip to content',
   'nav.main': 'Main navigation',

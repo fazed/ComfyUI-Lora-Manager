@@ -54,6 +54,39 @@ function errorMessage(payload: unknown, fallback: string): string {
   return fallback
 }
 
+/**
+ * POST that answers with a file (backup export, doctor bundle). JSON error
+ * bodies become ApiError like `request`.
+ */
+export async function requestBlob(
+  path: string,
+  options: { method?: 'GET' | 'POST'; body?: unknown } = {},
+): Promise<{ blob: Blob; disposition: string | null }> {
+  const init: RequestInit = { method: options.method ?? 'POST', headers: { Accept: 'application/zip, application/json' } }
+  if (options.body !== undefined) {
+    init.body = JSON.stringify(options.body)
+    init.headers = { ...init.headers, 'Content-Type': 'application/json' }
+  }
+  let response: Response
+  try {
+    response = await fetchImpl(apiUrl(path), init)
+  } catch (error) {
+    throw new ApiError('Network error: the LoRA Manager backend is not reachable', 0, error)
+  }
+  const type = response.headers.get('Content-Type') ?? ''
+  if (!response.ok || type.includes('application/json')) {
+    const text = await response.text()
+    let payload: unknown = text
+    try {
+      payload = JSON.parse(text)
+    } catch {
+      payload = text
+    }
+    throw new ApiError(errorMessage(payload, `Request failed (${response.status})`), response.status, payload)
+  }
+  return { blob: await response.blob(), disposition: response.headers.get('Content-Disposition') }
+}
+
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { method = 'GET', query, body, signal } = options
   const init: RequestInit = { method, signal, headers: { Accept: 'application/json' } }
