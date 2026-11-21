@@ -8,6 +8,7 @@
  */
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import AppIcon from './AppIcon.vue'
+import LazyMedia from './LazyMedia.vue'
 import type { CivitaiImage } from '@/api/types'
 import { useDismissLayer } from '@/composables/useDismiss'
 import { copyText, useToasts } from '@/composables/useFeedback'
@@ -84,20 +85,21 @@ watch(
     @click="backdrop.click"
   >
     <div class="relative flex min-h-0 items-center justify-center bg-sunken">
-      <template v-if="image">
-        <video
-          v-if="isVideo"
-          :key="image.url"
-          class="size-full object-contain"
-          :src="image.url"
-          controls
-          autoplay
-          muted
-          loop
-          playsinline
-        ></video>
-        <img v-else :key="image.url" class="size-full object-contain" :src="image.url" :alt="t('lightbox.label', position)" />
-      </template>
+      <LazyMedia
+        v-if="image"
+        class="size-full"
+        media-class="size-full object-contain"
+        :src="image.url"
+        :kind="isVideo ? 'video' : 'image'"
+        :alt="t('lightbox.label', position)"
+        loading="eager"
+        fetchpriority="high"
+        controls
+        autoplay
+        loop
+        retry
+        :icon-size="40"
+      />
       <span class="absolute top-3 left-3 z-2 rounded-pill bg-scrim px-2 py-px text-xs text-on-scrim tabular-nums" aria-hidden="true">
         {{ t('lightbox.counter', position) }}
       </span>

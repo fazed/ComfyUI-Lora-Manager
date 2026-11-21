@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
+import LazyMedia from './LazyMedia.vue'
 import type { ModelItem } from '@/api/types'
 import { withMountPrefix } from '@/utils/basePath'
-import { isVideoUrl } from '@/utils/format'
 import { t } from '@/i18n'
 
 const props = defineProps<{
@@ -23,10 +23,9 @@ const emit = defineEmits<{
   send: [item: ModelItem, replace: boolean]
 }>()
 
-const failed = ref(false)
-const video = ref<HTMLVideoElement | null>(null)
+const media = ref<InstanceType<typeof LazyMedia> | null>(null)
+const video = computed(() => (media.value?.element instanceof HTMLVideoElement ? media.value.element : null))
 const previewUrl = computed(() => (props.item.preview_url ? withMountPrefix(props.item.preview_url) : ''))
-const isVideo = computed(() => isVideoUrl(props.item.preview_url))
 const displayName = computed(() => props.item.model_name || props.item.file_name)
 // Civitai NSFW levels: 1 PG, 2 PG-13, 4 R, 8 X, 16 XXX.
 const blurred = computed(() => props.blurMature && (props.item.preview_nsfw_level ?? 0) >= 4)
@@ -71,26 +70,14 @@ function pause(): void {
       @focus="play"
       @blur="pause"
     ></button>
-    <div class="absolute inset-0">
-      <template v-if="previewUrl && !failed">
-        <video
-          v-if="isVideo"
-          ref="video"
-          :class="mediaClass"
-          :src="previewUrl"
-          muted
-          loop
-          playsinline
-          preload="metadata"
-          @error="failed = true"
-        ></video>
-        <img v-else :class="mediaClass" :src="previewUrl" :alt="''" loading="lazy" decoding="async" @error="failed = true" />
+    <LazyMedia ref="media" class="absolute! inset-0" :src="previewUrl" :media-class="mediaClass" loop>
+      <template #fallback>
+        <span class="flex flex-col items-center justify-center gap-2 text-xs">
+          <AppIcon name="image" :size="32" />
+          <span>{{ t('card.noPreview') }}</span>
+        </span>
       </template>
-      <div v-else class="flex h-full flex-col items-center justify-center gap-2 text-xs text-muted">
-        <AppIcon name="image" :size="32" />
-        <span>{{ t('card.noPreview') }}</span>
-      </div>
-    </div>
+    </LazyMedia>
     <div class="pointer-events-none absolute inset-x-2 top-2 z-3 flex items-start gap-1">
       <span v-if="item.base_model" :class="[pillClass, 'bg-scrim text-on-scrim']">{{ item.base_model }}</span>
       <span v-if="item.update_available" :class="[pillClass, 'bg-accent text-on-accent']">

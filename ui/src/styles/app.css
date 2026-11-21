@@ -244,6 +244,59 @@
   }
 
   /*
+   * LazyMedia (components/LazyMedia.vue): skeleton under the media while it
+   * loads, then the media fades in. The shimmer starts after a short delay (no
+   * flash for fast loads) and is off for prefers-reduced-motion. The fade keeps
+   * the zoom transition of .lm-zoom-media in the same declaration.
+   */
+  .lm-media-placeholder {
+    background-color: var(--lm-color-skeleton);
+  }
+
+  .lm-media-placeholder.is-loading {
+    background-image: linear-gradient(
+      100deg,
+      transparent 30%,
+      color-mix(in srgb, var(--lm-color-surface) 35%, transparent) 50%,
+      transparent 70%
+    );
+    background-size: 250% 100%;
+    background-repeat: no-repeat;
+    animation: lm-shimmer 1.6s var(--lm-ease) 0.25s infinite;
+  }
+
+  .lm-fade {
+    opacity: 0;
+    transition:
+      opacity var(--lm-fade-duration) var(--lm-ease),
+      scale var(--lm-motion-normal) var(--lm-ease);
+  }
+
+  .lm-fade.is-loaded {
+    opacity: 1;
+  }
+
+  .lm-fade.is-instant {
+    transition: scale var(--lm-motion-normal) var(--lm-ease);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .lm-media-placeholder.is-loading {
+      animation: none;
+      background-image: none;
+    }
+  }
+
+  @keyframes lm-shimmer {
+    from {
+      background-position: 100% 0;
+    }
+    to {
+      background-position: 0 0;
+    }
+  }
+
+  /*
    * Selectable row (menu links, folder tree, "all folders", theme options).
    * .is-selected comes last so a selected row keeps its colors on hover.
    */

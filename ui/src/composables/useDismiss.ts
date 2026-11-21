@@ -10,10 +10,12 @@
  *
  * Native modal <dialog>s pass `escape: false`: the browser fires `cancel` on the
  * topmost one, and the layer still keeps the overlays below it from reacting.
- * The pure logic lives in utils/dismiss.ts.
+ * Document listeners are attached only while the layer is open (VueUse
+ * useEventListener with a reactive target). Pure logic: utils/dismiss.ts.
  */
 
 import { onBeforeUnmount, watch } from 'vue'
+import { useEventListener } from '@vueuse/core'
 import {
   createBackdropGuard,
   createLayerStack,
@@ -25,20 +27,6 @@ import {
 export const dismissStack = createLayerStack()
 
 let nextId = 1
-let keyListening = false
-
-function onDocumentKey(event: KeyboardEvent): void {
-  if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return
-  if (dismissStack.escape()) event.preventDefault()
-}
-
-function syncKeyListener(): void {
-  const wanted = dismissStack.size() > 0
-  if (wanted === keyListening || typeof document === 'undefined') return
-  keyListening = wanted
-  if (wanted) document.addEventListener('keydown', onDocumentKey)
-  else document.removeEventListener('keydown', onDocumentKey)
-}
 
 export interface DismissOptions {
   /** Whether the overlay is open (reactive getter). */
@@ -54,30 +42,39 @@ export interface DismissOptions {
 
 export function useDismissLayer(options: DismissOptions) {
   const id = nextId++
+  const escape = options.escape ?? true
   const isTopmost = () => dismissStack.isTop(id)
   const guard = createBackdropGuard(
     options.backdrop === 'dialog' ? (event) => (event.currentTarget as Element | null)?.getBoundingClientRect() ?? null : undefined,
   )
+  const doc = typeof document === 'undefined' ? null : document
 
-  function onDocumentPointer(event: PointerEvent): void {
-    if (!options.outside || !isTopmost()) return
-    if (isOutsideAll(event.target as Node | null, options.outside())) options.close('outside')
-  }
+  useEventListener(
+    () => (escape && options.active() ? doc : null),
+    'keydown',
+    (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing || !isTopmost()) return
+      // preventDefault also stops lower layers' listeners in this same dispatch.
+      event.preventDefault()
+      options.close('escape')
+    },
+  )
 
-  function register(): void {
-    dismissStack.push({ id, escape: options.escape ?? true, close: options.close })
-    if (options.outside) document.addEventListener('pointerdown', onDocumentPointer)
-    syncKeyListener()
-  }
+  useEventListener(
+    () => (options.outside && options.active() ? doc : null),
+    'pointerdown',
+    (event: PointerEvent) => {
+      if (!options.outside || !isTopmost()) return
+      if (isOutsideAll(event.target as Node | null, options.outside())) options.close('outside')
+    },
+  )
 
-  function unregister(): void {
-    dismissStack.remove(id)
-    if (options.outside) document.removeEventListener('pointerdown', onDocumentPointer)
-    syncKeyListener()
-  }
-
-  watch(options.active, (open) => (open ? register() : unregister()), { immediate: true })
-  onBeforeUnmount(unregister)
+  watch(
+    options.active,
+    (open) => (open ? dismissStack.push({ id, escape, close: options.close }) : dismissStack.remove(id)),
+    { immediate: true },
+  )
+  onBeforeUnmount(() => dismissStack.remove(id))
 
   return {
     isTopmost,

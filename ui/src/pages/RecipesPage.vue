@@ -1,7 +1,9 @@
 <script setup lang="ts">
 /** Phase-1 recipes view: a read-only grid; details live in the classic UI. */
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useTimeoutFn } from '@vueuse/core'
+import LazyMedia from '@/components/LazyMedia.vue'
 import StateBlock from '@/components/StateBlock.vue'
 import VirtualGrid from '@/components/VirtualGrid.vue'
 import AppIcon from '@/components/AppIcon.vue'
@@ -13,7 +15,6 @@ import { recipesApi } from '@/api/endpoints'
 import type { RecipeItem } from '@/api/types'
 import { useInfiniteList } from '@/composables/useInfiniteList'
 import { withMountPrefix } from '@/utils/basePath'
-import { isVideoUrl } from '@/utils/format'
 import { t } from '@/i18n'
 
 const classicUrl = withMountPrefix('/loras/recipes')
@@ -22,24 +23,21 @@ const router = useRouter()
 /** Applied search (list endpoint `search`); `searchText` is the box, applied after a pause or on Enter. */
 const search = ref('')
 const searchText = ref('')
-let searchTimer: ReturnType<typeof setTimeout> | null = null
+// Typing applies after a 250 ms pause; Enter / a pick applies at once (cancels the pending apply).
+const { start: applyLater, stop: cancelApply } = useTimeoutFn(() => (search.value = searchText.value.trim()), 250, {
+  immediate: false,
+})
 
 function commitSearch(value: string): void {
-  if (searchTimer) clearTimeout(searchTimer)
-  searchTimer = null
+  cancelApply()
   searchText.value = value
   search.value = value.trim()
 }
 
 watch(searchText, (value) => {
-  if (searchTimer) clearTimeout(searchTimer)
-  if (value.trim() === search.value) return
-  searchTimer = setTimeout(() => {
-    searchTimer = null
-    search.value = value.trim()
-  }, 250)
+  cancelApply()
+  if (value.trim() !== search.value) applyLater()
 })
-onBeforeUnmount(() => searchTimer && clearTimeout(searchTimer))
 
 function onSearchChoose(option: SuggestOption): void {
   if (option.kind === 'item') commitSearch(option.item.name)
@@ -122,16 +120,12 @@ onMounted(() => void list.reset())
           :href="classicUrl"
           :title="item.title"
         >
-          <video
-            v-if="isVideoUrl(item.file_url)"
-            class="size-full object-cover"
-            :src="withMountPrefix(item.file_url ?? '')"
-            muted
+          <LazyMedia
+            class="size-full"
+            media-class="size-full object-cover"
+            :src="item.file_url ? withMountPrefix(item.file_url) : ''"
             loop
-            playsinline
-            preload="metadata"
-          ></video>
-          <img v-else-if="item.file_url" class="size-full object-cover" :src="withMountPrefix(item.file_url)" alt="" loading="lazy" />
+          />
           <div class="absolute inset-x-0 bottom-0 flex flex-col gap-[2px] bg-scrim-fade px-3 pt-6 pb-3 text-xs">
             <strong class="text-sm">{{ item.title || item.id }}</strong>
             <span>

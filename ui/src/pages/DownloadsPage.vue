@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import AppIcon from '@/components/AppIcon.vue'
+import LazyMedia from '@/components/LazyMedia.vue'
 import StateBlock from '@/components/StateBlock.vue'
 import { downloadsApi } from '@/api/endpoints'
 import type { QueueItem } from '@/api/types'
@@ -209,8 +210,7 @@ watch(finishedCount, (value) => {
         <p v-if="!queue.active.value.length" :class="ui.empty">{{ t('downloads.noActive') }}</p>
         <ul v-else :class="ui.list">
           <li v-for="item in queue.active.value" :key="item.download_id" :class="ui.item">
-            <img v-if="item.thumbnail_url" :class="ui.thumb" :src="item.thumbnail_url" alt="" loading="lazy" />
-            <div v-else :class="ui.thumb"></div>
+            <LazyMedia :class="ui.thumb" media-class="size-full object-cover" :src="item.thumbnail_url || ''" :icon-size="18" />
             <div :class="ui.main">
               <strong class="truncate">{{ itemName(item) }}</strong>
               <div
@@ -241,8 +241,7 @@ watch(finishedCount, (value) => {
         <p v-if="!queue.waiting.value.length" :class="ui.empty">{{ t('downloads.noWaiting') }}</p>
         <ul v-else :class="ui.list">
           <li v-for="(item, index) in queue.waiting.value" :key="item.download_id" :class="ui.item">
-            <img v-if="item.thumbnail_url" :class="ui.thumb" :src="item.thumbnail_url" alt="" loading="lazy" />
-            <div v-else :class="ui.thumb"></div>
+            <LazyMedia :class="ui.thumb" media-class="size-full object-cover" :src="item.thumbnail_url || ''" :icon-size="18" />
             <div :class="ui.main">
               <strong class="truncate">{{ itemName(item) }}</strong>
               <div :class="ui.meta">
@@ -304,8 +303,7 @@ watch(finishedCount, (value) => {
       <p v-else-if="!history.length" :class="ui.empty">{{ t('downloads.noHistory') }}</p>
       <ul v-else :class="ui.list">
         <li v-for="item in history" :key="item.download_id" :class="ui.item">
-          <img v-if="item.thumbnail_url" :class="ui.thumbSm" :src="item.thumbnail_url" alt="" loading="lazy" />
-          <div v-else :class="ui.thumbSm"></div>
+          <LazyMedia :class="ui.thumbSm" media-class="size-full object-cover" :src="item.thumbnail_url || ''" :icon-size="16" />
           <div :class="ui.main">
             <strong class="truncate">{{ itemName(item) }}</strong>
             <div :class="ui.meta">

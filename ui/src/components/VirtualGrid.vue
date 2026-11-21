@@ -5,7 +5,8 @@
  * --lm-card-aspect and --lm-card-gap (base.css / density; built-in themes
  * do not override them, user themes may).
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useEventListener, useMutationObserver, useResizeObserver } from '@vueuse/core'
 
 const props = withDefaults(
   defineProps<{
@@ -72,42 +73,34 @@ function onScroll(): void {
   if (scroller.value) scrollTop.value = scroller.value.scrollTop
 }
 
-let resizeObserver: ResizeObserver | null = null
-let themeObserver: MutationObserver | null = null
-
-onMounted(() => {
-  readTokens()
+function measure(): void {
   const el = scroller.value
   if (!el) return
-  const measure = () => {
-    width.value = el.clientWidth - Number.parseFloat(getComputedStyle(el).paddingLeft) * 2
-    viewportHeight.value = el.clientHeight
-  }
+  width.value = el.clientWidth - Number.parseFloat(getComputedStyle(el).paddingLeft) * 2
+  viewportHeight.value = el.clientHeight
+}
+
+function remeasure(): void {
+  readTokens()
   measure()
-  resizeObserver = new ResizeObserver(measure)
-  resizeObserver.observe(el)
-  themeObserver = new MutationObserver(() => {
-    readTokens()
-    measure()
-  })
-  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'data-density', 'style'] })
-  // A user theme's stylesheet arrives after data-theme flips: re-read the tokens once it has loaded.
-  onSheetLoad = (event: Event) => {
-    if ((event.target as Element | null)?.tagName === 'LINK') {
-      readTokens()
-      measure()
-    }
-  }
-  document.addEventListener('load', onSheetLoad, true)
-})
+}
 
-let onSheetLoad: ((event: Event) => void) | null = null
-
-onBeforeUnmount(() => {
-  resizeObserver?.disconnect()
-  themeObserver?.disconnect()
-  if (onSheetLoad) document.removeEventListener('load', onSheetLoad, true)
+onMounted(remeasure)
+useResizeObserver(scroller, measure)
+// Theme / density switches change the card tokens.
+useMutationObserver(document.documentElement, remeasure, {
+  attributes: true,
+  attributeFilter: ['data-theme', 'data-density', 'style'],
 })
+// A user theme's stylesheet arrives after data-theme flips: re-read the tokens once it has loaded.
+useEventListener(
+  document,
+  'load',
+  (event: Event) => {
+    if ((event.target as Element | null)?.tagName === 'LINK') remeasure()
+  },
+  true,
+)
 
 // Ask for more data when the rendered window reaches the last rows.
 watch(

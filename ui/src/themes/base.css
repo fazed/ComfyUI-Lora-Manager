@@ -50,6 +50,8 @@
   /* Motion */
   --lm-motion-fast: 120ms;
   --lm-motion-normal: 200ms;
+  /* Fade-in of loaded images/videos (LazyMedia). */
+  --lm-fade-duration: 280ms;
   --lm-ease: cubic-bezier(0.2, 0, 0, 1);
 
   /* Shadows: the color part comes from --lm-color-shadow so themes can tint it */
@@ -76,6 +78,7 @@
   :root {
     --lm-motion-fast: 0ms;
     --lm-motion-normal: 0ms;
+    --lm-fade-duration: 0ms;
     --lm-card-zoom: 1;
   }
 }

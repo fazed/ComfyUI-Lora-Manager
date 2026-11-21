@@ -10,6 +10,7 @@
  */
 
 import { ref, shallowRef, type Ref } from 'vue'
+import { useTimeoutFn } from '@vueuse/core'
 import { apiSuggestSource } from '@/api/suggestSource'
 import {
   createSuggester,
@@ -50,12 +51,28 @@ export function useSuggestions(scope: () => string, source: SuggestSource = apiS
   const suggester = createSuggester(source, sharedCache)
   const result = shallowRef<SuggestResult | null>(null)
   const loading = ref(false)
-  let timer: ReturnType<typeof setTimeout> | null = null
   let seq = 0
+  let pending: { query: string; ticket: number } | null = null
+
+  // Debounce: the lookup runs SUGGEST_DEBOUNCE_MS after the last keystroke.
+  const debounce = useTimeoutFn(
+    () => {
+      const next = pending
+      pending = null
+      if (!next) return
+      void suggester.suggest(scope(), next.query).then((value) => {
+        if (value === null || next.ticket !== seq) return
+        result.value = value
+        loading.value = false
+      })
+    },
+    SUGGEST_DEBOUNCE_MS,
+    { immediate: false },
+  )
 
   function stop(): void {
-    if (timer) clearTimeout(timer)
-    timer = null
+    debounce.stop()
+    pending = null
     suggester.cancel()
     seq++
   }
@@ -77,15 +94,8 @@ export function useSuggestions(scope: () => string, source: SuggestSource = apiS
       return
     }
     loading.value = true
-    const ticket = ++seq
-    timer = setTimeout(() => {
-      timer = null
-      void suggester.suggest(scope(), query).then((value) => {
-        if (value === null || ticket !== seq) return
-        result.value = value
-        loading.value = false
-      })
-    }, SUGGEST_DEBOUNCE_MS)
+    pending = { query, ticket: ++seq }
+    debounce.start()
   }
 
   return { result, loading, request, reset }

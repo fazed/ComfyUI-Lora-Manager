@@ -46,10 +46,56 @@ ui/
   dist/                   build output - COMMITTED (users have no Node/Bun)
 ```
 
-Runtime dependencies: `vue`, `vue-router` only. No UI kit, no CDN, no
-runtime-fetched assets; icons are inline SVG paths using `currentColor`.
+Runtime dependencies: `vue`, `vue-router` and `@vueuse/core` (pinned 13.9.0,
+tree-shaken: only the imported functions end up in the bundle). No UI kit, no
+CDN, no runtime-fetched assets; icons are inline SVG paths using `currentColor`.
 Tailwind (`tailwindcss` + `@tailwindcss/vite`, pinned 4.3.5) is a build-time
 dev dependency only: the compiled, purged CSS ends up in `ui/dist`.
+
+### VueUse
+
+Prefer a VueUse function over hand-rolled listener/timer/observer code; it
+cleans up with the component scope. Currently used:
+
+- `useEventListener` (drawer keys, top-bar `/` and Ctrl/Cmd+K shortcut,
+  grid stylesheet loads, `useDismiss` Escape/outside listeners attached only
+  while an overlay is open);
+- `useResizeObserver`, `useMutationObserver` (VirtualGrid width and theme/density
+  token re-reads);
+- `useTimeoutFn` (search-suggestion debounce, library/recipes search apply,
+  LazyMedia placeholder removal);
+- `useLocalStorage` (theme choice, density, remembered toggles such as the
+  drawer specifications; same keys and plain-string values as before, written
+  on change only, blocked storage ignored);
+- `usePreferredDark` (the "System" theme follows the OS live).
+
+Kept custom on purpose: `createPoller` (shared, scope-less download poller with
+no-overlap rescheduling and visibility pause; `useIntervalFn` cannot express
+"next run after the previous finished"), `copyText` (`useClipboard` cannot
+report a failed copy, which the error toast needs), the per-library
+sort/card-size store (validated on read), `useFolderPanel` (writes only on wide
+viewports; tested with an injected width) and the grid virtualisation
+(`useVirtualList` is not a 2-D grid). No `useScrollLock`: the page body never
+scrolls (the grid and drawer scroll inside the app shell).
+
+### Media loading (LazyMedia)
+
+`components/LazyMedia.vue` renders every image/video (library cards, drawer
+cover, example thumbnails, version thumbs, lightbox, search thumbnails,
+downloads, recipes). The caller sizes the box (classes on the component), so
+loading never shifts the layout; `media-class` goes on the `<img>`/`<video>`
+(object-fit, `lm-zoom-media`, blur), so the card hover zoom still scales the
+media. States (`utils/mediaLoad.ts`): loading shows a `--lm-color-skeleton`
+placeholder with a subtle shimmer (starts after 250 ms, off for
+`prefers-reduced-motion`); loaded fades in over `--lm-fade-duration` after
+`img.decode()`; media that is already complete, or loads within 120 ms (cache,
+e.g. a card scrolled back into the virtual grid), appears at once; error/no
+src shows the `fallback` slot (default an image icon) and, with `retry`, a
+Retry button. A new `src` resets the state. Images use `loading="lazy"` and
+`decoding="async"` (the drawer cover and lightbox are `eager` with
+`fetchpriority="high"`); native lazy loading is used instead of an
+IntersectionObserver per card, because the virtual grid only renders rows near
+the viewport anyway.
 
 ### Backend route and prefix handling
 
@@ -309,7 +355,7 @@ Non-color tokens (defaults in `base.css`, any theme may override):
 | Radii | `--lm-radius-sm/md/lg/pill` |
 | Spacing | `--lm-space-1/2/3/4/5/6/8` (compact density shrinks them) |
 | Shadows | `--lm-shadow-sm/md/lg` |
-| Motion | `--lm-motion-fast`, `--lm-motion-normal`, `--lm-ease` (zeroed for `prefers-reduced-motion`) |
+| Motion | `--lm-motion-fast`, `--lm-motion-normal`, `--lm-fade-duration` (media fade-in), `--lm-ease` (durations zeroed for `prefers-reduced-motion`) |
 | Layout | `--lm-topbar-height`, `--lm-drawer-width`, `--lm-control-height`, `--lm-border-width`, `--lm-focus-ring-width` |
 | Cards | `--lm-card-aspect` (e.g. `2 / 3`), `--lm-card-gap` (card width comes from the per-library size slider), `--lm-card-zoom` (hover/focus zoom of card media, default `1.05`, `1` = off; forced to `1` for `prefers-reduced-motion`) |
 

@@ -7,8 +7,9 @@
  * second full-width row; on phones the tabs take the second row as a
  * segmented strip and the search sits next to the brand.
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useEventListener } from '@vueuse/core'
 import AppIcon from './AppIcon.vue'
 import AppMenu from './AppMenu.vue'
 import SearchCombobox from './SearchCombobox.vue'
@@ -85,8 +86,7 @@ function onShortcut(event: KeyboardEvent): void {
   search.value?.focus()
 }
 
-onMounted(() => document.addEventListener('keydown', onShortcut))
-onBeforeUnmount(() => document.removeEventListener('keydown', onShortcut))
+useEventListener(document, 'keydown', onShortcut)
 
 const iconButton = 'lm-btn lm-btn--ghost relative px-2'
 </script>

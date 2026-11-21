@@ -5,6 +5,7 @@
  */
 import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useTimeoutFn } from '@vueuse/core'
 import AppIcon from '@/components/AppIcon.vue'
 import BaseModelQuickFilter from '@/components/BaseModelQuickFilter.vue'
 import FolderTree from '@/components/FolderTree.vue'
@@ -121,22 +122,21 @@ function selectFolder(path: string): void {
 // Local search box: the text filters the grid after a short pause (or at once on Enter).
 const SEARCH_DEBOUNCE_MS = 250
 const searchText = ref(state.search)
-let searchTimer: ReturnType<typeof setTimeout> | null = null
+const { start: applyLater, stop: cancelApply } = useTimeoutFn(
+  () => (state.search = searchText.value.trim()),
+  SEARCH_DEBOUNCE_MS,
+  { immediate: false },
+)
 
 function commitSearch(value: string): void {
-  if (searchTimer) clearTimeout(searchTimer)
-  searchTimer = null
+  cancelApply()
   searchText.value = value
   state.search = value.trim()
 }
 
 watch(searchText, (value) => {
-  if (searchTimer) clearTimeout(searchTimer)
-  if (value.trim() === state.search) return
-  searchTimer = setTimeout(() => {
-    searchTimer = null
-    state.search = value.trim()
-  }, SEARCH_DEBOUNCE_MS)
+  cancelApply()
+  if (value.trim() !== state.search) applyLater()
 })
 // Chip removal / "Clear all" / route prefill update the box too.
 watch(
@@ -145,7 +145,6 @@ watch(
     if (searchText.value.trim() !== value) searchText.value = value
   },
 )
-onBeforeUnmount(() => searchTimer && clearTimeout(searchTimer))
 
 function onSearchChoose(option: SuggestOption): void {
   if (option.kind === 'item') openItem.value = option.item.payload as ModelItem

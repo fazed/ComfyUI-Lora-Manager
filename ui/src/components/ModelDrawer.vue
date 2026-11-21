@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useEventListener } from '@vueuse/core'
 import AppIcon from './AppIcon.vue'
 import ExampleLightbox from './ExampleLightbox.vue'
+import LazyMedia from './LazyMedia.vue'
 import StateBlock from './StateBlock.vue'
 import { downloadsApi, type ModelApi } from '@/api/endpoints'
 import type { ModelItem, ModelMetadata, ModelUpdateRecord } from '@/api/types'
@@ -254,15 +256,12 @@ function onKey(event: KeyboardEvent): void {
 let previousFocus: HTMLElement | null = null
 onMounted(async () => {
   previousFocus = document.activeElement as HTMLElement | null
-  document.addEventListener('keydown', onKey)
   void loadMetadata()
   await nextTick()
   closeButton.value?.focus()
 })
-onBeforeUnmount(() => {
-  document.removeEventListener('keydown', onKey)
-  previousFocus?.focus?.()
-})
+onBeforeUnmount(() => previousFocus?.focus?.())
+useEventListener(document, 'keydown', onKey)
 </script>
 
 <template>
@@ -337,16 +336,17 @@ onBeforeUnmount(() => {
               :class="previewUrl && (metaLoading || images.length) ? '@min-[460px]:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]' : ''"
             >
               <div v-if="previewUrl" class="flex items-center justify-center overflow-hidden rounded-md bg-sunken">
-                <video
-                  v-if="isVideoUrl(item.preview_url)"
-                  class="max-h-[420px] w-full object-contain"
+                <!-- Fixed-height box: the cover never shifts the layout while it loads. -->
+                <LazyMedia
+                  class="h-[min(420px,70vw)] w-full"
+                  media-class="size-full object-contain"
                   :src="previewUrl"
-                  muted
-                  loop
+                  loading="eager"
+                  fetchpriority="high"
                   autoplay
-                  playsinline
-                ></video>
-                <img v-else class="max-h-[420px] w-full object-contain" :src="previewUrl" alt="" />
+                  loop
+                  retry
+                />
               </div>
 
               <div v-if="metaLoading || images.length" class="flex min-w-0 flex-col gap-2" role="group" aria-labelledby="drawer-examples-title">
@@ -377,20 +377,12 @@ onBeforeUnmount(() => {
                       :title="imageHints[index] || undefined"
                       @click="openLightbox(index, $event)"
                     >
-                      <video
-                        v-if="image.type === 'video' || isVideoUrl(image.url)"
-                        class="lm-zoom-media size-full object-cover"
+                      <LazyMedia
+                        class="size-full"
+                        media-class="lm-zoom-media size-full object-cover"
                         :src="image.url"
-                        muted
-                        playsinline
-                        preload="metadata"
-                      ></video>
-                      <img
-                        v-else
-                        class="lm-zoom-media size-full object-cover"
-                        :src="image.url"
-                        alt=""
-                        loading="lazy"
+                        :kind="image.type === 'video' || isVideoUrl(image.url) ? 'video' : 'image'"
+                        :icon-size="20"
                       />
                       <span
                         v-if="image.type === 'video' || isVideoUrl(image.url)"
@@ -622,14 +614,12 @@ onBeforeUnmount(() => {
               :key="version.versionId"
               class="flex items-center gap-3 rounded-md hairline border-border p-2"
             >
-              <img
-                v-if="version.previewUrl && !isVideoUrl(version.previewUrl)"
+              <LazyMedia
                 class="lm-thumb h-[72px] w-[56px]"
-                :src="withMountPrefix(version.previewUrl)"
-                alt=""
-                loading="lazy"
+                media-class="size-full object-cover"
+                :src="version.previewUrl ? withMountPrefix(version.previewUrl) : ''"
+                :icon-size="18"
               />
-              <div v-else class="lm-thumb h-[72px] w-[56px]"></div>
               <div class="flex min-w-0 flex-1 flex-col gap-[2px]">
                 <strong>{{ version.name }}</strong>
                 <div class="flex flex-wrap gap-2 text-xs text-muted">

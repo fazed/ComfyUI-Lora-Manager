@@ -7,7 +7,8 @@
  * persists changes.
  */
 
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { useLocalStorage, usePreferredDark } from '@vueuse/core'
 import { themesApi } from '@/api/endpoints'
 import {
   BUILTIN_THEMES,
@@ -20,15 +21,25 @@ import {
   type ThemeDefinition,
 } from '@/themes/registry'
 import { appUrl } from '@/utils/basePath'
-import { readJson, readStorage, writeStorage } from '@/utils/storage'
+import { readJson, writeStorage } from '@/utils/storage'
 
 export type Density = 'comfortable' | 'compact'
 
-const choice = ref<string>(readStorage(THEME_STORAGE_KEY) || SYSTEM_THEME)
-const density = ref<Density>(readStorage(DENSITY_STORAGE_KEY) === 'compact' ? 'compact' : 'comfortable')
+// Stored as plain strings under the keys the pre-paint script in index.html reads;
+// written on change only, blocked storage is ignored.
+const storageOptions = { writeDefaults: false, onError: () => undefined } as const
+const choice = useLocalStorage<string>(THEME_STORAGE_KEY, SYSTEM_THEME, {
+  ...storageOptions,
+  serializer: { read: (raw) => raw || SYSTEM_THEME, write: (value) => value },
+})
+const density = useLocalStorage<Density>(DENSITY_STORAGE_KEY, 'comfortable', {
+  ...storageOptions,
+  serializer: { read: (raw) => (raw === 'compact' ? 'compact' : 'comfortable'), write: (value) => value },
+})
 const userThemes = ref<ThemeDefinition[]>([])
 const userThemesDir = ref('')
-const prefersDark = ref(false)
+// Live (prefers-color-scheme: dark); false where matchMedia is unavailable.
+const prefersDark = usePreferredDark()
 let initialised = false
 
 const available = computed<ThemeDefinition[]>(() => [...BUILTIN_THEMES, ...userThemes.value])
@@ -56,9 +67,8 @@ function apply(): void {
   }
 }
 
+/** The theme choice and density persist through their storage refs; the active user theme's stylesheet is cached here. */
 function persist(): void {
-  writeStorage(THEME_STORAGE_KEY, choice.value)
-  writeStorage(DENSITY_STORAGE_KEY, density.value)
   const theme = activeTheme.value
   writeStorage(
     USER_THEME_STORAGE_KEY,
@@ -81,16 +91,7 @@ async function loadUserThemes(): Promise<void> {
 function init(): void {
   if (initialised) return
   initialised = true
-  try {
-    const media = window.matchMedia('(prefers-color-scheme: dark)')
-    prefersDark.value = media.matches
-    media.addEventListener('change', (event) => {
-      prefersDark.value = event.matches
-      apply()
-    })
-  } catch {
-    prefersDark.value = false
-  }
+  watch(prefersDark, () => apply())
   // Seed the stored user theme so the first apply() keeps the stylesheet the
   // inline bootstrap already attached (no flash while the list loads).
   const stored = toUserTheme(readJson<unknown>(USER_THEME_STORAGE_KEY, null))
