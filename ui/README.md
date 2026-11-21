@@ -963,3 +963,162 @@ version id, and calls the blocking `POST /download-model` once per LoRA. The
 new UI instead feeds the version ids into the phase B1 download dialog as
 Civitai download links (`/api/download/models/<versionId>`), so they go
 through the queue worker like every other download.
+
+## Phase B2b discovery: example images, statistics, doctor, backups, settings
+
+Read from `py/routes/{example_images_*,stats_routes,update_routes}.py`,
+`py/routes/handlers/{example_images,misc}_handlers.py`,
+`py/utils/example_images_*.py`, `py/services/{backup_service,metadata_archive_manager,settings_manager}.py`
+and the classic `ExampleImagesManager.js`, `showcase/*`, `statistics.js`,
+`DoctorManager.js`, `EnvironmentPanel.js`, `SettingsManager.js` (+ the
+settings templates), `UpdateService.js`, `BannerService.js` before any B2b UI
+code was written. Pinned by `tests/routes/test_b2b_ui_contract.py`.
+
+### Example images (storage and endpoints)
+
+* **Root**: the `example_images_path` setting (default empty = feature off).
+  Layout is flat: `<root>/<sha256 lower>/`. Downloaded files are
+  `image_<i><ext>`, `i` = the **0-based position in `civitai.images`**;
+  imported files are `custom_<8-char id><ext>` with an entry in
+  `civitai.customImages[]` (`{id, url: "", nsfwLevel: 0, width, height, type,
+  meta, hasMeta, hasPositivePrompt}`). Supported: `.jpg .jpeg .png .webp .gif
+  .avif .jxl .mp4 .webm`. Root-level `.download_progress.json` and
+  `_deleted/` (cleanup bucket); a `.lm-examples-complete` marker per folder.
+* **Serving**: `/example_images_static/<hash>/<file>` is mounted **once at
+  startup and only if the path exists then**. Changing the path needs a
+  restart before new files are served. Even the read-only GETs create the
+  root folder (`ensure_library_root_exists`).
+* **Local vs remote** (classic resolver, ported to `utils/exampleImages.ts`):
+  a custom entry (string `id`) matches the file starting with `custom_<id>`;
+  a regular entry matches `image_<index>.` by its index **in the source
+  array** (the classic UI used the index after SFW filtering, which can point
+  at the wrong file; the new UI keeps the source index). The local file wins;
+  the remote `url` is the fallback; custom entries are local-only.
+* Endpoints (all JSON, under `/api/lm`):
+
+| Action | Endpoint | Behaviour |
+| --- | --- | --- |
+| Files of a model | `GET /example-image-files?model_hash=` | `{files:[{name, path, extension, is_video}]}`, unsorted, `[]` when the folder is missing; 400 without a configured path. |
+| Has files | `GET /has-example-images?model_hash=` | `{has_images}` (no `success` key). |
+| Download all | `POST /download-example-images {optimize, model_types}` | Starts a **background** job; 400 when one runs or no path is set. Skips models already complete or known-failed. Does not filter by NSFW. |
+| Status | `GET /example-images-status?compact=1` | `{is_downloading, status:{status idle/running/paused/stopping/stopped/completed/error, total, completed, current_model, errors[], last_error, elapsed_seconds, failure_summary, *_count}}`. |
+| Pause / resume / stop | `POST /pause-example-images`, `/resume-example-images`, `/stop-example-images` | 400 when there is nothing to pause/resume/stop. Stop lets running models finish. |
+| Download one model | `POST /force-download-example-images {model_hashes, optimize, model_types}` | **Synchronous** (the request stays open until done) and ignores the "already done / failed" state; `{result:{total, processed, successful, errors[]}}`. Existing `image_<i>` files are skipped, nothing is deleted. |
+| Import | `POST /import-example-images` multipart `model_hash`, `model_path`, `files` (one or more) | `shutil.copy2` into the hash folder as `custom_<id><ext>`, appends `customImages`, saves `.metadata.json`; returns `files`, `regular_images`, `custom_images`. Unsupported files are reported in `errors` (200 with `success:false` when all fail). |
+| Delete | `POST /delete-example-image {model_hash, short_id}` | **Only imported (custom) images**; `os.remove` (no recycle bin, **not reversible**) and the entry leaves `customImages`. 404 for an unknown id or a model without custom images. |
+| NSFW level | `POST /example-images/set-nsfw-level {model_hash, nsfw_level, source: civitai or custom, index or id}` | Sets `nsfwLevel` on that entry and saves the sidecar; no range check (the UI offers 1/2/4/8/16). |
+| Open folder | `POST /open-example-images-folder {model_hash}` | Per `example_images_open_mode`: `system` opens the explorer **on the server machine**, `clipboard` returns `{mode:"clipboard", path}`, `uri_template` returns `{mode:"uri", uri}`. 404 when the model has no folder. |
+| Cleanup | `POST /cleanup-example-image-folders` | Removes empty folders and **moves** orphaned hash folders to `_deleted/` (does not know "Other" models). Not ported. |
+
+* **Path validation** (`POST /settings {example_images_path}`): only when
+  non-empty and changed; the folder must exist, be a directory and contain
+  only hash folders / `_deleted` / the progress file / dotfiles; otherwise
+  HTTP 200 `{success:false, error}`. Nothing is created or migrated.
+* Other keys: `auto_download_example_images` (auto mode: a check every 30
+  min while the classic UI is open, plus a server-side download after each
+  model download), `optimize_example_images` (resized renditions),
+  `example_images_open_mode`, `example_images_local_root`,
+  `example_images_open_uri_template`; the throttling keys are internal.
+
+### Statistics
+
+All `GET /api/lm/stats/*` are read-only (in-memory usage dict + scanner
+caches): `collection-overview` (counts, sizes, unused per type,
+`model_types_distribution`), `usage-analytics` (top 10 per type, a 30-day
+`usage_timeline`), `model-usage-list?type=&sort=&limit=&offset=` (all models
+of a type, paged), `base-model-distribution`, `tag-analytics` (top 50 tags),
+`storage-analytics` (top 20 by size per type), `insights` (rule keys +
+params, translated by the client). "Unused" = the hash never appeared in the
+usage stats.
+
+### Doctor
+
+`GET /doctor/diagnostics?clientVersion=` returns five checks
+(`civitai_api_key`, `cache_health`, `filename_conflicts`,
+`sidecar_mirror_orphans`, `ui_version`) with `status ok|warning|error`,
+`summary`, `details` (strings or objects) and `actions`. It changes no data,
+but **with an API key set it makes one live request to Civitai**
+(`/models?limit=1`) and may initialise the persistent cache schema. Fixes:
+
+* `repair-cache` (POST, no body): full rescan of every root and rewrite of the
+  persistent SQLite cache (no model or sidecar file is touched; slow,
+  idempotent). Classic: no confirm. New UI: confirm.
+* `resolve-filename-conflicts` (POST): **renames files on disk** - for each
+  duplicate file name the first copy keeps its name, every other copy gets
+  `<name>-<4 hex of its hash>` (model, `.metadata.json`, `.civitai.info`,
+  previews). No undo. Workflows that refer to the old name (legacy syntax)
+  must be updated. The check looks at LoRAs only, the fix at every scanner.
+  No-op with `lora_syntax_format=full`. Classic and new UI: danger confirm
+  with the counts.
+* `export-bundle` (POST): an in-memory zip (report, sanitized settings,
+  logs); nothing is written on the server.
+* `open-settings`, `open-settings-syntax-format`, `reload-page`: client-only.
+
+`GET /environment` (versions, read-only), `GET /version-info` (local) and
+`GET /check-updates?nightly=` (**network: GitHub API**, read-only). **Not
+ported** (destructive): `POST /perform-update` and `POST /switch-channel`
+(git reset/clean/pull or ZIP overwrite of the plugin folder).
+
+### Backups and metadata archive
+
+* **Contents**: `settings.json`, `cache/download_history/downloaded_versions.sqlite`,
+  `cache/symlink/symlink_map.json`, every `cache/model_update/*.sqlite` and
+  `stats/lora_manager_stats.json`, plus a `manifest.json` with the sha256 of
+  every file. No models, sidecars, previews, recipes or the metadata archive.
+* **Location**: `<settings dir>/backups/lora-manager-backup-<UTC>-<auto|manual>.zip`.
+  `GET /backup/status` lists them (`snapshots[{name, path, size, mtime, is_auto}]`
+  newest first, plus `status{backupDir, enabled, retentionCount, ...}`).
+* **Create** = `POST /backup/export`: builds the zip in a temp file in the
+  backup folder, returns it as a download and deletes the temp file. Nothing
+  stays on the server and nothing is pruned. Only the daily **auto**
+  snapshot (`backup_auto_enabled`, every 24 h) is stored, and storing one
+  prunes auto snapshots beyond `backup_retention_count` (manual files are
+  never pruned).
+* **Delete**: there is **no endpoint**; old auto snapshots are only pruned
+  by retention. The new UI offers "Open backup folder" instead.
+* **Restore** = `POST /backup/import` (multipart file): validates the zip,
+  `manifest_version` 1, relative member paths and every sha256 **before**
+  replacing anything; targets come from the `kind`, never from the archive
+  (no path traversal). Then `os.replace` over the files above. **No safety
+  backup, not transactional, no reload**: the running backend keeps its
+  in-memory settings and a later save can write them back, so **ComfyUI must
+  be restarted** after a restore. A bad archive is a 400.
+* **Metadata archive**: `GET /metadata-archive-status`
+  (`isAvailable, isEnabled, databaseSize, databasePath`),
+  `POST /download-metadata-archive?download_id=` (**blocks until a
+  multi-GB download from GitHub/HuggingFace is extracted** to
+  `<plugin>/civitai/civitai.sqlite`, overwriting it; progress only over the
+  `/ws/download-progress` WebSocket; sets `enable_metadata_archive_db`),
+  `POST /remove-metadata-archive` (deletes the database folder, unsets the
+  setting).
+
+### Settings
+
+* `GET /settings` returns every key except `hash_chunk_size_mb`,
+  `download_stall_timeout_seconds`, `folder_paths` (plugin mode), `libraries`,
+  `active_library` and the three API keys (`civitai_api_key`,
+  `huggingface_api_key`, `llm_api_key`), which come back only as `*_set`
+  booleans. **`proxy_password` and `proxy_username` are returned in clear**;
+  the new UI drops the password on read and only shows "configured".
+* `POST /settings` takes a partial object and handles keys **in order**,
+  skipping unchanged values. Validation (HTTP 200 `{success:false}`):
+  `example_images_path`, `update_channel`, `download_queue_max_concurrent`
+  (int 1-5). A `ValueError` of the manager (recipes path, overlapping
+  checkpoint/unet folders, unknown other sub type) is HTTP 500 text.
+  **Every key is written to `settings.json` as it is processed, so keys
+  before a failing one are already saved** (the new UI sends validated keys
+  first and re-reads the settings after any error). `"__DELETE__"` removes
+  `proxy_username` / `proxy_password`.
+* Side effects: proxy keys refresh the download session; the four metadata
+  provider keys re-register the providers; `download_queue_max_concurrent`
+  wakes the queue; `model_name_display` re-sorts; **`recipes_path` moves
+  every recipe file**; `use_portable_settings` relocates `settings.json`;
+  `sidecar_storage_*` needs a migration; other-models / workflows / wildcards
+  toggles and paths rebuild roots live; `extra_folder_paths` and
+  `folder_paths` need a **restart**; `language` only affects the classic UI.
+* The file is rewritten whole on every key (`json.dump(indent=2)`, only
+  non-default values plus `civitai_api_key` and `folder_paths`, insertion
+  order). Secrets are stored in plain text. The handler never logs values,
+  but `downloader.py` logs the proxy URL (with credentials) at debug level.
+* No libraries endpoints exist; there is no LLM "test connection" endpoint
+  (`GET /llm/provider-models`, `GET /llm/models?provider=&api_base=` list models).
