@@ -589,3 +589,66 @@ Left to the classic UI for now (linked from the new UI):
   the rest of the settings.
 * WebSocket progress (the new UI polls instead), "send to workflow" for
   checkpoints, embeddings and recipes, translations other than English.
+
+## Phase B1 discovery: downloads and model tools (backend semantics)
+
+Read from `py/routes/handlers/model_handlers.py`, `py/services/*` and the
+classic `static/js` flows before any B1 code was written. Paths below are
+relative to `py/`.
+
+### Downloads
+
+* **Resolve**: `GET /api/lm/{prefix}/civitai/versions/{model_id}` returns a
+  bare array of Civitai `modelVersions[]` (`id`, `name`, `baseModel`,
+  `createdAt`, `availability`, `images[]`, `files[{id, name, type, sizeKB,
+  primary, metadata{format,size,fp}}]`) enriched with `existsLocally`
+  (version id in this type's cache), `localPath`, `hasBeenDownloaded`
+  (download history), `downloadedFiles[{fileId, fileName, filePath}]`,
+  `modelSizeKB`, `modelTags`. `400 "Model type mismatch"` when the model is
+  of another type. A Civitai download link (`/api/download/models/{versionId}`)
+  is resolved to its model id with `GET /api/lm/{prefix}/civitai/model/version/{id}`
+  (`.modelId`). All of these are read-only.
+* **Queue**: `GET /api/lm/downloads/queue/add` (fork queue) accepted only
+  `model_id`, `model_version_id`, `model_name`, `version_name`,
+  `thumbnail_url`, `source`, `file_params` (JSON); the worker always started
+  rows with `use_default_paths: true` (default root of the type + download
+  path template). Dedup: the same `download_id`, or the same model with an
+  overlapping version and file, is `duplicate: true, reason: "already_queued"`.
+* **Classic dialog** (`DownloadManager.js`) instead calls
+  `POST /api/lm/download-model {model_id, model_version_id, model_root,
+  relative_path, use_default_paths, use_save_dir_as_root, file_params}`, which
+  blocks until the file is downloaded and **bypasses the fork's queue,
+  concurrency limit and history**. With `use_default_paths` the backend
+  ignores `relative_path` and computes it from `download_path_templates`
+  (`{base_model}`, `{first_tag}`, `{author}`, `{model_name}`; empty = flat);
+  the root is the type's default root unless `use_save_dir_as_root` keeps the
+  given `model_root`. Without default paths `model_root/relative_path` is used
+  as given (traversal-checked, **not** checked against the library roots).
+* **B1 decision**: the queue now stores an optional **destination** (see
+  "Phase B1" below) so the new dialog's root/folder choice still goes through
+  the queue worker.
+* `BulkMissingLoraDownloadManager.js` is recipe-only (missing LoRAs of
+  recipes, one `download-model` POST per LoRA with default paths) and is left
+  to phase B2 with the recipes.
+
+### Model tools
+
+| Action | Endpoint | Behaviour |
+| --- | --- | --- |
+| Excluded list | `GET /{prefix}/excluded` (`page`, `page_size` max 100, `sort_by`, `search`; other filters are ignored) | Paged like `/list`. **Not purely read-only**: drops stale paths from the excluded list and creates a default `.metadata.json` (hashing the file) for an excluded model without one. `POST /{prefix}/unexclude {file_path}` sets `exclude: false` and re-adds the cache entry. |
+| Find duplicates | `GET /{prefix}/find-duplicates` (filters `base_model`, `tag_include`, `folder`, `favorites_only`) | Read-only: groups of the in-memory hash index (`{duplicates: [{hash, models[]}], count}`), "original-looking" names first. Models without a hash (pending checkpoints) never appear. |
+| Verify group | `POST /{prefix}/verify-duplicates {file_paths}` | Re-hashes every file (full read). **Writes**: a file whose real hash differs from the stored one gets the new `sha256` in its sidecar and cache. Returns `verified_as_duplicates`, `mismatched_files`, `new_hash_map`. |
+| Filename conflicts | `GET /{prefix}/find-filename-conflicts` | Read-only; same stem in several folders (`{conflicts: [{filename, models[]}]}`); always empty when `lora_syntax_format` is `full`. |
+| Delete duplicates | `POST /{prefix}/bulk-delete` | Same staged delete + 20 s undo as phase A. The classic UI does not stop you from deleting every copy of a group. |
+| Replace preview | `POST /{prefix}/replace-preview` multipart, field order `preview_file`, `model_path`, `nsfw_level` | **Deletes every existing preview** of the model (all `PREVIEW_EXTENSIONS`), then writes the new one: images re-encoded to `.webp` (card width, quality 85, metadata stripped), GIF/video kept. Sets `preview_url` and `preview_nsfw_level` (omitted = **0**) in the sidecar and cache. Errors are plain text 500. |
+| Preview from URL | `POST /{prefix}/set-preview-from-url {model_path, image_url, nsfw_level}` | Downloads the image (no auth) and runs the same replace. 400/502/500 JSON. |
+| NSFW level | `POST /{prefix}/save-metadata {file_path, preview_nsfw_level}` | No dedicated endpoint, no validation. Levels: 1 PG, 2 PG-13, 4 R, 8 X, 16 XXX (0 unrated, 32 blocked is never offered). |
+| Bulk base model / favorite / rating | none | There is **no bulk endpoint**: the classic BulkManager loops `save-metadata` per model. `save-metadata` stores **any key** it is sent (dicts are shallow-merged, `tags` normalised); 409 when the file is gone. |
+| Refresh from Civitai | `POST /{prefix}/fetch-civitai {file_path}` | Re-fetches by hash. **Overwrites** `model_name` and `base_model`; merges the `civitai` dict (trained words unioned, a manual creator kept); fills `modelDescription`/`tags` only when empty; keeps notes, favorite, usage tips, NSFW level, user tags; downloads a preview only when none exists. Failure is `success: false` with HTTP 200. |
+| Re-link | `POST /{prefix}/relink-civitai {file_path, model_id, model_version_id?, source?}` | Points the metadata at another Civitai model/version with the same merge; never touches the model file nor an existing `sha256`. |
+| Fetch all | `POST /{prefix}/fetch-all-civitai {}` | Whole type, skips models that already have a Civitai id; blocks until done; progress only over the `/ws/fetch-progress` WebSocket (no polling endpoint). |
+| Filename template | `GET|POST /{prefix}/apply-filename-template` (`dry_run`, `file_paths`, `folder_paths`) | **A GET without `dry_run` renames for real.** Uses the type's `download_filename_templates` (empty = revert to `original_file_name`). The real run renames model + sidecars + previews like Rename (conflict = failure, batch continues); the dry run returns `planned_moves[{model, from, to}]`. Shares the auto-organize lock (409). |
+| Create folder | `POST /{prefix}/create-folder {folder_path}` (absolute, inside a root) | `makedirs(exist_ok)`; `created` false when it existed. |
+| Rename folder | `POST /{prefix}/rename-folder {folder_path, new_name}` | One segment; renames on disk **with its models** and rewrites cache entries and on-disk sidecars. 409 `target_exists`/`busy`; 400 root, symlink, recipes dir, missing. |
+| Delete folder | `POST /{prefix}/delete-folder {folder_path, dry_run?}` | **Refuses (409 `not_empty`) when any model file is inside** (excluded ones count); otherwise removes the folder **recursively including leftover non-model files** (`manifest`: `file_count`, `dir_count`, `total_bytes`, `restorable`). 400 for a root, symlink, the recipes dir; a missing folder is forgotten. |
+| Move with default path | `move_model` / `move_models_bulk` with `use_default_paths: true` and `target_path` = a root | The server joins the download path template for each model (falls back to the root when it yields nothing). |
