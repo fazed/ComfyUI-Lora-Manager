@@ -352,7 +352,13 @@ onBeforeUnmount(() => {
                 </h3>
                 <div
                   class="flex gap-2 overflow-x-auto pb-1 @min-[460px]:grid @min-[460px]:max-h-[392px] @min-[460px]:content-start @min-[460px]:overflow-x-visible @min-[460px]:overflow-y-auto @min-[460px]:pb-0"
-                  :class="previewUrl ? '@min-[460px]:grid-cols-3' : '@min-[460px]:grid-cols-4'"
+                  :class="
+                    !previewUrl
+                      ? '@min-[460px]:grid-cols-4'
+                      : images.length <= 4
+                        ? '@min-[460px]:grid-cols-2'
+                        : '@min-[460px]:grid-cols-3'
+                  "
                 >
                   <template v-if="metaLoading">
                     <div v-for="n in 6" :key="n" class="lm-skeleton size-[88px] flex-none rounded-sm @min-[460px]:aspect-square @min-[460px]:size-auto"></div>

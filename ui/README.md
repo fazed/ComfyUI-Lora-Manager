@@ -25,7 +25,8 @@ ui/
                           useDownloadQueue (shared poller), useTheme,
                           useLibraryFilters, useAppSettings, useFeedback, useSearch
     components/           AppSidebar, TopBar, ThemeMenu/ThemeOptions, VirtualGrid,
-                          ModelCard, ModelDrawer, FolderTree, StateBlock, ...
+                          ModelCard, ModelDrawer, ExampleLightbox,
+                          BaseModelQuickFilter, NodePickerDialog, FolderTree, ...
     pages/                LibraryPage (generic, per model type), RecipesPage,
                           DownloadsPage, SettingsPage, NotFoundPage
     config/libraries.ts   per-type config (loras / checkpoints / embeddings)
@@ -297,6 +298,50 @@ Non-color tokens (defaults in `base.css`, any theme may override):
 The virtualised grid reads `--lm-card-aspect` and `--lm-card-gap` at runtime,
 so a theme or density switch re-lays out the grid.
 
+## Library quick filter, detail drawer and "Send to ComfyUI"
+
+* **Base-model quick filter** (`components/BaseModelQuickFilter.vue`): a
+  horizontally scrolling chip row under the library toolbar, built from
+  `GET /api/lm/{prefix}/base-models` (count desc, `utils/baseModelChips.ts`).
+  "All" clears the base-model filter; the top N chips (per library:
+  `quickBaseModels` in `config/libraries.ts`, 8 for LoRAs and checkpoints, 0 =
+  off for embeddings) toggle it, the rest sit in a "More" popover. Multi-select
+  works (the list endpoint takes repeated `base_model`). The chips write to the
+  same `state.baseModels` of `useLibraryFilters` as the filter panel and the
+  active-filter chips, so there is one source of truth and nothing extra is
+  persisted. A selected base model from "More" joins the visible row.
+* **Detail drawer** tabs: Overview, Description, Versions (the Examples tab is
+  gone). The overview shows the cover with the example thumbnails beside it
+  when the drawer is wide (container query at 460px) and as a horizontal strip
+  under it when narrow. Thumbnails open `ExampleLightbox.vue` (modal `<dialog>`,
+  arrow keys, Escape, focus returns to the thumbnail) with the generation data
+  of Civitai `images[].meta` normalised by `utils/generation.ts`: prompt and
+  negative prompt with copy buttons, parameter chips (model, sampler,
+  scheduler, steps, CFG, seed, size, clip skip, denoise, VAE) and resources;
+  "No generation data" when the image has none. Thumbnails with a prompt get a
+  small text badge and the prompt as tooltip.
+* **Tags** are uniform pills (click = filter the library by that tag and close
+  the drawer, x = remove), collapsed after 12 with "+N more"
+  (`utils/tags.ts`). **Specifications** (file name, path, folder, base model,
+  type, file type, size, dates, hash; copy path/hash) are a collapsible
+  section, closed by default, remembered in `localStorage`
+  (`lm-ui.detail.specsOpen`, `composables/usePersistentToggle.ts`).
+* **Send to ComfyUI** (LoRAs, `config.sendToComfy`): a button on every card
+  (shown on hover/focus, always on touch devices; Shift+click replaces), one
+  in the drawer header, and Send / Replace / Copy LoRA syntax with a strength
+  field in the overview. Same flow as the classic UI
+  (`utils/workflow.ts`, `composables/useSendToWorkflow.ts`):
+  `GET /api/lm/get-registry` lists the nodes of the open ComfyUI tabs, enabled
+  LoRA-capable nodes not excluded by `send_to_workflow_exclusions` are kept,
+  several targets open a node picker, and `POST /api/lm/update-lora-code`
+  `{lora_code, mode: append|replace, node_ids: [{node_id, graph_id}]}` makes
+  the backend push `lora_code_update` over the PromptServer websocket. The
+  syntax follows `lora_syntax_format` (legacy = bare file name) and the usage
+  tips strength; copying adds trigger words when `include_trigger_words` is
+  on. Without an open workflow, in standalone mode or when no LoRA node is
+  found, a warning toast offers "Copy syntax" instead. Checkpoint/embedding
+  "send to workflow" is still classic-UI only.
+
 ## Phase 1 scope and roadmap
 
 Covered in phase 1:
@@ -306,12 +351,14 @@ Covered in phase 1:
   link, keyboard focus styles, aria labels.
 * Library pages for LoRAs, checkpoints and embeddings (one generic page):
   virtualised infinite grid, folder tree, search, sort, base-model and tag
-  filters with active-filter chips, favorites/updates toggles, card-size
+  filters with active-filter chips and a base-model quick filter,
+  favorites/updates toggles, card-size
   slider, selection mode (copy file names; bulk actions link to classic UI),
   favorite toggle on cards.
-* Detail drawer: preview, trigger words with copy, tags editor, notes, file
-  metadata, Civitai link, example gallery (from Civitai metadata), versions
-  with in-library badges and "queue download", sanitized description.
+* Detail drawer: preview with example thumbnails and a lightbox with
+  generation data, trigger words with copy, tags editor, notes, collapsible
+  specifications, Civitai link, versions with in-library badges and "queue
+  download", sanitized description; "Send to ComfyUI" for LoRAs.
 * Downloads: active downloads with progress and speed, waiting queue with
   move top/end/remove, history with retry / retry failed / delete / clear,
   global pause/resume, add by Civitai URL or model id. Polls every 1.5 s only
@@ -331,5 +378,5 @@ Left to the classic UI for now (linked from the new UI):
 * Local example images (download, import, delete, NSFW levels), statistics
   page, doctor/diagnostics, backups, metadata archive, LLM settings, proxy and
   the rest of the settings.
-* WebSocket progress (the new UI polls instead), "send to workflow",
-  translations other than English.
+* WebSocket progress (the new UI polls instead), "send to workflow" for
+  checkpoints, embeddings and recipes, translations other than English.
