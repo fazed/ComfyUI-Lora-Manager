@@ -36,7 +36,7 @@ const verified = ref<Set<string>>(new Set())
 const verifying = ref<string | null>(null)
 const busy = ref(false)
 
-const deleteError = computed(() => duplicateDeleteError(groups.value, selected.value))
+const deleteError = computed(() => duplicateDeleteError(groups.value, selected.value, mismatched.value))
 const selectedItems = computed(() => groups.value.flatMap((group) => group.models).filter((model) => selected.value.has(model.file_path)))
 
 async function load(): Promise<void> {
@@ -180,7 +180,7 @@ function folderOf(model: ModelItem): string {
                 </label>
                 <button type="button" class="block cursor-pointer overflow-hidden rounded-sm" :title="model.file_path" @click="emit('open', model)">
                   <LazyMedia
-                    class="aspect-card w-full"
+                    class="aspect-card max-h-[220px] w-full"
                     :media-class="['size-full object-cover', blurMature && (model.preview_nsfw_level ?? 0) >= 4 && 'scale-110 blur-[18px]']"
                     :src="model.preview_url ? withMountPrefix(model.preview_url) : ''"
                   />

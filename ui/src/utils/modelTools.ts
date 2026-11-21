@@ -86,12 +86,19 @@ export function summarizeTemplatePlan(response: OrganizeResponse): TemplatePlan 
 
 /**
  * Why the current duplicate selection cannot be deleted: nothing selected, or
- * every copy of a group selected (one copy must always stay).
+ * every copy of a group selected (one copy must always stay). Files that
+ * "Verify" found to differ (`notDuplicates`) are not copies, so they do not
+ * count as the kept one.
  */
-export function duplicateDeleteError(groups: DuplicateGroup[], selected: Set<string>): 'none' | 'keepOne' | null {
+export function duplicateDeleteError(
+  groups: DuplicateGroup[],
+  selected: Set<string>,
+  notDuplicates: Set<string> = new Set(),
+): 'none' | 'keepOne' | null {
   if (!selected.size) return 'none'
   for (const group of groups) {
-    if (group.models.length && group.models.every((model) => selected.has(model.file_path))) return 'keepOne'
+    const copies = group.models.filter((model) => !notDuplicates.has(model.file_path))
+    if (copies.length && copies.every((model) => selected.has(model.file_path))) return 'keepOne'
   }
   return null
 }

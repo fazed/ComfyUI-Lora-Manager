@@ -94,6 +94,10 @@ describe('model tool helpers', () => {
     expect(duplicateDeleteError([group], new Set())).toBe('none')
     expect(duplicateDeleteError([group], new Set([group.models[1].file_path]))).toBeNull()
     expect(duplicateDeleteError([group], new Set(group.models.map((m) => m.file_path)))).toBe('keepOne')
+    // A file "Verify" proved different is not a copy: the other two may not both go.
+    const different = new Set([group.models[2].file_path])
+    expect(duplicateDeleteError([group], new Set([group.models[0].file_path, group.models[1].file_path]), different)).toBe('keepOne')
+    expect(duplicateDeleteError([group], new Set([group.models[1].file_path]), different)).toBeNull()
   })
 
   it('drops deleted models and groups that are no longer duplicates', () => {

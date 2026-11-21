@@ -40,9 +40,23 @@ function items(): HTMLButtonElement[] {
   return [...(menu.value?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not([disabled])') ?? [])]
 }
 
+// Fixed position from the button rect, so a scrolling/clipping parent (the folder panel) never cuts the menu.
+const MENU_WIDTH = 260
+const position = ref<Record<string, string>>({})
+
+function place(): void {
+  const rect = button.value?.getBoundingClientRect()
+  if (!rect) return
+  const viewport = window.innerWidth
+  const preferred = props.align === 'right' ? rect.right - MENU_WIDTH : rect.left
+  const left = Math.max(8, Math.min(preferred, viewport - MENU_WIDTH - 8))
+  position.value = { top: `${rect.bottom + 4}px`, left: `${left}px`, width: `${Math.min(MENU_WIDTH, viewport - 16)}px` }
+}
+
 async function toggle(): Promise<void> {
   open.value = !open.value
   if (open.value) {
+    place()
     await nextTick()
     items()[0]?.focus()
   }
@@ -89,8 +103,8 @@ function choose(entry: MenuEntry): void {
       v-if="open"
       :id="menuId"
       ref="menu"
-      class="absolute top-[calc(100%+var(--lm-space-1))] z-70 flex w-max min-w-[220px] max-w-[min(320px,calc(100vw-24px))] flex-col rounded-md hairline border-border bg-elevated p-1 shadow-lg"
-      :class="align === 'right' ? 'right-0' : 'left-0'"
+      class="fixed z-70 flex flex-col rounded-md hairline border-border bg-elevated p-1 shadow-lg"
+      :style="position"
       role="menu"
       :aria-label="label"
       @keydown="onKey"

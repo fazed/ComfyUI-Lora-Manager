@@ -337,6 +337,11 @@ const template = computed(() => {
   return templates && typeof templates === 'object' ? String((templates as Record<string, unknown>)[config.singular] ?? '') : ''
 })
 
+const filenameTemplate = computed(() => {
+  const templates = settings.value?.download_filename_templates
+  return templates && typeof templates === 'object' ? String((templates as Record<string, unknown>)[config.singular] ?? '') : ''
+})
+
 const toolItems = computed<MenuEntry[]>(() => [
   { id: 'download', label: t('download.open'), icon: 'download' },
   { id: 'duplicates', label: t('tools.duplicates'), icon: 'files' },
@@ -794,7 +799,14 @@ function bulkSend(event: MouseEvent): void {
       :submit="submitRelink"
       @close="relinkTarget = null"
     />
-    <TemplateDialog v-if="templateTarget" :tools="tools" :scope="templateTarget.scope" :scope-label="templateTarget.label" @close="templateTarget = null" />
+    <TemplateDialog
+      v-if="templateTarget"
+      :tools="tools"
+      :scope="templateTarget.scope"
+      :scope-label="templateTarget.label"
+      :template="filenameTemplate"
+      @close="templateTarget = null"
+    />
     <FolderDialog
       v-if="folderDialog"
       :mode="folderDialog.mode"

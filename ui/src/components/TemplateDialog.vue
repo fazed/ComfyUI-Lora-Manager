@@ -13,7 +13,8 @@ import type { ModelTools } from '@/composables/useModelTools'
 import type { TemplatePlan } from '@/utils/modelTools'
 import { t } from '@/i18n'
 
-const props = defineProps<{ tools: ModelTools; scope: TemplateScope; scopeLabel: string }>()
+/** `template`: the type's filename template from Settings (the dry run does not report it). */
+const props = defineProps<{ tools: ModelTools; scope: TemplateScope; scopeLabel: string; template: string }>()
 const emit = defineEmits<{ close: [] }>()
 
 const SHOWN = 200
@@ -25,7 +26,9 @@ const hasRenames = computed(() => (plan.value?.renames.length ?? 0) > 0)
 
 async function preview(): Promise<void> {
   loading.value = true
-  plan.value = await props.tools.previewTemplate(props.scope)
+  const result = await props.tools.previewTemplate(props.scope)
+  if (result && !result.template) result.template = props.template || null
+  plan.value = result
   loading.value = false
 }
 

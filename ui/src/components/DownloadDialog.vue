@@ -7,7 +7,7 @@
  * Resolving uses read-only lookups only; "Add to queue" calls
  * `downloads/queue/add` (the queue worker starts the downloads).
  */
-import { computed, onMounted, ref, shallowRef, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, shallowRef, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import AppIcon from './AppIcon.vue'
 import LazyMedia from './LazyMedia.vue'
@@ -69,8 +69,19 @@ function onRootChange(event: Event): void {
   void f.value.setRoot((event.target as HTMLSelectElement).value)
 }
 
+// `relative` keeps the visually hidden radio inside its row, so focusing it never scrolls the dialog itself.
 const versionRow =
-  'lm-row flex cursor-pointer items-start gap-3 p-2 has-focus-visible:focus-ring hairline border-border rounded-md'
+  'lm-row relative flex cursor-pointer items-start gap-3 p-2 has-focus-visible:focus-ring hairline border-border rounded-md'
+
+// Show the preselected version (e.g. from ?modelVersionId=) in the list.
+watch(
+  () => f.value.step.value,
+  async (step) => {
+    if (step !== 'version') return
+    await nextTick()
+    document.querySelector('input[name="download-version"]:checked')?.closest('label')?.scrollIntoView({ block: 'nearest' })
+  },
+)
 </script>
 
 <template>
