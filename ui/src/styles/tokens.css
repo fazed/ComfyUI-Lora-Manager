@@ -1,0 +1,187 @@
+/*
+ * Tailwind <-> design token bridge (the only place utilities are defined).
+ *
+ * Every theme value points at a --lm-* custom property from src/themes/, so
+ * utilities such as bg-surface, text-muted, rounded-md, shadow-md, p-4 or
+ * gap-card change with data-theme, data-density and user themes.
+ *
+ * `inline` makes utilities emit var(--lm-...) directly instead of an
+ * intermediate --color-* variable resolved on :root; that keeps elements that
+ * carry their own data-theme (the theme picker swatches) working.
+ *
+ * Tailwind's default palette and scales are reset (`initial`) so raw values
+ * like bg-blue-500 or rounded-xl do not exist. Spacing keeps no multiplier:
+ * only the token steps below generate p-*, m-*, gap-*, w-*, h-* utilities;
+ * fixed geometry (icon boxes, thumbnails) uses arbitrary px values.
+ */
+@theme inline {
+  /* Colors: tokens only. */
+  --color-*: initial;
+  --color-page: var(--lm-color-bg);
+  --color-surface: var(--lm-color-surface);
+  --color-elevated: var(--lm-color-elevated);
+  --color-sunken: var(--lm-color-sunken);
+  --color-border: var(--lm-color-border);
+  --color-border-strong: var(--lm-color-border-strong);
+  --color-fg: var(--lm-color-text);
+  --color-muted: var(--lm-color-muted);
+  --color-accent: var(--lm-color-accent);
+  --color-accent-hover: var(--lm-color-accent-hover);
+  --color-accent-soft: var(--lm-color-accent-soft);
+  --color-on-accent: var(--lm-color-on-accent);
+  --color-danger: var(--lm-color-danger);
+  --color-danger-soft: var(--lm-color-danger-soft);
+  --color-on-danger: var(--lm-color-on-danger);
+  --color-success: var(--lm-color-success);
+  --color-success-soft: var(--lm-color-success-soft);
+  --color-warning: var(--lm-color-warning);
+  --color-warning-soft: var(--lm-color-warning-soft);
+  --color-focus: var(--lm-color-focus);
+  --color-overlay: var(--lm-color-overlay);
+  --color-scrim: var(--lm-color-scrim);
+  --color-on-scrim: var(--lm-color-on-scrim);
+  --color-skeleton: var(--lm-color-skeleton);
+  --color-shadow: var(--lm-color-shadow);
+
+  /* Typography */
+  --font-*: initial;
+  --font-sans: var(--lm-font-sans);
+  --font-mono: var(--lm-font-mono);
+  --default-font-family: var(--lm-font-sans);
+  --default-mono-font-family: var(--lm-font-mono);
+  --text-*: initial;
+  --text-xs: var(--lm-font-size-xs);
+  --text-sm: var(--lm-font-size-sm);
+  --text-md: var(--lm-font-size-md);
+  --text-lg: var(--lm-font-size-lg);
+  --text-xl: var(--lm-font-size-xl);
+  --text-2xl: var(--lm-font-size-2xl);
+  --font-weight-*: initial;
+  --font-weight-regular: var(--lm-font-weight-regular);
+  --font-weight-medium: var(--lm-font-weight-medium);
+  --font-weight-bold: var(--lm-font-weight-bold);
+  --leading-*: initial;
+  --leading-normal: var(--lm-line-height);
+  --leading-tight: var(--lm-line-height-tight);
+
+  /* Spacing (density aware) and layout sizes */
+  --spacing: initial;
+  --spacing-0: 0px;
+  --spacing-px: 1px;
+  --spacing-1: var(--lm-space-1);
+  --spacing-2: var(--lm-space-2);
+  --spacing-3: var(--lm-space-3);
+  --spacing-4: var(--lm-space-4);
+  --spacing-5: var(--lm-space-5);
+  --spacing-6: var(--lm-space-6);
+  --spacing-8: var(--lm-space-8);
+  --spacing-control: var(--lm-control-height);
+  --spacing-control-sm: calc(var(--lm-control-height) - 8px);
+  --spacing-topbar: var(--lm-topbar-height);
+  --spacing-sidebar: var(--lm-sidebar-width);
+  --spacing-drawer: var(--lm-drawer-width);
+  --spacing-card: var(--lm-card-gap);
+  --aspect-card: var(--lm-card-aspect);
+
+  /* Radii and shadows */
+  --radius-*: initial;
+  --radius-sm: var(--lm-radius-sm);
+  --radius-md: var(--lm-radius-md);
+  --radius-lg: var(--lm-radius-lg);
+  --radius-pill: var(--lm-radius-pill);
+  /* Shadows are plain utilities below (shadow-sm/md/lg), not theme keys. */
+  --shadow-*: initial;
+  --inset-shadow-*: initial;
+  --drop-shadow-*: initial;
+  --text-shadow-*: initial;
+
+  /* Motion */
+  --ease-*: initial;
+  --ease-standard: var(--lm-ease);
+  --default-transition-duration: var(--lm-motion-fast);
+  --default-transition-timing-function: var(--lm-ease);
+  --animate-*: initial;
+  --animate-skeleton: lm-pulse 1.4s ease-in-out infinite;
+  --animate-spinner: lm-spin 0.8s linear infinite;
+  --animate-fade-in: lm-fade-in var(--lm-motion-normal) var(--lm-ease);
+  --animate-slide-in: lm-slide-in var(--lm-motion-normal) var(--lm-ease);
+
+  /* Breakpoints: the layout uses the max-width variants defined below. */
+  --breakpoint-*: initial;
+  --container-*: initial;
+
+  @keyframes lm-pulse {
+    50% {
+      opacity: 0.55;
+    }
+  }
+  @keyframes lm-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  @keyframes lm-fade-in {
+    from {
+      opacity: 0;
+    }
+  }
+  @keyframes lm-slide-in {
+    from {
+      transform: translateX(24px);
+      opacity: 0;
+    }
+  }
+}
+
+/* Layout breakpoints (desktop first, same thresholds as before Tailwind). */
+@custom-variant narrow (@media (max-width: 1100px));
+@custom-variant tablet (@media (max-width: 900px));
+@custom-variant phone (@media (max-width: 720px));
+
+/* Theme-aware variants: theming itself only flows through tokens, never `dark:`. */
+@custom-variant compact (&:where([data-density='compact'], [data-density='compact'] *));
+
+/*
+ * Shadows: emitted as a plain box-shadow (no --tw-shadow composition), so a
+ * shadow token stays exactly what the theme defines. The color part comes
+ * from --lm-color-shadow inside the --lm-shadow-* tokens.
+ */
+@utility shadow-sm {
+  box-shadow: var(--lm-shadow-sm);
+}
+@utility shadow-md {
+  box-shadow: var(--lm-shadow-md);
+}
+@utility shadow-lg {
+  box-shadow: var(--lm-shadow-lg);
+}
+/* Focus-width ring in the accent color (selected cards). */
+@utility ring-selected {
+  box-shadow: 0 0 0 var(--lm-focus-ring-width) var(--lm-color-accent);
+}
+
+/* Keyboard focus outline (same as the global :focus-visible rule), for peer-focus-visible:. */
+@utility focus-ring {
+  outline: var(--lm-focus-ring-width) solid var(--lm-color-focus);
+}
+/* Legibility gradient behind text on card media. */
+@utility bg-scrim-fade {
+  background-image: linear-gradient(to top, var(--lm-color-scrim), transparent);
+}
+
+/* Borders follow --lm-border-width (preflight already sets `border: 0 solid`). */
+@utility hairline {
+  border-width: var(--lm-border-width);
+}
+@utility hairline-t {
+  border-top-width: var(--lm-border-width);
+}
+@utility hairline-r {
+  border-right-width: var(--lm-border-width);
+}
+@utility hairline-b {
+  border-bottom-width: var(--lm-border-width);
+}
+@utility hairline-l {
+  border-left-width: var(--lm-border-width);
+}

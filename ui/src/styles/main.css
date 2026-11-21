@@ -1,0 +1,13 @@
+/*
+ * Stylesheet entry: Tailwind (preflight + utilities) mapped onto the design
+ * tokens, then the app's base rules and shared component classes.
+ *
+ * The theme files in src/themes/ stay plain CSS: they only set --lm-* tokens.
+ */
+@import 'tailwindcss' source(none);
+@import './tokens.css';
+@import './app.css';
+
+/* Scan only the app sources (dist/ is committed and must never feed back in). */
+@source '../../index.html';
+@source '../**/*.{vue,ts}';
