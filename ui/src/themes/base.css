@@ -38,6 +38,8 @@
 
   /* Controls and layout */
   --lm-control-height: 36px;
+  /* Minimum hit area of controls on touch / phone layouts (drawer). */
+  --lm-touch-target: 44px;
   --lm-border-width: 1px;
   --lm-focus-ring-width: 2px;
   --lm-topbar-height: 60px;

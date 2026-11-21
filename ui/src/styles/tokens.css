@@ -89,6 +89,7 @@
   --spacing-6: var(--lm-space-6);
   --spacing-8: var(--lm-space-8);
   --spacing-control: var(--lm-control-height);
+  --spacing-touch: var(--lm-touch-target);
   --spacing-control-sm: calc(var(--lm-control-height) - 8px);
   --spacing-topbar: var(--lm-topbar-height);
   --spacing-drawer: var(--lm-drawer-width);

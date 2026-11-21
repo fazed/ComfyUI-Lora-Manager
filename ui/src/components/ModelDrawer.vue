@@ -5,7 +5,7 @@ import AppIcon from './AppIcon.vue'
 import ExampleImagesDialog from './ExampleImagesDialog.vue'
 import ExampleLightbox from './ExampleLightbox.vue'
 import LazyMedia from './LazyMedia.vue'
-import type { ModelAction } from './ModelActionMenu.vue'
+import ModelActionMenu, { MODEL_ITEMS, type ActionMenuItem, type ModelAction } from './ModelActionMenu.vue'
 import StateBlock from './StateBlock.vue'
 import { downloadsApi, type ModelApi } from '@/api/endpoints'
 import type { ModelItem, ModelMetadata, ModelUpdateRecord } from '@/api/types'
@@ -21,7 +21,7 @@ import { isBlurred } from '@/utils/mature'
 import { promptHint } from '@/utils/generation'
 import { sanitizeHtml } from '@/utils/sanitize'
 import { collapseTags } from '@/utils/tags'
-import { loraStrengths, type SendMode } from '@/utils/workflow'
+import { loraStrengths, usageTipEntries, type SendMode } from '@/utils/workflow'
 import { t, type MessageKey } from '@/i18n'
 
 const props = withDefaults(
@@ -60,6 +60,8 @@ const strength = ref(loraStrengths(props.item.usage_tips).strength)
 const sending = ref(false)
 const panel = ref<HTMLElement | null>(null)
 const closeButton = ref<HTMLButtonElement | null>(null)
+// "More actions" menu (the same model actions as the card menu, plus the external links).
+const menu = ref<{ x: number; y: number; opener: HTMLElement } | null>(null)
 
 const metadata = ref<ModelMetadata | null>(null)
 const metaLoading = ref(false)
@@ -85,6 +87,14 @@ const civitaiUrl = computed(() => {
   const host = /^[a-z0-9.-]+$/i.test(props.civitaiHost) ? props.civitaiHost : 'civitai.com'
   return `https://${host}/models/${modelId.value}${version ? `?modelVersionId=${version}` : ''}`
 })
+// External links (new tab) first, then the same model actions as the card menu.
+const menuItems = computed<ActionMenuItem[]>(() => {
+  const links: ActionMenuItem[] = []
+  if (civitaiUrl.value) links.push({ action: 'civitai', label: t('detail.civitai'), icon: 'external', href: civitaiUrl.value })
+  links.push({ action: 'classic', label: t('common.openClassic'), icon: 'external', href: props.classicUrl })
+  return [...links, ...MODEL_ITEMS.map((entry, index) => ({ ...entry, label: t(entry.label), divider: index === 0 }))]
+})
+const tipEntries = computed(() => usageTipEntries(props.item.usage_tips))
 const triggerWords = computed(() => {
   const words = metadata.value?.trainedWords ?? props.item.civitai?.trainedWords ?? []
   return words.map((word) => word.trim()).filter(Boolean)
@@ -227,6 +237,18 @@ async function queueVersion(versionId: number): Promise<void> {
   }
 }
 
+function openMenu(event: MouseEvent): void {
+  const button = event.currentTarget as HTMLElement
+  const rect = button.getBoundingClientRect()
+  menu.value = { x: rect.right - 240, y: rect.bottom + 4, opener: button }
+}
+
+function closeMenu(reason: 'escape' | 'outside' | 'select'): void {
+  const opener = menu.value?.opener
+  menu.value = null
+  if (reason === 'escape') opener?.focus()
+}
+
 function openLightbox(index: number, event: Event): void {
   lightboxOpener = event.currentTarget as HTMLElement | null
   lightboxIndex.value = index
@@ -302,27 +324,23 @@ useEventListener(document, 'keydown', onKey)
       aria-modal="true"
       aria-labelledby="drawer-title"
     >
-      <header class="flex items-start gap-2 px-5 pt-5 pb-3 phone:px-4">
+      <header class="flex items-start gap-2 px-5 pt-4 pb-3 phone:px-4 phone:pt-3 phone:pb-2">
         <div class="min-w-0 flex-1">
-          <p class="lm-overline tracking-[0.06em]">{{ t('detail.title') }}</p>
-          <h2 id="drawer-title" class="mt-1 mb-2 text-xl wrap-anywhere">{{ displayName }}</h2>
+          <h2 id="drawer-title" class="mb-2 text-xl wrap-anywhere phone:mb-1 phone:line-clamp-2 phone:text-lg" :title="displayName">{{ displayName }}</h2>
           <div class="flex flex-wrap gap-1">
             <span v-if="item.base_model" class="lm-badge lm-badge--accent">{{ item.base_model }}</span>
-            <span v-if="item.update_available" class="lm-badge lm-badge--warning">{{ t('card.update') }}</span>
-            <span v-if="item.civitai?.name" class="lm-badge">{{ item.civitai.name }}</span>
+            <button
+              v-if="item.update_available"
+              type="button"
+              class="lm-badge lm-badge--warning cursor-pointer hover:opacity-80 phone:hidden"
+              :aria-label="t('detail.showUpdates')"
+              @click="tab = 'versions'"
+            >
+              {{ t('card.update') }}
+            </button>
+            <span v-if="item.civitai?.name" class="lm-badge phone:hidden">{{ item.civitai.name }}</span>
           </div>
         </div>
-        <button
-          v-if="canSend"
-          type="button"
-          class="lm-btn lm-btn--ghost lm-btn--icon"
-          :aria-label="t('card.sendToComfy')"
-          :title="t('card.sendToComfy')"
-          :disabled="sending"
-          @click="sendToComfy('append')"
-        >
-          <AppIcon name="send" />
-        </button>
         <button
           type="button"
           class="lm-btn lm-btn--ghost lm-btn--icon"
@@ -332,6 +350,17 @@ useEventListener(document, 'keydown', onKey)
           @click="toggleFavorite"
         >
           <AppIcon name="star" :filled="!!item.favorite" />
+        </button>
+        <button
+          type="button"
+          class="lm-btn lm-btn--ghost lm-btn--icon"
+          :aria-label="t('detail.moreActions')"
+          :title="t('detail.moreActions')"
+          aria-haspopup="menu"
+          :aria-expanded="!!menu"
+          @click="openMenu"
+        >
+          <AppIcon name="more" />
         </button>
         <button ref="closeButton" type="button" class="lm-btn lm-btn--ghost lm-btn--icon" :aria-label="t('common.close')" @click="emit('close')">
           <AppIcon name="close" />
@@ -358,8 +387,89 @@ useEventListener(document, 'keydown', onKey)
       <div class="flex-1 overflow-y-auto p-5 phone:px-4">
         <!-- Overview -->
         <section v-if="tab === 'overview'" id="panel-overview" role="tabpanel" aria-labelledby="tab-overview" :class="sectionClass">
+          <!-- Send to ComfyUI (LoRAs): one compact row, usage tips from the metadata below it. -->
+          <div v-if="canSend" class="flex flex-col gap-2 rounded-md bg-sunken p-3">
+            <div class="flex flex-wrap items-end gap-2">
+              <label class="flex flex-col gap-1 text-xs text-muted" for="drawer-strength">
+                {{ t('detail.strength') }}
+                <input
+                  id="drawer-strength"
+                  v-model.number="strength"
+                  class="lm-input w-[84px] tabular-nums"
+                  type="number"
+                  step="0.05"
+                  min="-10"
+                  max="10"
+                />
+              </label>
+              <button type="button" class="lm-btn lm-btn--primary" :disabled="sending" @click="sendToComfy('append')">
+                <AppIcon name="send" :size="16" />{{ t('detail.sendAppend') }}
+              </button>
+              <button type="button" class="lm-btn" :disabled="sending" @click="sendToComfy('replace')">
+                {{ t('detail.sendReplace') }}
+              </button>
+              <button
+                type="button"
+                class="lm-btn lm-btn--ghost lm-btn--icon"
+                :aria-label="t('detail.copySyntax')"
+                :title="t('detail.copySyntax')"
+                @click="copySyntax"
+              >
+                <AppIcon name="copy" :size="16" />
+              </button>
+            </div>
+            <ul v-if="tipEntries.length" class="flex flex-wrap items-center gap-1" :aria-label="t('detail.usageTips')">
+              <li v-for="entry in tipEntries" :key="entry.key">
+                <button
+                  v-if="entry.strength !== null"
+                  type="button"
+                  class="lm-chip tabular-nums"
+                  :title="t('detail.useStrength', { value: entry.strength })"
+                  @click="strength = entry.strength"
+                >
+                  {{ entry.text }}
+                </button>
+                <span v-else class="lm-chip tabular-nums">{{ entry.text }}</span>
+              </li>
+            </ul>
+          </div>
+
+          <div v-if="canSend || triggerWords.length || metaError">
+            <div class="flex items-center justify-between">
+              <h3 :class="blockTitleClass">{{ t('detail.triggerWords') }}</h3>
+              <button v-if="triggerWords.length > 1" type="button" class="lm-btn lm-btn--sm" @click="copy(triggerWords.join(', '))">
+                <AppIcon name="copy" :size="14" />{{ t('detail.copyAll') }}
+              </button>
+            </div>
+            <div v-if="metaLoading && canSend" class="lm-skeleton h-[28px] rounded-sm"></div>
+            <div v-else-if="triggerWords.length" :class="chipsClass">
+              <button
+                v-for="word in triggerWords"
+                :key="word"
+                type="button"
+                class="lm-chip text-left font-mono whitespace-normal"
+                :title="t('common.copy')"
+                @click="copy(word)"
+              >
+                {{ word }}<AppIcon name="copy" :size="12" />
+              </button>
+            </div>
+            <p v-else-if="canSend" class="my-[1em] text-muted">{{ t('detail.noTriggerWords') }}</p>
+            <p v-if="metaError" class="lm-error-text">{{ metaError }}</p>
+          </div>
+
           <!-- Cover + examples: side by side on a wide drawer, stacked (examples as a strip) when narrow. -->
-          <div class="@container">
+          <div class="@container flex flex-col gap-2">
+            <div class="flex items-center gap-2">
+              <h3 id="drawer-examples-title" class="lm-overline flex items-center gap-2">
+                {{ t('detail.examples') }}
+                <span v-if="images.length" class="tabular-nums">{{ images.length }}</span>
+                <span v-if="localImages" class="lm-badge lm-badge--success normal-case">{{ t('examples.localCount', { count: localImages }) }}</span>
+              </h3>
+              <button type="button" class="lm-btn lm-btn--sm lm-btn--ghost ml-auto" :disabled="metaLoading" @click="examplesOpen = true">
+                <AppIcon name="image" :size="14" />{{ t('examples.manage') }}
+              </button>
+            </div>
             <div
               class="grid gap-3"
               :class="previewUrl && (metaLoading || images.length) ? '@min-[460px]:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]' : ''"
@@ -378,12 +488,7 @@ useEventListener(document, 'keydown', onKey)
                 />
               </div>
 
-              <div v-if="metaLoading || images.length" class="flex min-w-0 flex-col gap-2" role="group" aria-labelledby="drawer-examples-title">
-                <h3 id="drawer-examples-title" class="lm-overline flex items-center gap-2">
-                  {{ t('detail.examples') }}
-                  <span v-if="images.length" class="tabular-nums">{{ images.length }}</span>
-                  <span v-if="localImages" class="lm-badge lm-badge--success normal-case">{{ t('examples.localCount', { count: localImages }) }}</span>
-                </h3>
+              <div v-if="metaLoading || images.length" class="flex min-w-0 flex-col gap-2" role="group" :aria-labelledby="'drawer-examples-title'">
                 <div
                   class="flex gap-2 overflow-x-auto pb-1 @min-[460px]:grid @min-[460px]:max-h-[392px] @min-[460px]:content-start @min-[460px]:overflow-x-visible @min-[460px]:overflow-y-auto @min-[460px]:pb-0"
                   :class="
@@ -433,99 +538,7 @@ useEventListener(document, 'keydown', onKey)
                 </div>
               </div>
             </div>
-            <p v-if="!metaLoading && !images.length && item.from_civitai" class="mt-2 text-xs text-muted">{{ t('detail.noExamples') }}</p>
-            <button type="button" class="lm-btn lm-btn--sm lm-btn--ghost mt-2" :disabled="metaLoading" @click="examplesOpen = true">
-              <AppIcon name="image" :size="14" />{{ t('examples.manage') }}
-            </button>
-          </div>
-
-          <div class="flex flex-wrap items-center gap-2">
-            <a v-if="civitaiUrl" class="lm-btn" :href="civitaiUrl" target="_blank" rel="noopener noreferrer">
-              <AppIcon name="external" :size="16" />{{ t('detail.civitai') }}
-            </a>
-            <a class="lm-btn lm-btn--ghost" :href="classicUrl">
-              <AppIcon name="external" :size="16" />{{ t('common.openClassic') }}
-            </a>
-          </div>
-
-          <!-- File actions: each opens its own dialog / confirm on the library page. -->
-          <div class="flex flex-wrap items-center gap-2" role="group" :aria-label="t('actions.menuTitle')">
-            <button type="button" class="lm-btn lm-btn--sm" @click="emit('action', 'rename')">
-              <AppIcon name="pencil" :size="14" />{{ t('actions.rename') }}
-            </button>
-            <button type="button" class="lm-btn lm-btn--sm" @click="emit('action', 'move')">
-              <AppIcon name="folderMove" :size="14" />{{ t('actions.move') }}
-            </button>
-            <button type="button" class="lm-btn lm-btn--sm" @click="emit('action', 'template')">
-              <AppIcon name="type" :size="14" />{{ t('tools.template.open') }}
-            </button>
-            <button type="button" class="lm-btn lm-btn--sm" @click="emit('action', 'preview')">
-              <AppIcon name="image" :size="14" />{{ t('tools.preview.open') }}
-            </button>
-            <button type="button" class="lm-btn lm-btn--sm" @click="emit('action', 'rating')">
-              <AppIcon name="shield" :size="14" />{{ t('tools.nsfw.open') }}
-            </button>
-            <button type="button" class="lm-btn lm-btn--sm" @click="emit('action', 'refresh')">
-              <AppIcon name="refresh" :size="14" />{{ t('tools.refresh.open') }}
-            </button>
-            <button type="button" class="lm-btn lm-btn--sm" @click="emit('action', 'relink')">
-              <AppIcon name="link" :size="14" />{{ t('tools.relink.open') }}
-            </button>
-            <button type="button" class="lm-btn lm-btn--sm" @click="emit('action', 'exclude')">
-              <AppIcon name="eyeOff" :size="14" />{{ t('actions.exclude') }}
-            </button>
-            <button type="button" class="lm-btn lm-btn--sm lm-btn--danger" @click="emit('action', 'delete')">
-              <AppIcon name="trash" :size="14" />{{ t('actions.delete') }}
-            </button>
-          </div>
-
-          <!-- Send to ComfyUI (LoRAs) -->
-          <div v-if="canSend" class="flex flex-wrap items-end gap-2 rounded-md bg-sunken p-3">
-            <label class="flex flex-col gap-1 text-xs text-muted" for="drawer-strength">
-              {{ t('detail.strength') }}
-              <input
-                id="drawer-strength"
-                v-model.number="strength"
-                class="lm-input w-[84px] tabular-nums"
-                type="number"
-                step="0.05"
-                min="-10"
-                max="10"
-              />
-            </label>
-            <button type="button" class="lm-btn lm-btn--primary" :disabled="sending" @click="sendToComfy('append')">
-              <AppIcon name="send" :size="16" />{{ t('detail.sendAppend') }}
-            </button>
-            <button type="button" class="lm-btn" :disabled="sending" @click="sendToComfy('replace')">
-              {{ t('detail.sendReplace') }}
-            </button>
-            <button type="button" class="lm-btn lm-btn--ghost" @click="copySyntax">
-              <AppIcon name="copy" :size="16" />{{ t('detail.copySyntax') }}
-            </button>
-          </div>
-
-          <div>
-            <div class="flex items-center justify-between">
-              <h3 :class="blockTitleClass">{{ t('detail.triggerWords') }}</h3>
-              <button v-if="triggerWords.length > 1" type="button" class="lm-btn lm-btn--sm" @click="copy(triggerWords.join(', '))">
-                <AppIcon name="copy" :size="14" />{{ t('detail.copyAll') }}
-              </button>
-            </div>
-            <div v-if="metaLoading" class="lm-skeleton h-[28px] rounded-sm"></div>
-            <div v-else-if="triggerWords.length" :class="chipsClass">
-              <button
-                v-for="word in triggerWords"
-                :key="word"
-                type="button"
-                class="lm-chip text-left font-mono whitespace-normal"
-                :title="t('common.copy')"
-                @click="copy(word)"
-              >
-                {{ word }}<AppIcon name="copy" :size="12" />
-              </button>
-            </div>
-            <p v-else class="my-[1em] text-muted">{{ t('detail.noTriggerWords') }}</p>
-            <p v-if="metaError" class="lm-error-text">{{ metaError }}</p>
+            <p v-if="!metaLoading && !images.length && item.from_civitai" class="text-xs text-muted">{{ t('detail.noExamples') }}</p>
           </div>
 
           <!-- Tags: uniform neutral pills; click filters the library, x removes. -->
@@ -715,6 +728,16 @@ useEventListener(document, 'keydown', onKey)
         </section>
       </div>
     </aside>
+
+    <ModelActionMenu
+      v-if="menu"
+      :x="menu.x"
+      :y="menu.y"
+      :label="t('actions.menu', { name: displayName })"
+      :items="menuItems"
+      @select="emit('action', $event as ModelAction)"
+      @close="closeMenu"
+    />
 
     <ExampleImagesDialog v-if="examplesOpen" :name="displayName" :ex="examples" @close="examplesOpen = false" />
 
