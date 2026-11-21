@@ -8,6 +8,7 @@ import { computed, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
 import LazyMedia from './LazyMedia.vue'
 import type { RecipeItem } from '@/api/types'
+import { useCardInteractions, type MenuPoint } from '@/composables/useCardInteractions'
 import { withMountPrefix } from '@/utils/basePath'
 import { availability } from '@/utils/recipes'
 import { t } from '@/i18n'
@@ -15,12 +16,11 @@ import { t } from '@/i18n'
 const props = defineProps<{ item: RecipeItem; selectionMode: boolean; selected: boolean; blurMature: boolean }>()
 const emit = defineEmits<{
   open: [item: RecipeItem]
-  /** shift = Shift+click (select a range from the last toggled card). */
-  /** shift = Shift+click: select a range from the last toggled card. */
+  /** shift = Shift+click: select a range from the last toggled card (Ctrl/Cmd+click also toggles outside selection mode). */
   'toggle-select': [item: RecipeItem, shift: boolean]
   'toggle-favorite': [item: RecipeItem]
   send: [item: RecipeItem, replace: boolean]
-  menu: [item: RecipeItem, point: { x: number; y: number }, opener: HTMLElement | null]
+  menu: [item: RecipeItem, point: MenuPoint, opener: HTMLElement | null]
 }>()
 
 const media = ref<InstanceType<typeof LazyMedia> | null>(null)
@@ -46,22 +46,13 @@ const pillClass =
 const roundClass = 'inline-grid size-[28px] cursor-pointer place-items-center rounded-pill'
 const revealClass = 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 touch:opacity-100'
 
-function activate(event: MouseEvent): void {
-  if (props.selectionMode) emit('toggle-select', props.item, event.shiftKey)
-  else emit('open', props.item)
-}
-
-function openMenuFromButton(event: MouseEvent): void {
-  const button = event.currentTarget as HTMLElement
-  const rect = button.getBoundingClientRect()
-  emit('menu', props.item, { x: rect.right - 220, y: rect.bottom + 4 }, button)
-}
-
-function openContextMenu(event: MouseEvent): void {
-  if (props.selectionMode) return
-  event.preventDefault()
-  emit('menu', props.item, { x: event.clientX, y: event.clientY }, event.currentTarget instanceof HTMLElement ? event.currentTarget.querySelector('button') : null)
-}
+const { activate, openMenuFromButton, openContextMenu } = useCardInteractions<RecipeItem>({
+  item: () => props.item,
+  selectionMode: () => props.selectionMode,
+  open: (item) => emit('open', item),
+  toggle: (item, shift) => emit('toggle-select', item, shift),
+  menu: (item, point, opener) => emit('menu', item, point, opener),
+})
 </script>
 
 <template>

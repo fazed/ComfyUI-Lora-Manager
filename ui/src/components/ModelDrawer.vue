@@ -16,6 +16,7 @@ import { copyText, useConfirm, useToasts } from '@/composables/useFeedback'
 import { usePersistentToggle } from '@/composables/usePersistentToggle'
 import { useSendToWorkflow } from '@/composables/useSendToWorkflow'
 import { withMountPrefix } from '@/utils/basePath'
+import { civitaiModelUrl } from '@/utils/civitai'
 import { formatBytes, formatDate, isVideoUrl } from '@/utils/format'
 import { currentVersionId, nextTab, shouldConfirmClose } from '@/utils/drawer'
 import {
@@ -122,12 +123,9 @@ const savingTags = ref(false)
 const displayName = computed(() => props.item.model_name || props.item.file_name)
 const previewUrl = computed(() => (props.item.preview_url ? withMountPrefix(props.item.preview_url) : ''))
 const modelId = computed(() => props.item.civitai?.modelId ?? metadata.value?.modelId ?? null)
-const civitaiUrl = computed(() => {
-  if (!modelId.value) return ''
-  const version = props.item.civitai?.id ?? metadata.value?.id
-  const host = /^[a-z0-9.-]+$/i.test(props.civitaiHost) ? props.civitaiHost : 'civitai.com'
-  return `https://${host}/models/${modelId.value}${version ? `?modelVersionId=${version}` : ''}`
-})
+const civitaiUrl = computed(() =>
+  civitaiModelUrl(props.civitaiHost, modelId.value, props.item.civitai?.id ?? metadata.value?.id),
+)
 // External links (new tab) first, then the same model actions as the card menu.
 const currentVersion = computed(() => currentVersionId(props.item, metadata.value))
 const menuItems = computed<ActionMenuItem[]>(() => {

@@ -279,6 +279,8 @@ const actions = useRecipeActions({
 let anchor: string | null = null
 
 function toggleSelect(item: RecipeItem, range = false): void {
+  // Ctrl/Cmd+click on a card outside selection mode starts it with that card.
+  if (!selectionMode.value) setSelectionMode(true)
   const next = new Set(selected.value)
   if (range && anchor) for (const inRange of selectRange(loadedKeys(), anchor, item.id)) next.add(inRange)
   else if (next.has(item.id)) next.delete(item.id)

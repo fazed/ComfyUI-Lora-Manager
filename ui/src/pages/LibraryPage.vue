@@ -49,6 +49,18 @@ import { isVideoUrl } from '@/utils/format'
 import { clearBrowseView, RESTORE_MAX_ITEMS, saveBrowseView, takeBrowseView, unfilteredTotal, type BrowseViewState } from '@/utils/browse'
 import { hiddenSelectedCount, invertSelection, pruneSelection, selectRange, validateFileName } from '@/utils/modelActions'
 import { withMountPrefix } from '@/utils/basePath'
+import type { MenuPoint } from '@/composables/useCardInteractions'
+import { createFolderActions, type FolderDialogRequest } from '@/utils/folderActions'
+import {
+  folderMenu,
+  itemMenu,
+  renamedFolderPath,
+  runItemMenuAction,
+  runSelectionMenuAction,
+  selectionMenu,
+  type ItemMenuDeps,
+  type SelectionMenuDeps,
+} from '@/utils/menuItems'
 import { t, type MessageKey } from '@/i18n'
 
 const props = defineProps<{ prefix: ModelPrefix }>()
@@ -349,6 +361,8 @@ function sendToComfy(item: ModelItem, replace: boolean): void {
 let anchor: string | null = null
 
 function toggleSelect(item: ModelItem, range = false): void {
+  // Ctrl/Cmd+click on a card outside selection mode starts it with that card.
+  if (!selectionMode.value) setSelectionMode(true)
   const key = item.file_path
   const next = new Set(selected.value)
   if (range && anchor) for (const inRange of selectRange(loadedKeys(), anchor, key)) next.add(inRange)
@@ -446,7 +460,7 @@ const excludedOpen = ref(false)
 const previewTarget = ref<{ item: ModelItem; mode: 'preview' | 'rating' } | null>(null)
 const relinkTarget = ref<ModelItem | null>(null)
 const templateTarget = ref<{ scope: TemplateScope; label: string } | null>(null)
-const folderDialog = ref<{ mode: 'create' | 'rename'; locations: string[]; currentName?: string } | null>(null)
+const folderDialog = ref<FolderDialogRequest | null>(null)
 
 const template = computed(() => {
   const templates = settings.value?.download_path_templates
@@ -474,59 +488,35 @@ function runTool(id: string): void {
   else if (id === 'fetchAll') void tools.fetchAll(t(config.title))
 }
 
-const folderLabel = computed(() => state.folder.split('/').pop() ?? state.folder)
-const folderItems = computed<MenuEntry[]>(() => [
-  { id: 'create', label: t('folders.new'), icon: 'folderPlus' },
-  { id: 'rename', label: t('folders.rename'), icon: 'pencil', disabled: !state.folder },
-  { id: 'template', label: t('folders.template'), icon: 'type', disabled: !state.folder },
-  { id: 'delete', label: t('folders.delete'), icon: 'trash', danger: true, disabled: !state.folder },
-])
+// Header "..." menu: the selected folder (or the root). Tree rows open the same entries for the pointed folder.
+const folderItems = computed<MenuEntry[]>(() =>
+  folderMenu(state.folder).map((entry) => ({ id: entry.action, label: entry.label, icon: entry.icon, danger: entry.danger, disabled: entry.disabled })),
+)
 
-/** Absolute paths of the selected folder (one per root that holds it). */
-async function folderCandidates(): Promise<string[] | null> {
-  try {
-    const candidates = await api.resolveFolder(state.folder)
-    if (!candidates.length) {
-      toasts.error(t('folders.refused.missing', { name: folderLabel.value }))
-      return null
-    }
-    return candidates.map((candidate) => candidate.folder_path)
-  } catch (error) {
-    toasts.error(t('folders.resolveFailed', { error: (error as Error).message }))
-    return null
-  }
-}
+const isInside = (path: string, folder: string) => !!folder && (path === folder || path.startsWith(`${folder}/`))
 
-async function runFolderAction(id: string): Promise<void> {
-  if (id === 'create') {
-    const locations = state.folder ? await folderCandidates() : await api.roots().catch(() => null)
-    if (locations?.length) folderDialog.value = { mode: 'create', locations }
-    return
-  }
-  if (!state.folder) {
-    toasts.error(t('folders.noFolder'))
-    return
-  }
-  const locations = await folderCandidates()
-  if (!locations) return
-  if (id === 'rename') folderDialog.value = { mode: 'rename', locations, currentName: folderLabel.value }
-  else if (id === 'template') {
-    templateTarget.value = { scope: { folderPaths: locations }, label: t('tools.template.scopeFolder', { folder: state.folder }) }
-  } else if (id === 'delete') {
-    if (locations.length > 1) {
-      toasts.error(t('folders.refused.refused', { name: folderLabel.value, error: locations.join(', ') }))
-      return
-    }
-    if (await tools.deleteFolder(locations[0], folderLabel.value)) state.folder = ''
-  }
+const folderActions = createFolderActions({
+  api,
+  tools,
+  toasts,
+  openDialog: (request) => (folderDialog.value = request),
+  openTemplate: (folderPaths, path) => {
+    templateTarget.value = { scope: { folderPaths }, label: t('tools.template.scopeFolder', { folder: path }) }
+  },
+  // A deleted folder that held the selection (or was above it) clears the folder filter.
+  deleted: (path) => {
+    if (isInside(state.folder, path)) state.folder = ''
+  },
+})
+
+function runFolderAction(id: string, path: string = state.folder): void {
+  void folderActions.run(id, path)
 }
 
 function onFolderDone(name: string): void {
-  // A renamed selected folder keeps the selection on its new name.
-  if (folderDialog.value?.mode === 'rename' && state.folder) {
-    const parent = state.folder.includes('/') ? state.folder.slice(0, state.folder.lastIndexOf('/')) : ''
-    state.folder = parent ? `${parent}/${name}` : name
-  }
+  // A renamed folder that holds the selection keeps the selection on its new name.
+  const dialog = folderDialog.value
+  if (dialog?.mode === 'rename') state.folder = renamedFolderPath(state.folder, dialog.path, name)
 }
 
 async function submitRelink(value: string): Promise<string | null> {
@@ -534,14 +524,27 @@ async function submitRelink(value: string): Promise<string | null> {
   return item ? tools.relink(item, value) : null
 }
 
-const menu = ref<{ item: ModelItem; x: number; y: number; opener: HTMLElement | null } | null>(null)
+// --- Shared context menu: one model, the selection, or a folder of the tree ---
+
+type MenuTarget = { kind: 'item'; item: ModelItem } | { kind: 'selection' } | { kind: 'folder'; path: string }
+const menu = ref<(MenuTarget & MenuPoint & { opener: HTMLElement | null }) | null>(null)
 const renameTarget = ref<ModelItem | null>(null)
 const moveTargets = ref<ModelItem[] | null>(null)
 const tagTargets = ref<ModelItem[] | null>(null)
 const organizeOpen = ref(false)
 
-function openMenu(item: ModelItem, point: { x: number; y: number }, opener: HTMLElement | null): void {
-  menu.value = { item, ...point, opener }
+/**
+ * Right-click / "..." on a card. In selection mode a selected card opens the
+ * selection menu (bulk actions on everything selected); an unselected card
+ * opens its own item menu and leaves the selection untouched.
+ */
+function openMenu(item: ModelItem, point: MenuPoint, opener: HTMLElement | null): void {
+  const target: MenuTarget = selectionMode.value && selected.value.has(item.file_path) ? { kind: 'selection' } : { kind: 'item', item }
+  menu.value = { ...target, ...point, opener }
+}
+
+function openFolderMenu(path: string, point: MenuPoint, opener: HTMLElement | null): void {
+  menu.value = { kind: 'folder', path, ...point, opener }
 }
 
 function closeMenu(reason: 'escape' | 'outside' | 'select'): void {
@@ -550,16 +553,60 @@ function closeMenu(reason: 'escape' | 'outside' | 'select'): void {
   if (reason === 'escape') opener?.focus()
 }
 
+const menuContext = computed(() => ({ canSend: !!config.sendToComfy, isLora: props.prefix === 'loras', civitaiHost: civitaiHost.value }))
+
+const menuView = computed(() => {
+  const current = menu.value
+  if (!current) return null
+  if (current.kind === 'item') {
+    return { items: itemMenu(current.item, menuContext.value), label: t('actions.menu', { name: current.item.model_name || current.item.file_name }) }
+  }
+  if (current.kind === 'selection') {
+    const count = selected.value.size
+    return { items: selectionMenu(count, menuContext.value), label: t('menu.selection', { count }), heading: t('library.selected', { count }) }
+  }
+  return { items: folderMenu(current.path), label: t('folders.menu', { name: current.path.split('/').pop() ?? current.path }) }
+})
+
+const itemMenuDeps: ItemMenuDeps = {
+  actions,
+  tools,
+  open: (item) => (openItem.value = item),
+  send: sendToComfy,
+  copySyntax: (item) => void workflow.copyLora(item),
+  toggleFavorite: (item) => void toggleFavorite(item),
+  dialog: (kind, item) => {
+    if (kind === 'rename') renameTarget.value = item
+    else if (kind === 'move') moveTargets.value = [item]
+    else if (kind === 'template') templateTarget.value = { scope: { filePaths: [item.file_path] }, label: item.model_name || item.file_name }
+    else if (kind === 'preview' || kind === 'rating') previewTarget.value = { item, mode: kind }
+    else relinkTarget.value = item
+  },
+}
+
+// Bulk actions: shared by the selection bar and the selection menu.
+const bulk: SelectionMenuDeps = {
+  move: (items) => (moveTargets.value = items),
+  tags: (items) => (tagTargets.value = items),
+  template: (items) => {
+    templateTarget.value = { scope: { filePaths: items.map((item) => item.file_path) }, label: t('tools.template.scopeFiles', { count: items.length }) }
+  },
+  send: (items) => void workflow.sendLoras(items, 'append'),
+  copyNames: () => void copySelectedNames(),
+  delete: (items) => void actions.deleteItems(items),
+}
+
+/** Model actions of the drawer's More actions menu. */
 function runAction(action: ModelAction, item: ModelItem): void {
-  if (action === 'rename') renameTarget.value = item
-  else if (action === 'move') moveTargets.value = [item]
-  else if (action === 'exclude') void actions.excludeItem(item)
-  else if (action === 'template') {
-    templateTarget.value = { scope: { filePaths: [item.file_path] }, label: item.model_name || item.file_name }
-  } else if (action === 'preview' || action === 'rating') previewTarget.value = { item, mode: action }
-  else if (action === 'refresh') void tools.refreshFromCivitai(item)
-  else if (action === 'relink') relinkTarget.value = item
-  else void actions.deleteItems([item])
+  runItemMenuAction(action, item, itemMenuDeps)
+}
+
+function onMenuSelect(action: string): void {
+  const current = menu.value
+  if (!current) return
+  if (current.kind === 'item') runItemMenuAction(action, current.item, itemMenuDeps)
+  else if (current.kind === 'selection') runSelectionMenuAction(action, selectedItems.value, bulk)
+  else runFolderAction(action, current.path)
 }
 
 const extensionOf = (item: ModelItem) => item.file_path.match(/(\.[^./\\]+)$/)?.[1] ?? ''
@@ -600,8 +647,7 @@ function onOrganized(prefix: ModelPrefix): void {
 
 function bulkSend(event: MouseEvent): void {
   void workflow.sendLoras(selectedItems.value, event.shiftKey ? 'replace' : 'append')
-}
-</script>
+}</script>
 
 <template>
   <div class="flex min-h-0 flex-1">
@@ -637,7 +683,7 @@ function bulkSend(event: MouseEvent): void {
       >
         <AppIcon name="grid" :size="15" />{{ t('library.allFolders') }}
       </button>
-      <FolderTree :tree="tree" :selected="state.folder" @select="selectFolder" />
+      <FolderTree :tree="tree" :selected="state.folder" @select="selectFolder" @menu="openFolderMenu" />
     </aside>
 
     <section class="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -698,10 +744,10 @@ function bulkSend(event: MouseEvent): void {
             @invert="invertSelected"
             @done="setSelectionMode(false)"
           >
-            <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="moveTargets = selectedItems">
+            <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="bulk.move(selectedItems)">
               <AppIcon name="folderMove" :size="14" />{{ t('selection.move') }}
             </button>
-            <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="tagTargets = selectedItems">
+            <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="bulk.tags(selectedItems)">
               <AppIcon name="tag" :size="14" />{{ t('selection.tags') }}
             </button>
             <button
@@ -718,14 +764,14 @@ function bulkSend(event: MouseEvent): void {
               type="button"
               class="lm-btn lm-btn--sm"
               :disabled="!selected.size"
-              @click="templateTarget = { scope: { filePaths: selectedItems.map((item) => item.file_path) }, label: t('tools.template.scopeFiles', { count: selectedItems.length }) }"
+              @click="bulk.template(selectedItems)"
             >
               <AppIcon name="type" :size="14" />{{ t('selection.template') }}
             </button>
             <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="copySelectedNames">
               <AppIcon name="copy" :size="14" />{{ t('selection.copyNames') }}
             </button>
-            <button type="button" class="lm-btn lm-btn--sm lm-btn--danger" :disabled="!selected.size" @click="actions.deleteItems(selectedItems)">
+            <button type="button" class="lm-btn lm-btn--sm lm-btn--danger" :disabled="!selected.size" @click="bulk.delete(selectedItems)">
               <AppIcon name="trash" :size="14" />{{ t('selection.delete') }}
             </button>
           </LibrarySelectionBar>
@@ -795,11 +841,13 @@ function bulkSend(event: MouseEvent): void {
     />
 
     <ModelActionMenu
-      v-if="menu"
+      v-if="menu && menuView"
       :x="menu.x"
       :y="menu.y"
-      :label="t('actions.menu', { name: menu.item.model_name || menu.item.file_name })"
-      @select="runAction($event as ModelAction, menu!.item)"
+      :label="menuView.label"
+      :heading="menuView.heading"
+      :items="menuView.items"
+      @select="onMenuSelect"
       @close="closeMenu"
     />
     <InputDialog

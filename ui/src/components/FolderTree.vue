@@ -1,8 +1,14 @@
 <script setup lang="ts">
-/** Recursive folder tree (from the unified-folder-tree endpoint). */
+/**
+ * Recursive folder tree (from the unified-folder-tree endpoint). Right-click
+ * (or the context-menu key) on a row emits `menu` with that row's path, so the
+ * page can open the folder menu for the pointed folder.
+ */
 import { computed, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
 import type { FolderTree } from '@/api/types'
+import { menuPointFor, type MenuPoint } from '@/composables/useCardInteractions'
+import { t } from '@/i18n'
 
 defineOptions({ name: 'FolderTree' })
 
@@ -10,7 +16,11 @@ const props = withDefaults(defineProps<{ tree: FolderTree; selected: string; par
   parent: '',
   depth: 0,
 })
-const emit = defineEmits<{ select: [path: string] }>()
+const emit = defineEmits<{
+  select: [path: string]
+  /** Open the folder menu for `path`; `opener` gets focus back when it closes. */
+  menu: [path: string, point: MenuPoint, opener: HTMLElement | null]
+}>()
 
 /** Chevron button and the spacer that keeps leaf rows aligned with it. */
 const toggleClass = 'inline-grid h-[28px] w-[22px] flex-none cursor-pointer place-items-center text-muted'
@@ -37,6 +47,14 @@ function toggle(path: string): void {
   next.set(path, !isOpen(path))
   expanded.value = next
 }
+
+function openMenu(path: string, event: MouseEvent): void {
+  event.preventDefault()
+  const row = event.currentTarget as HTMLElement
+  const opener = row.querySelector<HTMLElement>('[data-folder-select]')
+  const fromKeyboard = event.clientX === 0 && event.clientY === 0 && event.button !== 2
+  emit('menu', path, fromKeyboard && opener ? menuPointFor(opener, false) : { x: event.clientX, y: event.clientY }, opener)
+}
 </script>
 
 <template>
@@ -52,12 +70,14 @@ function toggle(path: string): void {
         class="lm-row flex items-center"
         :class="{ 'is-selected': selected === entry.path }"
         :style="{ paddingLeft: `calc(${depth} * var(--lm-space-3))` }"
+        :data-folder-path="entry.path"
+        @contextmenu="openMenu(entry.path, $event)"
       >
         <button
           v-if="entry.hasChildren"
           type="button"
           :class="toggleClass"
-          :aria-label="`${isOpen(entry.path) ? 'Collapse' : 'Expand'} ${entry.name}`"
+          :aria-label="t(isOpen(entry.path) ? 'folders.collapse' : 'folders.expand', { name: entry.name })"
           @click="toggle(entry.path)"
         >
           <AppIcon :name="isOpen(entry.path) ? 'chevronDown' : 'chevronRight'" :size="14" />
@@ -65,6 +85,7 @@ function toggle(path: string): void {
         <span v-else :class="toggleClass"></span>
         <button
           type="button"
+          data-folder-select
           class="flex h-[28px] min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-sm px-1 text-left text-sm"
           @click="emit('select', entry.path)"
         >
@@ -79,6 +100,7 @@ function toggle(path: string): void {
         :parent="entry.path"
         :depth="depth + 1"
         @select="emit('select', $event)"
+        @menu="(path, point, opener) => emit('menu', path, point, opener)"
       />
     </li>
   </ul>

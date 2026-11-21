@@ -3,6 +3,7 @@ import { computed, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
 import LazyMedia from './LazyMedia.vue'
 import type { ModelItem } from '@/api/types'
+import { useCardInteractions, type MenuPoint } from '@/composables/useCardInteractions'
 import { withMountPrefix } from '@/utils/basePath'
 import { isBlurred } from '@/utils/mature'
 import { t } from '@/i18n'
@@ -18,27 +19,22 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   open: [item: ModelItem]
-  /** shift = Shift+click (select a range from the last toggled card). */
-  /** shift = Shift+click: select a range from the last toggled card. */
+  /** shift = Shift+click: select a range from the last toggled card (Ctrl/Cmd+click also toggles outside selection mode). */
   'toggle-select': [item: ModelItem, shift: boolean]
   'toggle-favorite': [item: ModelItem]
   /** replace = Shift+click (replace the node's LoRAs instead of appending). */
   send: [item: ModelItem, replace: boolean]
-  /** Open the action menu at a viewport point; `opener` gets focus back when it closes. */
-  menu: [item: ModelItem, point: { x: number; y: number }, opener: HTMLElement | null]
+  /** Open the context menu at a viewport point (also in selection mode); `opener` gets focus back when it closes. */
+  menu: [item: ModelItem, point: MenuPoint, opener: HTMLElement | null]
 }>()
 
-function openMenuFromButton(event: MouseEvent): void {
-  const button = event.currentTarget as HTMLElement
-  const rect = button.getBoundingClientRect()
-  emit('menu', props.item, { x: rect.right - 220, y: rect.bottom + 4 }, button)
-}
-
-function openContextMenu(event: MouseEvent): void {
-  if (props.selectionMode) return
-  event.preventDefault()
-  emit('menu', props.item, { x: event.clientX, y: event.clientY }, event.currentTarget instanceof HTMLElement ? event.currentTarget.querySelector('button') : null)
-}
+const { activate, openMenuFromButton, openContextMenu } = useCardInteractions<ModelItem>({
+  item: () => props.item,
+  selectionMode: () => props.selectionMode,
+  open: (item) => emit('open', item),
+  toggle: (item, shift) => emit('toggle-select', item, shift),
+  menu: (item, point, opener) => emit('menu', item, point, opener),
+})
 
 const media = ref<InstanceType<typeof LazyMedia> | null>(null)
 const video = computed(() => (media.value?.element instanceof HTMLVideoElement ? media.value.element : null))
@@ -55,11 +51,6 @@ const pillClass =
 const roundClass = 'inline-grid size-[28px] cursor-pointer place-items-center rounded-pill'
 /** Hover-revealed corner buttons: always visible on touch devices and while focused. */
 const revealClass = 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 touch:opacity-100'
-
-function activate(event: MouseEvent): void {
-  if (props.selectionMode) emit('toggle-select', props.item, event.shiftKey)
-  else emit('open', props.item)
-}
 
 function play(): void {
   void video.value?.play().catch(() => undefined)

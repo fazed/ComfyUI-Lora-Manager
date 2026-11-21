@@ -569,6 +569,47 @@ pages only supply data, tool entries and bulk actions through props and slots.
   placeholder cells with the real columns, gap and aspect (`utils/gridLayout.ts`
   is shared with the grid maths) and `aria-busy`; when everything is loaded the
   grid footer says "You've reached the end: N models".
+* **Context menus** (`components/ModelActionMenu.vue`, one shared WAI-ARIA
+  menu; entries built by the pure `utils/menuItems.ts`, tests in
+  `tests/menuItems.test.ts`, written first). An entry may be `disabled`
+  (`aria-disabled`, still reachable with the arrow keys, ignored on click)
+  and carry display-only `shortcut` text; the menu takes an optional
+  `heading` caption. Three menus on the library pages:
+  * **Item** (right-click a card or its "..." button): Open details, Send to
+    ComfyUI and Replace in ComfyUI (only where sending works, i.e. LoRAs),
+    Copy LoRA syntax (LoRAs), Add to / Remove from favorites, View on Civitai
+    (new tab, only with a Civitai model id; URL from `civitaiModelUrl` in
+    `utils/civitai.ts`, shared with the drawer), then the model actions above.
+    No "Copy trigger words": the list payload has no trigger words.
+  * **Selection**: in selection mode, right-clicking a **selected** card
+    shows the bulk actions of the selection bar (Move..., Add tags...,
+    Filename template..., Send to ComfyUI, Copy names, Delete...) under a
+    "3 selected" heading. Right-clicking an **unselected** card in selection
+    mode shows that card's own item menu and leaves the selection alone
+    (changing a carefully built selection on a right-click was judged more
+    surprising). Right-click works in selection mode on recipe cards too
+    (their item menu; recipes have no selection menu yet).
+  * **Folder** (right-click a row of the folder tree, or the context-menu
+    key): New subfolder..., Rename folder..., Apply filename template...,
+    Delete folder... for the **pointed** folder; the folder panel's "..."
+    header menu shows the same entries for the selected folder (or New
+    folder... at the root). Both run `createFolderActions` in
+    `utils/folderActions.ts`, which takes the folder path as an argument:
+    delete still resolves the folder, refuses one present in several roots
+    and runs the dry-run probe + danger confirm in `tools.deleteFolder`;
+    deleting the selected folder (or a parent of it) clears the folder filter,
+    renaming it keeps the selection on the new name (`renamedFolderPath`).
+  Every destructive entry runs through the existing flows (danger confirm,
+  20 s staged delete with Undo); there are no Delete/F2 shortcuts and no drag
+  and drop. The pointer helpers are shared by both card types
+  (`composables/useCardInteractions.ts`): a keyboard context-menu key anchors
+  the menu at the focused element. On touch, the "..." button is always
+  visible (Android also fires `contextmenu` on a long press); there is no
+  separate long-press handler, because the click that follows a long press
+  would also open the drawer.
+* **Ctrl/Cmd+click** on a card toggles it in the selection (and turns
+  selection mode on when it is off); Shift+click in selection mode still
+  selects a range.
 * **Cards.** Tags are one ellipsised line (no dangling separator), the scrim
   behind titles is taller, card titles are paragraphs (no heading flood) and the
   recipe card's send button is hidden on phones (it stays in the menu).
@@ -701,10 +742,12 @@ context menu and the model modal). Everything below goes through
 `composables/useModelActions.ts` (flows), `utils/modelActions.ts` (pure
 helpers) and the typed calls in `api/endpoints.ts`.
 
-* **Card menu** ("..." button on every card, or right-click): Move...,
-  Rename file..., Exclude from library..., Delete... (WAI-ARIA menu: arrow
-  keys, Home/End, Escape returns focus to the button). The **drawer** has the
-  same actions in its More actions menu.
+* **Card menu** ("..." button on every card, or right-click): the shared
+  context menu (see "Context menus" under Browse pages) with the quick
+  actions plus Move..., Rename file..., Filename template, Preview, Content
+  rating, Refresh, Re-link, Exclude from library..., Delete... (WAI-ARIA
+  menu: arrow keys, Home/End, Escape returns focus to the button). The
+  **drawer** has the same model actions in its More actions menu.
 * **Selection mode** toolbar: count, Select all loaded (also Ctrl/Cmd+A while
   selection mode is on and focus is not in a field), Select none, Invert, then
   Move..., Add tags..., Send to ComfyUI (LoRAs; all selected LoRAs as one

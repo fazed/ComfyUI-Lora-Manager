@@ -1,70 +1,38 @@
 <script lang="ts">
-import type { IconName } from './AppIcon.vue'
-import type { MessageKey } from '@/i18n'
-
-export type ModelAction =
-  | 'move'
-  | 'rename'
-  | 'template'
-  | 'preview'
-  | 'rating'
-  | 'refresh'
-  | 'relink'
-  | 'exclude'
-  | 'delete'
-
-export interface ActionMenuItem {
-  action: string
-  label: string
-  icon: IconName
-  danger?: boolean
-  /** External link: rendered as an anchor that opens in a new tab (no select event). */
-  href?: string
-  /** Draws a separator line above the entry. */
-  divider?: boolean
-}
-
-
-/** The model actions of the card menu and the drawer's "More actions" menu, in this order. */
-export const MODEL_ITEMS: { action: ModelAction; label: MessageKey; icon: IconName; danger?: boolean }[] = [
-  { action: 'move', label: 'actions.move', icon: 'folderMove' },
-  { action: 'rename', label: 'actions.rename', icon: 'pencil' },
-  { action: 'template', label: 'tools.template.open', icon: 'type' },
-  { action: 'preview', label: 'tools.preview.open', icon: 'image' },
-  { action: 'rating', label: 'tools.nsfw.open', icon: 'shield' },
-  { action: 'refresh', label: 'tools.refresh.open', icon: 'refresh' },
-  { action: 'relink', label: 'tools.relink.open', icon: 'link' },
-  { action: 'exclude', label: 'actions.exclude', icon: 'eyeOff' },
-  { action: 'delete', label: 'actions.delete', icon: 'trash', danger: true },
-]
+// The entry type and the model actions live in utils/menuItems.ts (pure, tested); re-exported for existing callers.
+export { MODEL_ITEMS, type ActionMenuItem, type ModelAction } from '@/utils/menuItems'
 </script>
 
 <script setup lang="ts">
 /**
- * Per-model action menu (card "…" button or right-click). One instance lives
- * on the library page, positioned at a viewport point and kept inside the
- * viewport. WAI-ARIA menu: arrow keys / Home / End move, Escape or an outside
- * pointerdown closes (focus goes back to the opener), Tab closes.
- * `items` replaces the model actions (the recipes page passes its own list).
+ * Shared context menu (card "…" button or right-click, selection, folder rows,
+ * the drawer's More actions, recipes). One instance lives on the page,
+ * positioned at a viewport point and kept inside the viewport. WAI-ARIA menu:
+ * arrow keys / Home / End move (disabled entries are focusable but inert),
+ * Escape or an outside pointerdown closes (focus goes back to the opener), Tab
+ * closes. `items` replaces the model actions; `heading` adds a non-interactive
+ * caption on top (e.g. "3 selected").
  */
 import { computed, nextTick, onMounted, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { useDismissLayer } from '@/composables/useDismiss'
-import { t } from '@/i18n'
+import { modelActionItems, type ActionMenuItem } from '@/utils/menuItems'
 
-const props = defineProps<{ x: number; y: number; label: string; items?: ActionMenuItem[] }>()
+const props = defineProps<{ x: number; y: number; label: string; items?: ActionMenuItem[]; heading?: string }>()
 const emit = defineEmits<{ select: [action: string]; close: [reason: 'escape' | 'outside' | 'select'] }>()
 
 const MENU_WIDTH = 240
-const entries = computed<ActionMenuItem[]>(() => props.items ?? MODEL_ITEMS.map((entry) => ({ ...entry, label: t(entry.label) })))
+const ROW_HEIGHT = 36
+const entries = computed<ActionMenuItem[]>(() => props.items ?? modelActionItems())
 
 const menu = ref<HTMLElement | null>(null)
 const style = computed(() => {
   const width = typeof window === 'undefined' ? 1024 : window.innerWidth
   const height = typeof window === 'undefined' ? 768 : window.innerHeight
+  const estimated = entries.value.length * ROW_HEIGHT + (props.heading ? 30 : 0) + 20
   return {
     left: `${Math.max(8, Math.min(props.x, width - MENU_WIDTH - 8))}px`,
-    top: `${Math.max(8, Math.min(props.y, height - (entries.value.length * 36 + 20) - 8))}px`,
+    top: `${Math.max(8, Math.min(props.y, height - estimated - 8))}px`,
     width: `${MENU_WIDTH}px`,
   }
 })
@@ -88,10 +56,20 @@ function onKey(event: KeyboardEvent): void {
   event.preventDefault()
 }
 
+function choose(entry: ActionMenuItem): void {
+  if (entry.disabled) return
+  emit('select', entry.action)
+  emit('close', 'select')
+}
+
 onMounted(async () => {
   await nextTick()
-  buttons()[0]?.focus()
+  const list = buttons()
+  ;(list.find((button) => button.getAttribute('aria-disabled') !== 'true') ?? list[0])?.focus()
 })
+
+const rowClass =
+  'lm-row flex min-h-[34px] cursor-pointer items-center gap-2 px-3 text-left text-sm phone:min-h-touch touch:min-h-touch aria-disabled:cursor-not-allowed aria-disabled:opacity-60'
 </script>
 
 <template>
@@ -102,29 +80,31 @@ onMounted(async () => {
     role="menu"
     :aria-label="label"
     @keydown="onKey"
+    @contextmenu.prevent
   >
+    <p v-if="heading" class="truncate px-3 pt-1 pb-1 text-xs font-medium text-muted" aria-hidden="true">{{ heading }}</p>
     <template v-for="entry in entries" :key="entry.action">
       <a
-        v-if="entry.href"
+        v-if="entry.href && !entry.disabled"
         role="menuitem"
-        class="lm-row flex min-h-[34px] cursor-pointer items-center gap-2 px-3 text-left text-sm text-fg no-underline hover:no-underline phone:min-h-touch touch:min-h-touch"
-        :class="entry.divider ? 'mt-1 hairline-t border-border' : ''"
+        :class="[rowClass, 'text-fg no-underline hover:no-underline', entry.divider ? 'mt-1 hairline-t border-border' : '']"
         :href="entry.href"
         target="_blank"
         rel="noopener noreferrer"
         @click="emit('close', 'select')"
       >
-        <AppIcon :name="entry.icon" :size="16" />{{ entry.label }}
+        <AppIcon :name="entry.icon" :size="16" /><span class="min-w-0 flex-1 truncate">{{ entry.label }}</span>
       </a>
       <button
         v-else
         type="button"
         role="menuitem"
-        class="lm-row flex min-h-[34px] cursor-pointer items-center gap-2 px-3 text-left text-sm phone:min-h-touch touch:min-h-touch"
-        :class="[entry.danger ? 'text-danger' : '', entry.divider ? 'mt-1 hairline-t border-border' : '']"
-        @click="emit('select', entry.action); emit('close', 'select')"
+        :class="[rowClass, entry.danger ? 'text-danger' : '', entry.divider ? 'mt-1 hairline-t border-border' : '']"
+        :aria-disabled="entry.disabled ? 'true' : undefined"
+        @click="choose(entry)"
       >
-        <AppIcon :name="entry.icon" :size="16" />{{ entry.label }}
+        <AppIcon :name="entry.icon" :size="16" /><span class="min-w-0 flex-1 truncate">{{ entry.label }}</span>
+        <span v-if="entry.shortcut" class="ml-2 flex-none text-xs text-muted tabular-nums" aria-hidden="true">{{ entry.shortcut }}</span>
       </button>
     </template>
   </div>

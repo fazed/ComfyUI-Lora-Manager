@@ -37,3 +37,13 @@ export function parseCivitaiInput(input: string): CivitaiTarget | null {
   if (modelMatch) return { modelId: Number(modelMatch[1]), versionId }
   return null
 }
+
+/**
+ * Public Civitai page of a model (optionally a version). A host that is not a
+ * plain domain name falls back to civitai.com. Empty without a model id.
+ */
+export function civitaiModelUrl(host: string, modelId: number | null | undefined, versionId?: number | null): string {
+  if (!modelId) return ''
+  const safeHost = /^[a-z0-9.-]+$/i.test(host) ? host : 'civitai.com'
+  return `https://${safeHost}/models/${modelId}${versionId ? `?modelVersionId=${versionId}` : ''}`
+}
