@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, nextTick, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import TopBar from '@/components/TopBar.vue'
 import ToastHost from '@/components/ToastHost.vue'
@@ -10,6 +10,18 @@ import { t } from '@/i18n'
 
 useTheme()
 const route = useRoute()
+
+// Route change (not a tab/query change inside a page): move focus to <main> when it was on
+// the top bar or nowhere, so the skip link / keyboard users start at the new page.
+watch(
+  () => route.name,
+  async (_name, previous) => {
+    if (previous === undefined) return
+    await nextTick()
+    const active = document.activeElement
+    if (!active || active === document.body || active.closest('header')) document.getElementById('main-content')?.focus({ preventScroll: true })
+  },
+)
 
 const pageTitle = computed(() => (route.meta.title ? t(route.meta.title) : t('app.title')))
 
@@ -32,7 +44,7 @@ watch(
   <!-- No sidebar: navigation lives in the top bar and the content uses the full width. -->
   <div class="flex h-full min-w-0 flex-col">
     <TopBar />
-    <main id="main-content" class="relative flex min-h-0 flex-1 flex-col overflow-hidden focus:outline-none" tabindex="-1">
+    <main id="main-content" :data-layout="route.meta.layout" class="relative flex min-h-0 flex-1 flex-col overflow-hidden focus:outline-none" tabindex="-1">
       <!-- Keyed by route name: the library page component is shared by several routes. -->
       <RouterView v-slot="{ Component, route: current }">
         <component :is="Component" :key="String(current.name)" />

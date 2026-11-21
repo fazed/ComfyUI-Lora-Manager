@@ -8,6 +8,7 @@ import { downloadsApi } from '@/api/endpoints'
 import type { QueueItem } from '@/api/types'
 import { useConfirm, useToasts } from '@/composables/useFeedback'
 import { useDownloadQueue } from '@/composables/useDownloadQueue'
+import PageShell from '@/components/PageShell.vue'
 import { parseCivitaiInput } from '@/utils/civitai'
 import { formatBytes, formatDateTime, formatSpeed, progressPercent } from '@/utils/format'
 import { t, type MessageKey } from '@/i18n'
@@ -155,29 +156,22 @@ watch(finishedCount, (value) => {
 </script>
 
 <template>
-  <div class="lm-page flex flex-1 flex-col gap-6 overflow-y-auto">
-    <header class="lm-page-header mb-0">
-      <div>
-        <h1>{{ t('downloads.title') }}</h1>
-        <p v-if="queue.worker.value" class="mt-2 flex flex-wrap items-center gap-2 text-sm text-muted">
-          <span class="lm-badge" :class="queue.paused.value ? 'lm-badge--warning' : 'lm-badge--success'">
-            {{ queue.paused.value ? t('downloads.paused') : t('downloads.running') }}
-          </span>
-          {{ t('downloads.concurrency', { count: queue.worker.value.max_concurrent ?? '?' }) }}
-          <span v-if="queue.worker.value.rate_limited" class="lm-badge lm-badge--warning">{{ t('downloads.rateLimited') }}</span>
-        </p>
-      </div>
-      <button
-        v-if="queue.queueWorker.value"
-        type="button"
-        class="lm-btn"
-        :disabled="busy === 'pause'"
-        @click="togglePause"
-      >
+  <PageShell :title="t('downloads.title')">
+    <template v-if="queue.worker.value" #description>
+      <span class="flex flex-wrap items-center gap-2">
+        <span class="lm-badge" :class="queue.paused.value ? 'lm-badge--warning' : 'lm-badge--success'">
+          {{ queue.paused.value ? t('downloads.paused') : t('downloads.running') }}
+        </span>
+        {{ t('downloads.concurrency', { count: queue.worker.value.max_concurrent ?? '?' }) }}
+        <span v-if="queue.worker.value.rate_limited" class="lm-badge lm-badge--warning">{{ t('downloads.rateLimited') }}</span>
+      </span>
+    </template>
+    <template v-if="queue.queueWorker.value" #actions>
+      <button type="button" class="lm-btn" :disabled="busy === 'pause'" @click="togglePause">
         <AppIcon :name="queue.paused.value ? 'play' : 'pause'" :size="16" />
         {{ queue.paused.value ? t('downloads.resumeAll') : t('downloads.pauseAll') }}
       </button>
-    </header>
+    </template>
 
     <p v-if="queue.loaded.value && !queue.queueWorker.value && !queue.error.value" class="lm-panel px-4 py-3 text-muted">
       {{ t('downloads.workerOff') }}
@@ -344,5 +338,5 @@ watch(finishedCount, (value) => {
       </ul>
     </section>
     <DownloadDialog v-if="dialogInput !== null" prefix="loras" :initial-input="dialogInput" @close="dialogInput = null" />
-  </div>
+  </PageShell>
 </template>

@@ -7,6 +7,7 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import AppIcon from '@/components/AppIcon.vue'
+import PageShell from '@/components/PageShell.vue'
 import SearchThumb from '@/components/SearchThumb.vue'
 import StateBlock from '@/components/StateBlock.vue'
 import { GLOBAL_SCOPES, searchLibrary, type LibraryScope } from '@/api/suggestSource'
@@ -69,19 +70,18 @@ onBeforeUnmount(() => controller?.abort())
 </script>
 
 <template>
-  <div class="lm-page min-h-0 flex-1 overflow-y-auto">
-    <header class="lm-page-header">
-      <h1>{{ query.length >= SUGGEST_MIN_CHARS ? t('search.heading', { query }) : t('search.title') }}</h1>
-      <span v-if="!loading && sections.length" class="text-sm text-muted tabular-nums" aria-live="polite">
+  <PageShell :title="query.length >= SUGGEST_MIN_CHARS ? t('search.heading', { query }) : t('search.title')">
+    <template v-if="!loading && sections.length" #actions>
+      <span class="text-sm text-muted tabular-nums" aria-live="polite">
         {{ t('search.count', { count: totalHits.toLocaleString() }) }}
       </span>
-    </header>
+    </template>
 
     <StateBlock v-if="query.length < SUGGEST_MIN_CHARS" kind="empty" icon="search" :message="t('search.prompt')" />
     <StateBlock v-else-if="loading" kind="loading" />
     <StateBlock v-else-if="!visible.length" kind="empty" icon="search" :message="t('search.none')" />
 
-    <section v-for="section in visible" :key="section.scope" class="mb-6" :aria-labelledby="`results-${section.scope}`">
+    <section v-for="section in visible" :key="section.scope" class="flex flex-col" :aria-labelledby="`results-${section.scope}`">
       <div class="mb-2 flex flex-wrap items-center gap-3">
         <h2 :id="`results-${section.scope}`" class="flex items-center gap-2 text-lg">
           <AppIcon :name="tabFor(section.scope).icon" :size="18" class="text-muted" />
@@ -126,5 +126,5 @@ onBeforeUnmount(() => controller?.abort())
         </li>
       </ul>
     </section>
-  </div>
+  </PageShell>
 </template>

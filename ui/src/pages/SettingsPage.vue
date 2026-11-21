@@ -20,6 +20,7 @@ import { computed, nextTick, onMounted, ref, shallowRef, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { useEventListener, useLocalStorage, useMediaQuery, useTimeoutFn } from '@vueuse/core'
 import AppIcon from '@/components/AppIcon.vue'
+import PageShell from '@/components/PageShell.vue'
 import ThemeOptions from '@/components/ThemeOptions.vue'
 import AboutPanel from '@/components/settings/AboutPanel.vue'
 import BackupsPanel from '@/components/settings/BackupsPanel.vue'
@@ -68,7 +69,8 @@ const query = ref('')
 const roots = shallowRef<Record<string, string[]>>({})
 const llmModels = shallowRef<Record<string, string[]>>({})
 const loadingModels = ref(false)
-const scroller = ref<HTMLElement | null>(null)
+const shell = ref<InstanceType<typeof PageShell> | null>(null)
+const scroller = computed(() => shell.value?.scroller ?? null)
 const searchInput = ref<HTMLInputElement | null>(null)
 const highlight = ref<string | null>(null)
 const { start: clearHighlightLater } = useTimeoutFn(() => (highlight.value = null), 2200, { immediate: false })
@@ -286,16 +288,12 @@ const nightly = computed(() => server.value?.update_channel === 'nightly')
 </script>
 
 <template>
-  <div ref="scroller" class="flex min-h-0 flex-1 flex-col overflow-y-auto [scrollbar-gutter:stable]">
-    <div class="lm-page mx-auto flex w-full max-w-[1180px] flex-1 flex-col gap-5">
-      <header class="flex flex-wrap items-end gap-x-6 gap-y-3">
-        <div class="min-w-[min(100%,260px)] flex-1">
-          <h1 class="text-2xl">{{ t('settings.title') }}</h1>
-          <p class="mt-1 text-sm text-muted">
-            {{ t('settings.intro') }}
-            <a :href="classicUrl">{{ t('common.openClassic') }} <AppIcon name="external" :size="12" /></a>
-          </p>
-        </div>
+  <PageShell ref="shell" :title="t('settings.title')">
+      <template #description>
+        {{ t('settings.intro') }}
+        <a :href="classicUrl">{{ t('common.openClassic') }} <AppIcon name="external" :size="12" /></a>
+      </template>
+      <template #actions>
         <div class="relative w-[300px] phone:w-full">
           <label class="sr-only" for="settings-filter">{{ t('set.searchShortcut') }}</label>
           <AppIcon name="search" :size="16" class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted" />
@@ -314,7 +312,7 @@ const nightly = computed(() => server.value?.update_channel === 'nightly')
             <AppIcon name="close" :size="14" />
           </button>
         </div>
-      </header>
+      </template>
 
       <div class="grid flex-1 grid-cols-[220px_minmax(0,1fr)] content-start items-start gap-6 tablet:grid-cols-1 tablet:gap-4">
         <!-- Tabs: sticky vertical list on wide screens, horizontal strip below the tablet breakpoint -->
@@ -461,11 +459,11 @@ const nightly = computed(() => server.value?.update_channel === 'nightly')
           </form>
         </div>
       </div>
-    </div>
 
     <!-- Sticky save bar: only with unsaved changes; in the flow at the end, so it never hides the last field -->
-    <div v-if="showBar && draft" class="sticky bottom-0 z-20 mt-auto animate-fade-in px-6 pb-4 phone:px-3 phone:pb-3">
-      <div class="mx-auto flex max-w-[1180px] flex-wrap items-center gap-3 rounded-md hairline border-accent bg-elevated px-4 py-3 shadow-lg" role="region" :aria-label="t('settings.unsaved')">
+    <template v-if="showBar && draft" #footer>
+    <div class="sticky bottom-0 z-20 mt-auto animate-fade-in px-6 pb-4 phone:px-4 phone:pb-3">
+      <div class="mx-auto flex max-w-page flex-wrap items-center gap-3 rounded-md hairline border-accent bg-elevated px-4 py-3 shadow-lg" role="region" :aria-label="t('settings.unsaved')">
         <span class="size-[8px] flex-none rounded-pill bg-accent" aria-hidden="true"></span>
         <span class="mr-auto text-sm font-medium" aria-live="polite">{{ saving ? t('set.saving') : dirty ? unsavedLabel : t('settings.noChanges') }}</span>
         <p v-if="saveError" id="settings-save-error" class="basis-full text-xs text-danger" role="alert" tabindex="-1">{{ saveError }}</p>
@@ -475,5 +473,6 @@ const nightly = computed(() => server.value?.update_channel === 'nightly')
         </button>
       </div>
     </div>
-  </div>
+    </template>
+  </PageShell>
 </template>

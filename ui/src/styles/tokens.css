@@ -122,6 +122,7 @@
   /* Breakpoints: the layout uses the max-width variants defined below. */
   --breakpoint-*: initial;
   --container-*: initial;
+  --container-page: var(--lm-page-max-width);
 
   @keyframes lm-pulse {
     50% {

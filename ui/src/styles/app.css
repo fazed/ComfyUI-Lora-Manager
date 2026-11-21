@@ -397,19 +397,6 @@
     @apply text-2xl;
   }
 
-  /* Scrolling page with a header (Downloads, Settings, Not found). */
-  .lm-page {
-    @apply p-6 phone:p-4;
-  }
-
-  .lm-page-header {
-    @apply mb-5 flex flex-wrap items-center justify-between gap-3;
-  }
-
-  .lm-page-header h1 {
-    @apply text-2xl;
-  }
-
   .lm-muted {
     @apply text-muted;
   }

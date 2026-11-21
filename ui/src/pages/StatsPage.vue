@@ -6,6 +6,7 @@
  */
 import { computed, onMounted, reactive, ref, shallowRef } from 'vue'
 import LazyMedia from '@/components/LazyMedia.vue'
+import PageShell from '@/components/PageShell.vue'
 import StateBlock from '@/components/StateBlock.vue'
 import ChartCard from '@/components/charts/ChartCard.vue'
 import DonutChart from '@/components/charts/DonutChart.vue'
@@ -187,14 +188,8 @@ const tableClass = 'w-full text-left text-sm [&_th]:py-1 [&_th]:pr-3 [&_th]:font
 </script>
 
 <template>
-  <div class="min-h-0 flex-1 overflow-y-auto">
-    <div class="lm-page flex w-full max-w-[1200px] flex-col gap-4">
-      <header class="lm-page-header mb-0">
-        <div>
-          <h1>{{ t('stats.title') }}</h1>
-          <p class="mt-2 text-muted">{{ t('stats.intro') }}</p>
-        </div>
-      </header>
+  <PageShell :title="t('stats.title')">
+    <template #description>{{ t('stats.intro') }}</template>
 
       <StateBlock v-if="loading" kind="loading" />
       <StateBlock v-else-if="error" kind="error" :title="t('stats.loadError')" :message="error" @retry="load" />
@@ -374,6 +369,5 @@ const tableClass = 'w-full text-left text-sm [&_th]:py-1 [&_th]:pr-3 [&_th]:font
           </article>
         </div>
       </template>
-    </div>
-  </div>
+  </PageShell>
 </template>

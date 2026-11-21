@@ -8,6 +8,7 @@ import { onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import AppIcon, { type IconName } from '@/components/AppIcon.vue'
 import EnvironmentPanel from '@/components/EnvironmentPanel.vue'
+import PageShell from '@/components/PageShell.vue'
 import StateBlock from '@/components/StateBlock.vue'
 import { useDoctor } from '@/composables/useMaintenance'
 import { actionKind, type CheckStatus } from '@/utils/maintenance'
@@ -53,22 +54,16 @@ onMounted(() => void doctor.run())
 </script>
 
 <template>
-  <div class="min-h-0 flex-1 overflow-y-auto">
-    <div class="lm-page flex w-full max-w-[980px] flex-col gap-4">
-      <header class="lm-page-header mb-0 flex flex-wrap items-start gap-3">
-        <div class="min-w-[min(100%,260px)] flex-1">
-          <h1>{{ t('doctor.title') }}</h1>
-          <p class="mt-2 text-muted">{{ t('doctor.intro') }}</p>
-        </div>
-        <div class="flex flex-wrap gap-2">
-          <button type="button" class="lm-btn" :disabled="loading || !!busy" @click="doctor.run()">
-            <AppIcon name="refresh" :size="16" />{{ loading ? t('doctor.running') : report ? t('doctor.rerun') : t('doctor.run') }}
-          </button>
-          <button type="button" class="lm-btn" :disabled="!report || !!busy" :title="t('doctor.exportHint')" @click="doctor.exportBundle()">
-            <AppIcon name="download" :size="16" />{{ t('doctor.export') }}
-          </button>
-        </div>
-      </header>
+  <PageShell :title="t('doctor.title')">
+    <template #description>{{ t('doctor.intro') }}</template>
+    <template #actions>
+      <button type="button" class="lm-btn" :disabled="loading || !!busy" @click="doctor.run()">
+        <AppIcon name="refresh" :size="16" />{{ loading ? t('doctor.running') : report ? t('doctor.rerun') : t('doctor.run') }}
+      </button>
+      <button type="button" class="lm-btn" :disabled="!report || !!busy" :title="t('doctor.exportHint')" @click="doctor.exportBundle()">
+        <AppIcon name="download" :size="16" />{{ t('doctor.export') }}
+      </button>
+    </template>
 
       <StateBlock v-if="loading && !report" kind="loading" />
       <StateBlock v-else-if="error && !report" kind="error" :title="t('doctor.loadError')" :message="error" @retry="doctor.run()" />
@@ -116,6 +111,5 @@ onMounted(() => void doctor.run())
           <EnvironmentPanel />
         </section>
       </template>
-    </div>
-  </div>
+  </PageShell>
 </template>
