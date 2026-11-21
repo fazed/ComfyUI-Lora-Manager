@@ -1,14 +1,16 @@
 <script setup lang="ts" generic="T">
 /**
- * Windowed card grid: only the rows inside (or near) the viewport are
- * rendered. Card aspect ratio and gap come from the theme tokens
- * --lm-card-aspect and --lm-card-gap (base.css / density; built-in themes
- * do not override them, user themes may).
+ * Windowed card grid or row list: only the rows inside (or near) the viewport
+ * are rendered. Grid: card aspect ratio and gap come from --lm-card-aspect and
+ * --lm-card-gap. List (`layout="list"`): one full-width column of
+ * --lm-row-height rows, --lm-row-gap apart. The tokens live in base.css /
+ * density; built-in themes do not override them, user themes may. The maths is
+ * shared with the skeleton (utils/gridLayout.ts).
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useEventListener, useMutationObserver, useResizeObserver } from '@vueuse/core'
 import { scrollTopToReveal } from '@/utils/drawerNav'
-import { gridColumns } from '@/utils/gridLayout'
+import { gridMetrics, parseLength, rowTop, type GridLayout, type LayoutTokens } from '@/utils/gridLayout'
 import { t } from '@/i18n'
 
 const props = withDefaults(
@@ -16,13 +18,15 @@ const props = withDefaults(
     items: T[]
     itemKey: (item: T) => string
     minItemWidth: number
+    /** Card grid (default) or one-column row list. */
+    layout?: GridLayout
     /** Extra rows rendered above/below the viewport. */
     overscan?: number
     label?: string
     /** Loading: render placeholder cells with the real columns, gap and aspect instead of items. */
     skeleton?: boolean
   }>(),
-  { overscan: 2, label: '', skeleton: false },
+  { layout: 'grid', overscan: 2, label: '', skeleton: false },
 )
 
 const emit = defineEmits<{ 'reach-end': [] }>()
@@ -32,8 +36,7 @@ const scroller = ref<HTMLElement | null>(null)
 const width = ref(0)
 const viewportHeight = ref(0)
 const scrollTop = ref(0)
-const aspect = ref(2 / 3)
-const gap = ref(14)
+const tokens = ref<LayoutTokens>({ aspect: 2 / 3, cardGap: 14, rowHeight: 56, rowGap: 6 })
 
 /** Parse "2 / 3", "0.75" or "16/9" into width/height. */
 function parseAspect(value: string): number | null {
@@ -44,16 +47,19 @@ function parseAspect(value: string): number | null {
 
 function readTokens(): void {
   const style = getComputedStyle(scroller.value ?? document.documentElement)
-  aspect.value = parseAspect(style.getPropertyValue('--lm-card-aspect')) ?? 2 / 3
-  const parsedGap = Number.parseFloat(style.getPropertyValue('--lm-card-gap'))
-  gap.value = Number.isFinite(parsedGap) ? parsedGap : 14
+  tokens.value = {
+    aspect: parseAspect(style.getPropertyValue('--lm-card-aspect')) ?? 2 / 3,
+    cardGap: parseLength(style.getPropertyValue('--lm-card-gap'), 14),
+    rowHeight: parseLength(style.getPropertyValue('--lm-row-height'), 56),
+    rowGap: parseLength(style.getPropertyValue('--lm-row-gap'), 6),
+  }
 }
 
-// On phone widths always allow two columns, whatever the card-size slider says (utils/gridLayout.ts).
-const columns = computed(() => gridColumns(width.value, gap.value, props.minItemWidth))
-const itemWidth = computed(() => (width.value - gap.value * (columns.value - 1)) / columns.value)
-const itemHeight = computed(() => Math.max(40, itemWidth.value / aspect.value))
-const rowHeight = computed(() => itemHeight.value + gap.value)
+// On phone widths the card grid always allows two columns, whatever the card-size slider says.
+const metrics = computed(() => gridMetrics(props.layout, width.value, props.minItemWidth, tokens.value))
+const columns = computed(() => metrics.value.columns)
+const itemHeight = computed(() => metrics.value.itemHeight)
+const rowHeight = computed(() => itemHeight.value + metrics.value.gap)
 const rowCount = computed(() => Math.ceil(props.items.length / columns.value))
 const startRow = computed(() => Math.max(0, Math.floor(scrollTop.value / rowHeight.value) - props.overscan))
 const endRow = computed(() =>
@@ -65,7 +71,9 @@ const visible = computed(() =>
     index: startRow.value * columns.value + offset,
   })),
 )
-const totalHeight = computed(() => Math.max(0, rowCount.value * rowHeight.value - gap.value))
+const totalHeight = computed(() => Math.max(0, rowCount.value * rowHeight.value - metrics.value.gap))
+const gapClass = computed(() => (props.layout === 'list' ? 'gap-[var(--lm-row-gap)]' : 'gap-card'))
+const trackStyle = computed(() => ({ gridTemplateColumns: `repeat(${columns.value}, minmax(0, 1fr))`, gridAutoRows: `${itemHeight.value}px` }))
 
 function onScroll(): void {
   if (scroller.value) scrollTop.value = scroller.value.scrollTop
@@ -109,6 +117,15 @@ watch(
   { immediate: false },
 )
 
+// Switching grid <-> list keeps the first visible item at the top instead of jumping to an unrelated pixel offset.
+watch([metrics, () => props.layout], async ([next, layout], [prev, prevLayout]) => {
+  const el = scroller.value
+  if (!el || layout === prevLayout || !prev) return
+  const firstIndex = Math.floor(el.scrollTop / (prev.itemHeight + prev.gap)) * prev.columns
+  await nextTick()
+  scrollTo(rowTop(firstIndex, next))
+})
+
 /** Scroll back to the top (after filters change). */
 function scrollToTop(): void {
   if (scroller.value) scroller.value.scrollTop = 0
@@ -119,8 +136,7 @@ function scrollToTop(): void {
 function scrollToIndex(index: number): void {
   const el = scroller.value
   if (!el || index < 0) return
-  const rowTop = Math.floor(index / columns.value) * rowHeight.value
-  const next = scrollTopToReveal(rowTop, itemHeight.value, el.scrollTop, el.clientHeight)
+  const next = scrollTopToReveal(rowTop(index, metrics.value), itemHeight.value, el.scrollTop, el.clientHeight)
   if (next === el.scrollTop) return
   el.scrollTop = next
   scrollTop.value = next
@@ -152,19 +168,16 @@ defineExpose({ scrollToTop, scrollToIndex, scrollTo, scrollOffset })
   >
     <template v-if="skeleton">
       <p class="sr-only" role="status">{{ t('common.loading') }}</p>
-      <div class="grid gap-card" aria-hidden="true" :style="{ gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`, gridAutoRows: `${itemHeight}px` }">
+      <div class="grid" :class="gapClass" aria-hidden="true" :style="trackStyle">
         <div v-for="n in skeletonCount" :key="n" class="lm-skeleton rounded-md"></div>
       </div>
     </template>
     <div v-else class="relative" :style="{ height: `${totalHeight}px` }">
       <div
-        class="absolute inset-x-0 top-0 grid gap-card will-change-transform"
+        class="absolute inset-x-0 top-0 grid"
+        :class="gapClass"
         role="list"
-        :style="{
-          transform: `translateY(${startRow * rowHeight}px)`,
-          gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-          gridAutoRows: `${itemHeight}px`,
-        }"
+        :style="{ ...trackStyle, transform: `translateY(${startRow * rowHeight}px)` }"
       >
         <div v-for="entry in visible" :key="itemKey(entry.item)" class="min-w-0" role="listitem">
           <slot :item="entry.item" :index="entry.index" />

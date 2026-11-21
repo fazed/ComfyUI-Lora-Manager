@@ -19,6 +19,7 @@ import FolderTree from '@/components/FolderTree.vue'
 import InputDialog from '@/components/InputDialog.vue'
 import ModelActionMenu, { type ModelAction } from '@/components/ModelActionMenu.vue'
 import ModelCard from '@/components/ModelCard.vue'
+import ModelRow from '@/components/ModelRow.vue'
 import ModelDrawer from '@/components/ModelDrawer.vue'
 import MoveDialog from '@/components/MoveDialog.vue'
 import OrganizeDialog from '@/components/OrganizeDialog.vue'
@@ -692,6 +693,8 @@ function bulkSend(event: MouseEvent): void {
         v-model:search="searchText"
         v-model:sort="filters.sort.value"
         v-model:card-size="filters.cardSize.value"
+        v-model:view="filters.view.value"
+        view-toggle
         :title="t(config.title)"
         :count-text="countText"
         :search-id="`library-search-${prefix}`"
@@ -790,11 +793,13 @@ function bulkSend(event: MouseEvent): void {
         :items="list.items.value"
         :item-key="(item: ModelItem) => item.file_path"
         :min-item-width="filters.cardSize.value"
+        :layout="filters.view.value"
         :label="t(config.title)"
         @reach-end="list.loadMore()"
       >
         <template #default="{ item }">
-          <ModelCard
+          <component
+            :is="filters.view.value === 'list' ? ModelRow : ModelCard"
             :item="item"
             :selection-mode="selectionMode"
             :selected="selected.has(item.file_path)"

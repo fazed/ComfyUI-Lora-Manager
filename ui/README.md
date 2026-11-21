@@ -28,7 +28,7 @@ ui/
                           outside/backdrop clicks close only the topmost overlay;
                           a backdrop click needs pointerdown + click on the backdrop)
     components/           TopBar, AppMenu/ThemeOptions, SearchCombobox, VirtualGrid,
-                          ModelCard, ModelDrawer, ExampleLightbox,
+                          ModelCard, ModelRow (list view), ModelDrawer, ExampleLightbox,
                           BaseModelQuickFilter, NodePickerDialog, FolderTree,
                           ModelActionMenu, ModalShell, InputDialog, MoveDialog,
                           OrganizeDialog, GenerationDetails, Recipe* (card,
@@ -83,7 +83,7 @@ Kept custom on purpose: `createPoller` (shared, scope-less download poller with
 no-overlap rescheduling and visibility pause; `useIntervalFn` cannot express
 "next run after the previous finished"), `copyText` (`useClipboard` cannot
 report a failed copy, which the error toast needs), the per-library
-sort/card-size store (validated on read), `useFolderPanel` (writes only on wide
+sort/card-size/view store (validated on read), `useFolderPanel` (writes only on wide
 viewports; tested with an injected width) and the grid virtualisation
 (`useVirtualList` is not a 2-D grid). No `useScrollLock`: the page body never
 scrolls (the grid and drawer scroll inside the app shell).
@@ -404,9 +404,14 @@ Non-color tokens (defaults in `base.css`, any theme may override):
 | Layout | `--lm-topbar-height`, `--lm-drawer-width`, `--lm-control-height`, `--lm-touch-target` (44px minimum hit area on phone / touch layouts), `--lm-border-width`, `--lm-focus-ring-width` |
 | Page | `--lm-page-max-width` (outer width of the centered content pages, default `1180px`, mapped to `max-w-page`) |
 | Cards | `--lm-card-aspect` (e.g. `2 / 3`), `--lm-card-gap` (card width comes from the per-library size slider), `--lm-card-zoom` (hover/focus zoom of card media, default `1.05`, `1` = off; forced to `1` for `prefers-reduced-motion`) |
+| List rows | `--lm-row-height` (56px, compact 46px; never below `--lm-touch-target`), `--lm-row-thumb` (thumbnail, 40px / 34px), `--lm-row-gap` (6px / 4px) |
 
-The virtualised grid reads `--lm-card-aspect` and `--lm-card-gap` at runtime,
-so a theme or density switch re-lays out the grid.
+The virtualised grid reads `--lm-card-aspect`, `--lm-card-gap`,
+`--lm-row-height` and `--lm-row-gap` at runtime, so a theme or density
+switch re-lays out the grid and the list. The row tokens are layout tokens:
+they live in `base.css` (and the compact block) only, never in a theme file.
+The grid wrapper no longer sets a permanent `will-change: transform` (it is
+re-positioned only when the rendered row window changes, not animated).
 
 ## Navigation and layout
 
@@ -527,16 +532,43 @@ pages only supply data, tool entries and bulk actions through props and slots.
 
 * **Toolbar layout.** One fixed 68px row from 901px up: title and count on the
   left, then (Recipes: the primary **Import** button), search (320px, shrinks
-  instead of wrapping), Sort, **Filters** (badge = panel filters, search and
-  folder excluded), card size (from 1280px), Folders, Select and one **Tools**
-  menu that holds *Organize...* and the page's tools. Below 1280px the Folders
-  and Select labels become icon-only with a tooltip. At 900px and below the
-  search takes its own second row (documented 2-row layout, about 112px).
-  Title and count never move to their own row when the folder panel opens.
+  instead of wrapping and gives up space before the title), Sort, **Filters**
+  (badge = panel filters, search and folder excluded), the **Grid / List view**
+  switch (model libraries only), the card-size slider (all desktop widths;
+  72px wide below 1280px; hidden in list view), Folders, Select and one
+  **Tools** menu that holds *Organize...* and the page's tools. Below 1280px
+  the Folders and Select labels become icon-only with a tooltip; a truncated
+  count shows in full as a tooltip. At 900px and below the search takes its
+  own second row (documented 2-row layout, about 112px). Title and count never
+  move to their own row when the folder panel opens.
+* **Grid / List view** (LoRAs, Checkpoints, Embeddings; not Recipes). A
+  segmented control (`role="group"` "View", two 36px buttons with
+  `aria-pressed` and the tooltips "Grid view" / "List view") sits left of the
+  card-size slider and is always visible; the choice is stored per library
+  with sort and card size (`view` in `lm-ui.library.<prefix>`, `VIEW_MODES`,
+  validated on read, default grid). List view renders `components/ModelRow.vue`
+  in the same `VirtualGrid` (`layout="list"`: one column, `--lm-row-height`
+  rows `--lm-row-gap` apart; the maths, skeleton included, is
+  `gridMetrics` / `rowTop` in `utils/gridLayout.ts`, tested in
+  `tests/listView.test.ts`). A row has the same events and pointer behaviour
+  as a card (shared `composables/useCardInteractions.ts`): full-row button
+  (`aria-label` / `aria-pressed` like the card), a `--lm-row-thumb` thumbnail
+  (mature blur, `--lm-card-zoom` hover zoom, no lift), name and folder, base
+  model badge, size, modified date, up to three tags and always-visible Send
+  (LoRAs) / Favorite / More actions buttons; a checkbox-style indicator on
+  the left in selection mode. Date and tags drop out when the row is narrow
+  (container queries at 820px / 1060px of row width, so an open folder panel
+  never squeezes the name); on phones a row is the thumbnail, the name, and
+  base model + size on a second line, with 44px buttons (Send stays in the
+  menu). Switching views keeps the first visible item at the top; scroll
+  restore, drawer prev/next (`scrollToIndex`) and Shift+click ranges work the
+  same in both layouts. There is no trigger-words column (not in the list
+  payload) and no sortable header.
 * **Phone (<= 720px).** One row: search plus a single **Filters** button
   (accessible name "Filters and sort", badge = active count) that opens a bottom
   sheet (native modal `<dialog>`, focus trap, Escape and backdrop close, on the
-  dismiss stack) with sort, show/hide folders, Select, the tool entries as
+  dismiss stack) with sort, the Grid / List view buttons and the card-size
+  slider (grid view only), show/hide folders, Select, the tool entries as
   labelled rows, the filter groups and a **Done** button. The page title is
   screen-reader only (the tabs above name the page); while filtered the count
   shows in the chips row. Controls here are `min-h-touch` (44px).

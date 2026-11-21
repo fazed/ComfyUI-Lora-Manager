@@ -16,15 +16,16 @@ import { ref } from 'vue'
 import { useEventListener, useMediaQuery } from '@vueuse/core'
 import AppIcon from './AppIcon.vue'
 import BottomSheet from './BottomSheet.vue'
+import type { IconName } from './icons'
 import MenuButton, { type MenuEntry } from './MenuButton.vue'
 import SearchCombobox from './SearchCombobox.vue'
-import type { FilterChip } from '@/composables/useLibraryFilters'
+import type { FilterChip, ViewMode } from '@/composables/useLibraryFilters'
 import { CARD_SIZE_MAX, CARD_SIZE_MIN } from '@/composables/useLibraryFilters'
 import type { SortOption } from '@/config/libraries'
 import { LOCAL_PER_GROUP, MAX_TAGS } from '@/api/suggestSource'
 import { shouldHandleShortcut } from '@/utils/browse'
 import type { SuggestOption } from '@/utils/suggest'
-import { t } from '@/i18n'
+import { t, type MessageKey } from '@/i18n'
 
 const props = withDefaults(
   defineProps<{
@@ -48,13 +49,21 @@ const props = withDefaults(
     toolItems: MenuEntry[]
     /** Bare-letter shortcuts are active (off while a drawer is open). */
     shortcuts?: boolean
+    /** Offer the grid / list view switch (model libraries; bind `v-model:view`). */
+    viewToggle?: boolean
   }>(),
-  { shortcuts: true },
+  { shortcuts: true, viewToggle: false },
 )
 
 const search = defineModel<string>('search', { required: true })
 const sort = defineModel<string>('sort', { required: true })
 const cardSize = defineModel<number>('cardSize', { required: true })
+const view = defineModel<ViewMode>('view', { default: 'grid' })
+
+const VIEW_BUTTONS: { mode: ViewMode; icon: IconName; label: MessageKey }[] = [
+  { mode: 'grid', icon: 'grid', label: 'library.view.grid' },
+  { mode: 'list', icon: 'list', label: 'library.view.list' },
+]
 
 const emit = defineEmits<{
   commit: [value: string]
@@ -159,14 +168,14 @@ defineExpose({ foldersToggle })
   >
     <div class="lm-toolbar-title mr-auto min-w-0 shrink">
       <h1 class="flex-none">{{ title }}</h1>
-      <span class="min-w-0 truncate text-sm text-muted tabular-nums" aria-live="polite">{{ countText }}</span>
+      <span class="min-w-0 truncate text-sm text-muted tabular-nums" aria-live="polite" :title="countText">{{ countText }}</span>
     </div>
     <slot name="leading" />
     <SearchCombobox
       :id="searchId"
       v-model="search"
       :scope="searchScope"
-      class="w-[320px] min-w-[120px] shrink max-[900px]:order-last max-[900px]:w-full"
+      class="w-[320px] min-w-[120px] shrink-[4] max-[900px]:order-last max-[900px]:w-full"
       :label="searchLabel"
       :placeholder="searchPlaceholder"
       :max-per-group="LOCAL_PER_GROUP"
@@ -192,10 +201,37 @@ defineExpose({ foldersToggle })
       <AppIcon name="filter" :size="16" />{{ t('library.filters') }}
       <span v-if="filterCount" class="lm-badge lm-badge--accent">{{ filterCount }}</span>
     </button>
-    <label class="hidden flex-none items-center gap-2 px-1 text-muted min-[1280px]:inline-flex">
+    <div
+      v-if="viewToggle"
+      class="inline-flex flex-none rounded-md hairline border-field-border bg-field p-px"
+      role="group"
+      :aria-label="t('library.view')"
+    >
+      <button
+        v-for="entry in VIEW_BUTTONS"
+        :key="entry.mode"
+        type="button"
+        class="inline-grid h-[34px] min-w-[36px] cursor-pointer place-items-center rounded-sm px-2 text-muted transition-colors hover:text-fg aria-pressed:bg-accent-soft aria-pressed:text-accent"
+        :aria-label="t(entry.label)"
+        :aria-pressed="view === entry.mode"
+        :title="t(entry.label)"
+        @click="view = entry.mode"
+      >
+        <AppIcon :name="entry.icon" :size="16" />
+      </button>
+    </div>
+    <label v-if="view !== 'list'" class="inline-flex flex-none items-center px-1 text-muted">
       <span class="sr-only">{{ t('library.cardSize') }}</span>
-      <AppIcon name="grid" :size="16" />
-      <input v-model.number="cardSize" class="w-[96px] accent-accent" type="range" :min="CARD_SIZE_MIN" :max="CARD_SIZE_MAX" step="10" :aria-label="t('library.cardSize')" />
+      <input
+        v-model.number="cardSize"
+        class="w-[72px] accent-accent min-[1280px]:w-[96px]"
+        type="range"
+        :min="CARD_SIZE_MIN"
+        :max="CARD_SIZE_MAX"
+        step="10"
+        :aria-label="t('library.cardSize')"
+        :title="t('library.cardSize')"
+      />
     </label>
     <button
       ref="foldersToggle"
@@ -254,6 +290,31 @@ defineExpose({ foldersToggle })
         <select :id="`sheet-sort-${idPrefix}`" v-model="sort" class="lm-select min-h-touch w-full">
           <option v-for="option in sortOptions" :key="option.value" :value="option.value">{{ t(option.label) }}</option>
         </select>
+      </div>
+      <div v-if="viewToggle" class="grid grid-cols-2 gap-2" role="group" :aria-label="t('library.view')">
+        <button
+          v-for="entry in VIEW_BUTTONS"
+          :key="entry.mode"
+          type="button"
+          class="lm-btn min-h-touch"
+          :class="{ 'lm-chip--active': view === entry.mode }"
+          :aria-pressed="view === entry.mode"
+          @click="view = entry.mode"
+        >
+          <AppIcon :name="entry.icon" :size="16" />{{ t(entry.label) }}
+        </button>
+      </div>
+      <div v-if="view !== 'list'" class="grid gap-1">
+        <label class="lm-label" :for="`sheet-size-${idPrefix}`">{{ t('library.cardSize') }}</label>
+        <input
+          :id="`sheet-size-${idPrefix}`"
+          v-model.number="cardSize"
+          class="min-h-touch w-full accent-accent"
+          type="range"
+          :min="CARD_SIZE_MIN"
+          :max="CARD_SIZE_MAX"
+          step="10"
+        />
       </div>
       <div class="grid grid-cols-2 gap-2">
         <button type="button" class="lm-btn min-h-touch" :aria-controls="foldersId" @click="fromSheet(() => emit('toggle-folders'))">

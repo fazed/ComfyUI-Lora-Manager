@@ -50,6 +50,10 @@
   --lm-card-gap: 14px;
   /* Hover/focus zoom of card media (1 disables it); the card itself never moves. */
   --lm-card-zoom: 1.05;
+  /* Compact list ("Rows") view of the model libraries: row height (>= --lm-touch-target), thumbnail, row gap. */
+  --lm-row-height: 56px;
+  --lm-row-thumb: 40px;
+  --lm-row-gap: 6px;
 
   /* Motion */
   --lm-motion-fast: 120ms;
@@ -75,6 +79,9 @@
   --lm-control-height: 30px;
   --lm-topbar-height: 52px;
   --lm-card-gap: 10px;
+  --lm-row-height: 46px;
+  --lm-row-thumb: 34px;
+  --lm-row-gap: 4px;
   --lm-font-size-md: 0.8125rem;
 }
 

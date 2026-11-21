@@ -23,21 +23,33 @@ export function clampCardSize(value: number): number {
   return Math.min(CARD_SIZE_MAX, Math.max(CARD_SIZE_MIN, Math.round(value)))
 }
 
+/** Browse layout of a model library: card grid or compact rows. */
+export const VIEW_MODES = ['grid', 'list'] as const
+export type ViewMode = (typeof VIEW_MODES)[number]
+
+export function isViewMode(value: unknown): value is ViewMode {
+  return typeof value === 'string' && (VIEW_MODES as readonly string[]).includes(value)
+}
+
 /** Model libraries pass their LibraryConfig; the recipes page passes its own prefix and sorts. */
 export function useLibraryFilters(config: Pick<LibraryConfig, 'sortOptions' | 'defaultSort'> & { prefix: string }) {
   const storageKey = `lm-ui.library.${config.prefix}`
   const stored = (() => {
     try {
-      return JSON.parse(readStorage(storageKey) || '{}') as { sort?: string; cardSize?: number }
+      const value: unknown = JSON.parse(readStorage(storageKey) || '{}')
+      return (value && typeof value === 'object' ? value : {}) as { sort?: unknown; cardSize?: unknown; view?: unknown }
     } catch {
       return {}
     }
   })()
 
   const sort = ref(
-    stored.sort && config.sortOptions.some((option) => option.value === stored.sort) ? stored.sort : config.defaultSort,
+    typeof stored.sort === 'string' && config.sortOptions.some((option) => option.value === stored.sort)
+      ? stored.sort
+      : config.defaultSort,
   )
-  const cardSize = ref(clampCardSize(stored.cardSize ?? CARD_SIZE_DEFAULT))
+  const cardSize = ref(clampCardSize(typeof stored.cardSize === 'number' ? stored.cardSize : CARD_SIZE_DEFAULT))
+  const view = ref<ViewMode>(isViewMode(stored.view) ? stored.view : 'grid')
   const state = reactive({
     /** Local (library-scoped) text search, sent as the list endpoint's `search`. */
     search: '',
@@ -48,8 +60,8 @@ export function useLibraryFilters(config: Pick<LibraryConfig, 'sortOptions' | 'd
     updatesOnly: false,
   })
 
-  watch([sort, cardSize], () => {
-    writeStorage(storageKey, JSON.stringify({ sort: sort.value, cardSize: cardSize.value }))
+  watch([sort, cardSize, view], () => {
+    writeStorage(storageKey, JSON.stringify({ sort: sort.value, cardSize: cardSize.value, view: view.value }))
   })
 
   function toggle(list: 'baseModels' | 'tags', value: string): void {
@@ -99,5 +111,5 @@ export function useLibraryFilters(config: Pick<LibraryConfig, 'sortOptions' | 'd
     JSON.stringify([sort.value, state.search, state.folder, state.baseModels, state.tags, state.favoritesOnly, state.updatesOnly]),
   )
 
-  return { sort, cardSize, state, toggle, include, clearList, clear, chips, panelCount, signature }
+  return { sort, cardSize, view, state, toggle, include, clearList, clear, chips, panelCount, signature }
 }
