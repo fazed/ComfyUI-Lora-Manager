@@ -24,7 +24,9 @@ ui/
     composables/          useInfiniteList, usePolling (visibility-aware),
                           useDownloadQueue (shared poller), useTheme,
                           useLibraryFilters, useAppSettings, useFeedback, useSearch,
-                          useFolderPanel
+                          useFolderPanel, useDismiss (overlay stack: Escape and
+                          outside/backdrop clicks close only the topmost overlay;
+                          a backdrop click needs pointerdown + click on the backdrop)
     components/           TopBar, AppMenu/ThemeOptions, SearchCombobox, VirtualGrid,
                           ModelCard, ModelDrawer, ExampleLightbox,
                           BaseModelQuickFilter, NodePickerDialog, FolderTree, ...

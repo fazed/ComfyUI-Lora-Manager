@@ -17,6 +17,7 @@ import { createModelApi } from '@/api/endpoints'
 import type { CountEntry, FolderTree as FolderTreeData, ModelItem, ModelPrefix, TagEntry } from '@/api/types'
 import { LIBRARIES } from '@/config/libraries'
 import { useAppSettings } from '@/composables/useAppSettings'
+import { useDismissLayer } from '@/composables/useDismiss'
 import { copyText, useToasts } from '@/composables/useFeedback'
 import { useFolderPanel } from '@/composables/useFolderPanel'
 import { useInfiniteList } from '@/composables/useInfiniteList'
@@ -45,6 +46,17 @@ const { state } = filters
 const folders = useFolderPanel(props.prefix)
 const showFolders = folders.open
 const foldersId = `folders-${props.prefix}`
+const foldersPanel = ref<HTMLElement | null>(null)
+const foldersToggle = ref<HTMLButtonElement | null>(null)
+// On narrow viewports the folder panel overlays the grid: outside pointerdown or Escape closes it.
+useDismissLayer({
+  active: () => showFolders.value && folders.isOverlay(),
+  close: (reason) => {
+    folders.set(false)
+    if (reason === 'escape') foldersToggle.value?.focus()
+  },
+  outside: () => [foldersPanel.value, foldersToggle.value],
+})
 const workflow = useSendToWorkflow()
 
 const list = useInfiniteList<ModelItem>((page, signal) =>
@@ -242,6 +254,7 @@ async function copySelectedNames(): Promise<void> {
     <aside
       v-show="showFolders"
       :id="foldersId"
+      ref="foldersPanel"
       class="w-[240px] flex-none overflow-y-auto hairline-r border-border bg-surface px-3 py-4 narrow:absolute narrow:inset-y-0 narrow:left-0 narrow:z-20 narrow:w-[min(300px,85vw)] narrow:shadow-lg"
       :aria-label="t('library.folders')"
     >
@@ -284,6 +297,7 @@ async function copySelectedNames(): Promise<void> {
             @choose="onSearchChoose"
           />
           <button
+            ref="foldersToggle"
             type="button"
             class="lm-btn"
             :class="{ 'lm-chip--active': showFolders }"

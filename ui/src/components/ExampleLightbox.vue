@@ -2,12 +2,14 @@
 /**
  * Example image lightbox: media on the left (top on phones), generation data
  * (prompt, negative prompt, parameters, resources) beside it. A modal <dialog>
- * keeps focus inside; arrows navigate, Escape closes, focus returns to the
- * opener (handled by the drawer).
+ * keeps focus inside; arrows navigate, Escape or a click on the backdrop closes
+ * (only the lightbox, not the drawer below); focus returns to the opener
+ * (handled by the drawer).
  */
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import AppIcon from './AppIcon.vue'
 import type { CivitaiImage } from '@/api/types'
+import { useDismissLayer } from '@/composables/useDismiss'
 import { copyText, useToasts } from '@/composables/useFeedback'
 import { isVideoUrl } from '@/utils/format'
 import { toGenerationView } from '@/utils/generation'
@@ -19,6 +21,8 @@ const emit = defineEmits<{ close: []; 'update:index': [index: number] }>()
 const toasts = useToasts()
 const dialog = ref<HTMLDialogElement | null>(null)
 const closeButton = ref<HTMLButtonElement | null>(null)
+// Escape arrives as the native `cancel` event; the layer keeps the drawer below from reacting.
+const { backdrop } = useDismissLayer({ active: () => true, close: () => emit('close'), escape: false, backdrop: 'dialog' })
 
 const count = computed(() => props.images.length)
 const image = computed(() => props.images[props.index])
@@ -76,6 +80,8 @@ watch(
     :aria-label="t('lightbox.label', position)"
     @cancel.prevent="emit('close')"
     @keydown="onKey"
+    @pointerdown="backdrop.pointerdown"
+    @click="backdrop.click"
   >
     <div class="relative flex min-h-0 items-center justify-center bg-sunken">
       <template v-if="image">

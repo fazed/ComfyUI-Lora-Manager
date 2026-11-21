@@ -5,6 +5,7 @@ import ExampleLightbox from './ExampleLightbox.vue'
 import StateBlock from './StateBlock.vue'
 import { downloadsApi, type ModelApi } from '@/api/endpoints'
 import type { ModelItem, ModelMetadata, ModelUpdateRecord } from '@/api/types'
+import { useDismissLayer } from '@/composables/useDismiss'
 import { copyText, useToasts } from '@/composables/useFeedback'
 import { usePersistentToggle } from '@/composables/usePersistentToggle'
 import { useSendToWorkflow } from '@/composables/useSendToWorkflow'
@@ -225,10 +226,13 @@ function copySyntax(): void {
   void workflow.copyLora(props.item, sendOptions('append'))
 }
 
+// Escape and backdrop clicks close the drawer only while it is the topmost overlay
+// (not while the lightbox, confirm or node picker dialog is open on top of it).
+const { isTopmost, backdrop } = useDismissLayer({ active: () => true, close: () => emit('close') })
+
 function onKey(event: KeyboardEvent): void {
   // Modal dialogs on top (lightbox, node picker) handle their own keys.
-  if (lightboxIndex.value !== null || document.querySelector('dialog[open]')) return
-  if (event.key === 'Escape') emit('close')
+  if (!isTopmost() || document.querySelector('dialog[open]')) return
   if (event.key === 'Tab' && panel.value) {
     // Keep focus inside the drawer while it is open.
     const focusable = panel.value.querySelectorAll<HTMLElement>(
@@ -262,7 +266,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="fixed inset-0 z-60 flex animate-fade-in justify-end bg-overlay" @click.self="emit('close')">
+  <div class="fixed inset-0 z-60 flex animate-fade-in justify-end bg-overlay" @pointerdown="backdrop.pointerdown" @click="backdrop.click">
     <aside
       ref="panel"
       class="flex h-full w-[min(var(--lm-drawer-width),100vw)] animate-slide-in flex-col hairline-l border-border bg-elevated shadow-lg"

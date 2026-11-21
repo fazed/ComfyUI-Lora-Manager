@@ -4,9 +4,10 @@
  * Pure view: the selection lives in useLibraryFilters (state.baseModels), the
  * same list the filter panel and the active-filter chips use.
  */
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import AppIcon from './AppIcon.vue'
 import type { CountEntry } from '@/api/types'
+import { useDismissLayer } from '@/composables/useDismiss'
 import { buildBaseModelChips, QUICK_FILTER_LIMIT } from '@/utils/baseModelChips'
 import { t } from '@/i18n'
 
@@ -39,27 +40,17 @@ function pickOverflow(name: string): void {
   closeMore(true)
 }
 
-function onDocumentPointer(event: PointerEvent): void {
-  const target = event.target as Node | null
-  if (target && (popover.value?.contains(target) || moreButton.value?.contains(target))) return
-  closeMore()
-}
-
-function onPopoverKey(event: KeyboardEvent): void {
-  if (event.key === 'Escape') {
-    event.stopPropagation()
-    closeMore(true)
-  }
-}
+// Outside pointerdown or Escape closes (Escape returns focus to the "More" chip).
+useDismissLayer({
+  active: () => moreOpen.value,
+  close: (reason) => closeMore(reason === 'escape'),
+  outside: () => [popover.value, moreButton.value],
+})
 
 watch(moreOpen, async (open) => {
-  if (open) {
-    document.addEventListener('pointerdown', onDocumentPointer)
-    await nextTick()
-    popover.value?.querySelector<HTMLElement>('button')?.focus()
-  } else {
-    document.removeEventListener('pointerdown', onDocumentPointer)
-  }
+  if (!open) return
+  await nextTick()
+  popover.value?.querySelector<HTMLElement>('button')?.focus()
 })
 
 watch(
@@ -82,8 +73,6 @@ watch(
     chip?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
   },
 )
-
-onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocumentPointer))
 </script>
 
 <template>
@@ -137,7 +126,6 @@ onBeforeUnmount(() => document.removeEventListener('pointerdown', onDocumentPoin
         class="absolute top-full right-0 z-30 mt-1 flex max-h-[min(320px,60vh)] w-[min(260px,calc(100vw-var(--lm-space-6)))] flex-col gap-px overflow-y-auto rounded-md hairline border-border bg-elevated p-1 shadow-md"
         role="group"
         :aria-label="t('library.quickMoreLabel', { count: row.overflow.length })"
-        @keydown="onPopoverKey"
       >
         <button
           v-for="chip in row.overflow"

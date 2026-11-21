@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /** Target-node picker for "Send to ComfyUI" when the workflow has several LoRA nodes. */
 import { computed, nextTick, ref, watch } from 'vue'
+import { useDismissLayer } from '@/composables/useDismiss'
 import { useNodePicker } from '@/composables/useSendToWorkflow'
 import { nodeLabel } from '@/utils/workflow'
 import { t } from '@/i18n'
@@ -27,6 +28,14 @@ watch(pickerState, async (state) => {
 function answer(keys: string[] | null): void {
   pickerState.value?.resolve(keys)
 }
+
+// Escape (native cancel) and a backdrop click both cancel the pick.
+const { backdrop } = useDismissLayer({
+  active: () => !!pickerState.value,
+  close: () => answer(null),
+  escape: false,
+  backdrop: 'dialog',
+})
 </script>
 
 <template>
@@ -35,6 +44,9 @@ function answer(keys: string[] | null): void {
     class="w-[min(440px,calc(100vw-var(--lm-space-8)))] rounded-lg hairline border-border bg-elevated p-5 text-fg shadow-lg backdrop:bg-overlay"
     aria-labelledby="node-picker-title"
     @cancel.prevent="answer(null)"
+    @close="!dialog?.open && answer(null)"
+    @pointerdown="backdrop.pointerdown"
+    @click="backdrop.click"
   >
     <form v-if="pickerState" method="dialog" @submit.prevent="answer(checked)">
       <h2 id="node-picker-title" class="text-lg">

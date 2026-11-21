@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { nextTick, ref, watch } from 'vue'
+import { useDismissLayer } from '@/composables/useDismiss'
 import { useConfirm } from '@/composables/useFeedback'
 import { t } from '@/i18n'
 
@@ -17,6 +18,14 @@ watch(confirmState, async (state) => {
 function answer(value: boolean): void {
   confirmState.value?.resolve(value)
 }
+
+// Escape (native cancel) and a backdrop click both answer "cancel".
+const { backdrop } = useDismissLayer({
+  active: () => !!confirmState.value,
+  close: () => answer(false),
+  escape: false,
+  backdrop: 'dialog',
+})
 </script>
 
 <template>
@@ -26,6 +35,9 @@ function answer(value: boolean): void {
     aria-labelledby="confirm-title"
     aria-describedby="confirm-message"
     @cancel.prevent="answer(false)"
+    @close="!dialog?.open && answer(false)"
+    @pointerdown="backdrop.pointerdown"
+    @click="backdrop.click"
   >
     <form v-if="confirmState" method="dialog" @submit.prevent="answer(true)">
       <h2 id="confirm-title" class="text-lg">{{ confirmState.title }}</h2>

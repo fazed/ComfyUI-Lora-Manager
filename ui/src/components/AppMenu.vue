@@ -3,9 +3,10 @@
  * Top-right "More options" menu: theme + density pickers and the link to the
  * classic UI (both used to live in the removed sidebar / theme button).
  */
-import { nextTick, onBeforeUnmount, ref } from 'vue'
+import { nextTick, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
 import ThemeOptions from './ThemeOptions.vue'
+import { useDismissLayer } from '@/composables/useDismiss'
 import { useTheme } from '@/composables/useTheme'
 import { withMountPrefix } from '@/utils/basePath'
 import { t } from '@/i18n'
@@ -17,17 +18,6 @@ const panel = ref<HTMLElement | null>(null)
 const button = ref<HTMLButtonElement | null>(null)
 const classicUrl = withMountPrefix('/loras')
 
-function onDocumentPointer(event: PointerEvent): void {
-  if (root.value && !root.value.contains(event.target as Node)) close()
-}
-
-function onKey(event: KeyboardEvent): void {
-  if (event.key === 'Escape') {
-    close()
-    button.value?.focus()
-  }
-}
-
 function onFocusOut(event: FocusEvent): void {
   const next = event.relatedTarget as Node | null
   if (open.value && next && root.value && !root.value.contains(next)) close()
@@ -36,19 +26,23 @@ function onFocusOut(event: FocusEvent): void {
 async function toggle(): Promise<void> {
   if (open.value) return close()
   open.value = true
-  document.addEventListener('pointerdown', onDocumentPointer)
-  document.addEventListener('keydown', onKey)
   await nextTick()
   panel.value?.querySelector<HTMLInputElement>('input:checked')?.focus()
 }
 
 function close(): void {
   open.value = false
-  document.removeEventListener('pointerdown', onDocumentPointer)
-  document.removeEventListener('keydown', onKey)
 }
 
-onBeforeUnmount(close)
+// Outside pointerdown or Escape closes (Escape returns focus to the button).
+useDismissLayer({
+  active: () => open.value,
+  close: (reason) => {
+    close()
+    if (reason === 'escape') button.value?.focus()
+  },
+  outside: () => [root.value],
+})
 </script>
 
 <template>
