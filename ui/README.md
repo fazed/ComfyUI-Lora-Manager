@@ -143,10 +143,27 @@ bun run dev        # Vite dev server on http://localhost:5174/lm-ui/
                    # proxies /api, /loras_static, /example_images_static and
                    # /lm-ui/user-themes to http://127.0.0.1:8188
                    # (override with LM_BACKEND=http://host:port)
-bun run typecheck  # vue-tsc
+bun run typecheck  # vue-tsc (through scripts/vue-tsc.cjs, see below)
 bun run test       # vitest
 bun run build      # typecheck + production build into ui/dist
 ```
+
+**Type checking under Bun.** `vue-tsc` adds `.vue` support by patching
+TypeScript's compiler while it is loaded through `fs.readFileSync`. Bun's
+module loader does not go through `fs.readFileSync`, so under Bun (this
+project has no Node) plain `vue-tsc` silently skipped every `.vue` file and
+always passed. `scripts/vue-tsc.cjs` applies the same patch explicitly
+(writes `node_modules/typescript/lib/_tsc.vue-bun.js`, git-ignored with
+`node_modules`) and runs it; `typecheck` and `build` use it. Turning it on
+surfaced six old errors (key-event target types in `utils/browse.ts` and
+`utils/drawerNav.ts`, `InstanceType` of the generic `VirtualGrid` - now the
+`VirtualGridExposed` interface in `utils/gridLayout.ts` - and an unused
+import), all fixed.
+
+`tsconfig.json` also sets `vueCompilerOptions.checkUnknownProps` and
+`checkUnknownEvents`: a prop or `@event` handler that the component does not
+declare is a type error. Legitimate fallthrough attributes (`aria-*`,
+`data-*`, `title`, a native `@click`) are allowed in `src/fallthroughAttrs.d.ts`.
 
 Note that `bun run dev` talks to a real backend: actions such as saving
 notes, editing settings or queueing downloads really happen there.
@@ -551,7 +568,14 @@ pages only supply data, tool entries and bulk actions through props and slots.
   rows `--lm-row-gap` apart; the maths, skeleton included, is
   `gridMetrics` / `rowTop` in `utils/gridLayout.ts`, tested in
   `tests/listView.test.ts`). A row has the same events and pointer behaviour
-  as a card (shared `composables/useCardInteractions.ts`): full-row button
+  as a card (shared `composables/useCardInteractions.ts`). Both declare one
+  contract, `ModelItemViewProps` / `ModelItemViewEmits` in
+  `components/modelItemView.ts`; LibraryPage renders them in two explicit
+  branches (`v-if` ModelRow / `v-else` ModelCard, not `<component :is>`,
+  whose handlers vue-tsc cannot check) and a compile-time `expectTypeOf` in
+  `tests/listView.test.ts` asserts that both expose identical props and
+  events, so a renamed prop, event or handler fails `bun run typecheck`.
+  A row has a full-row button
   (`aria-label` / `aria-pressed` like the card), a `--lm-row-thumb` thumbnail
   (mature blur, `--lm-card-zoom` hover zoom, no lift), name and folder, base
   model badge, size, modified date, up to three tags and always-visible Send
