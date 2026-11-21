@@ -48,7 +48,7 @@ const tags = computed(() => (props.item.tags ?? []).slice(0, 3))
 const mediaClass = computed(() => ['lm-zoom-media size-full object-cover', blurred.value && 'scale-110 blur-[18px]'])
 
 const pillClass =
-  'inline-flex max-w-[60%] items-center gap-[2px] overflow-hidden rounded-pill px-2 py-px text-xs font-medium text-ellipsis whitespace-nowrap'
+  'inline-flex min-w-0 max-w-[60%] shrink items-center gap-[2px] overflow-hidden rounded-pill px-2 py-px text-xs font-medium text-ellipsis whitespace-nowrap'
 /** Round 28px button/indicator in the top-right corner (favorite star, selection check). */
 const roundClass = 'inline-grid size-[28px] cursor-pointer place-items-center rounded-pill'
 /** Hover-revealed corner buttons: always visible on touch devices and while focused. */

@@ -422,7 +422,7 @@ function bulkSend(event: MouseEvent): void {
             <option v-for="option in config.sortOptions" :key="option.value" :value="option.value">{{ t(option.label) }}</option>
           </select>
           <button type="button" class="lm-btn" :aria-expanded="showFilters" aria-controls="library-filters" @click="showFilters = !showFilters">
-            <AppIcon name="filter" :size="16" /><span class="phone:hidden">{{ t('library.filters') }}</span>
+            <AppIcon name="filter" :size="16" /><span class="phone:sr-only">{{ t('library.filters') }}</span>
             <span v-if="filters.panelCount.value" class="lm-badge lm-badge--accent">{{ filters.panelCount.value }}</span>
           </button>
           <label class="inline-flex items-center gap-2 px-2 text-muted phone:hidden">
@@ -443,7 +443,7 @@ function bulkSend(event: MouseEvent): void {
           </button>
           <button type="button" class="lm-btn" :aria-pressed="selectionMode" @click="setSelectionMode(!selectionMode)">
             <AppIcon :name="selectionMode ? 'check' : 'checkSquare'" :size="16" />
-            <span class="phone:hidden">{{ selectionMode ? t('library.selectDone') : t('library.select') }}</span>
+            <span class="phone:sr-only">{{ selectionMode ? t('library.selectDone') : t('library.select') }}</span>
           </button>
         </div>
       </div>
