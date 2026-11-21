@@ -1,6 +1,7 @@
 import { api } from "../../scripts/api.js";
 import { lmUrl } from "./base_path.js";
 import { normalizeLoraNameKey } from "./loras_widget_utils.js";
+import { modernUiAvailability, recipeDeepLinkPath } from "./modern_ui_link.js";
 
 const DEFAULT_PAGE_SIZE = 30;
 
@@ -101,7 +102,7 @@ export async function fetchRecipeDetails(recipeId) {
 }
 
 export function openRecipeManager(recipeId = "") {
-  const hash = recipeId ? `#recipe=${encodeURIComponent(recipeId)}` : "";
-  const url = `${window.location.origin}${lmUrl("/loras/recipes")}${hash}`;
+  // Fork: modern UI deep link (/lm-ui/recipes?open=) when it is served, classic #recipe= otherwise.
+  const url = `${window.location.origin}${lmUrl(recipeDeepLinkPath(recipeId, modernUiAvailability()))}`;
   window.open(url, "lm-lora-manager");
 }
