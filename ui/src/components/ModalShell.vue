@@ -37,7 +37,7 @@ onBeforeUnmount(() => {
 <template>
   <dialog
     ref="dialog"
-    class="max-h-[calc(100vh-var(--lm-space-8))] rounded-lg hairline border-border bg-elevated p-0 text-fg shadow-lg backdrop:bg-overlay"
+    class="max-h-[calc(100vh-var(--lm-space-8))] overflow-hidden rounded-lg hairline border-border bg-elevated p-0 text-fg shadow-lg backdrop:bg-overlay"
     :class="wide ? 'w-[min(760px,calc(100vw-var(--lm-space-8)))]' : 'w-[min(480px,calc(100vw-var(--lm-space-8)))]'"
     :aria-labelledby="titleId"
     :aria-busy="busy || undefined"

@@ -5,7 +5,7 @@
  * and an optional new subfolder (the backend creates it on move). Failures of
  * a bulk move stay listed in the dialog; a clean move closes it.
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import AppIcon from './AppIcon.vue'
 import ModalShell from './ModalShell.vue'
 import type { ModelApi } from '@/api/endpoints'
@@ -33,6 +33,8 @@ const loadError = ref<string | null>(null)
 const busy = ref(false)
 const failures = ref<Failure[]>([])
 
+// Models still to move: after a partial bulk move only the failed ones remain (retry).
+const pending = ref<ModelItem[]>([...props.items])
 const single = computed(() => props.items.length === 1)
 const title = computed(() =>
   single.value
@@ -54,7 +56,7 @@ const relativeTarget = computed(() =>
 const targetPath = computed(() => (root.value ? joinTargetPath(root.value, relativeTarget.value) : ''))
 /** Every selected model already lives in the destination. */
 const sameFolder = computed(() =>
-  props.items.every((item) => {
+  pending.value.every((item) => {
     const dir = item.file_path.replace(/\\/g, '/').replace(/\/[^/]*$/, '')
     return dir.toLowerCase() === targetPath.value.toLowerCase()
   }),
@@ -73,6 +75,9 @@ async function loadTree(): Promise<void> {
   } finally {
     loading.value = false
   }
+  // Show the preselected folder (the model's current one) in the list.
+  await nextTick()
+  document.querySelector<HTMLInputElement>('input[name="move-folder"]:checked')?.closest('label')?.scrollIntoView({ block: 'nearest' })
 }
 
 onMounted(async () => {
@@ -103,8 +108,12 @@ async function onSubmit(): Promise<void> {
   busy.value = true
   failures.value = []
   try {
-    const summary = await props.actions.moveItems(props.items, targetPath.value, roots.value)
-    if (summary.failed.length) failures.value = summary.failed
+    const summary = await props.actions.moveItems(pending.value, targetPath.value, roots.value)
+    if (summary.failed.length) {
+      failures.value = summary.failed
+      const failed = new Set(summary.failed.map((entry) => entry.path))
+      pending.value = pending.value.filter((item) => failed.has(item.file_path))
+    }
     else emit('close')
   } finally {
     busy.value = false
@@ -189,7 +198,7 @@ const rowClass = 'lm-row flex min-h-[30px] cursor-pointer items-center gap-2 px-
         <button type="button" class="lm-btn" :disabled="busy" @click="emit('close')">{{ t('common.cancel') }}</button>
         <button type="submit" class="lm-btn lm-btn--primary" :disabled="!canMove">
           <AppIcon name="folderMove" :size="16" />
-          {{ busy ? t('actions.move.moving') : single ? t('actions.move.confirm') : t('actions.move.bulkConfirm', { count: items.length }) }}
+          {{ busy ? t('actions.move.moving') : single ? t('actions.move.confirm') : t('actions.move.bulkConfirm', { count: pending.length }) }}
         </button>
       </div>
     </form>

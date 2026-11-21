@@ -438,7 +438,7 @@ function bulkSend(event: MouseEvent): void {
               :aria-label="t('library.cardSize')"
             />
           </label>
-          <button type="button" class="lm-btn" :title="t('organize.title')" @click="organizeOpen = true">
+          <button type="button" class="lm-btn" @click="organizeOpen = true">
             <AppIcon name="wand" :size="16" /><span class="phone:sr-only">{{ t('organize.open') }}</span>
           </button>
           <button type="button" class="lm-btn" :aria-pressed="selectionMode" @click="setSelectionMode(!selectionMode)">
