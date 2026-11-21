@@ -343,7 +343,7 @@ function filterByTag(tag: string): void {
       <div class="lm-toolbar pb-3 phone:pb-2">
         <div class="lm-toolbar-title">
           <h1>{{ t('recipes.title') }}</h1>
-          <span class="text-sm text-muted tabular-nums" aria-live="polite">{{ t('library.count', { count: list.total.value.toLocaleString() }) }}</span>
+          <span class="text-sm text-muted tabular-nums" aria-live="polite">{{ t('recipes.count', { count: list.total.value.toLocaleString() }) }}</span>
         </div>
         <div class="flex flex-wrap items-center gap-2 phone:w-full">
           <SearchCombobox

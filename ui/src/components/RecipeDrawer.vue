@@ -239,7 +239,7 @@ useEventListener(document, 'keydown', onKey)
       </header>
 
       <div class="flex flex-1 flex-col gap-5 overflow-y-auto p-5 phone:px-4">
-        <div class="flex items-center justify-center overflow-hidden rounded-md bg-sunken">
+        <div class="flex flex-none items-center justify-center overflow-hidden rounded-md bg-sunken">
           <LazyMedia
             class="h-[min(420px,70vw)] w-full"
             :media-class="['size-full object-contain', blurred && 'blur-[18px]']"
@@ -336,7 +336,7 @@ useEventListener(document, 'keydown', onKey)
               <div :class="[rowClass, lora.state === 'library' ? 'border-border' : lora.state === 'missing' ? 'border-warning bg-warning-soft' : lora.state === 'deleted' ? 'border-danger bg-danger-soft' : 'border-border opacity-70']">
                 <LazyMedia class="size-[48px] flex-none overflow-hidden rounded-sm bg-sunken" media-class="size-full object-cover" :src="lora.previewUrl ? withMountPrefix(lora.previewUrl) : ''" :icon-size="18" />
                 <div class="flex min-w-0 flex-1 flex-col">
-                  <span class="truncate font-medium" :title="lora.name">{{ lora.name }}</span>
+                  <span class="line-clamp-2 font-medium wrap-anywhere" :title="lora.name">{{ lora.name }}</span>
                   <span class="truncate text-xs text-muted" :title="lora.fileName">
                     {{ [lora.version, lora.fileName].filter(Boolean).join(' · ') }}
                   </span>
