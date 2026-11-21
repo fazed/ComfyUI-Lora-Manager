@@ -40,7 +40,7 @@
   /* Form fields; the fallbacks keep user themes without these tokens readable. */
   --color-field: var(--lm-color-field, var(--lm-color-surface));
   --color-field-hover: var(--lm-color-field-hover, var(--lm-color-sunken));
-  --color-field-border: var(--lm-color-field-border, var(--lm-color-border-strong));
+  --color-field-border: var(--lm-color-field-border, color-mix(in srgb, var(--lm-color-muted) 75%, var(--lm-color-surface)));
   --color-field-border-hover: var(--lm-color-field-border-hover, var(--lm-color-muted));
   --color-field-disabled: var(--lm-color-field-disabled, var(--lm-color-sunken));
   --color-placeholder: var(--lm-color-placeholder, var(--lm-color-muted));

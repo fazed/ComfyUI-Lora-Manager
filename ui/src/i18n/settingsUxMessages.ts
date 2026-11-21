@@ -65,7 +65,7 @@ export const settingsUxMessages = {
   'set.tabs': 'Settings sections',
   'set.tabChanges': '{count} unsaved',
   'set.tabMatches': '{count} matches',
-  'set.searchResults': '{count} settings match "{query}"',
+  'set.searchResults': 'Results for "{query}": {count}',
   'set.searchEmptyTitle': 'No setting matches "{query}"',
   'set.searchEmptyHint': 'Try another word, such as "folder", "proxy" or "theme", or browse the tabs.',
   'set.searchClear': 'Clear search',

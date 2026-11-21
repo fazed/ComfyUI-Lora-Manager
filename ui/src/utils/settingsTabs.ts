@@ -203,6 +203,7 @@ export function formatDraftValue(field: FieldDef, value: DraftValue): string {
   else if (Array.isArray(value)) text = value.join(', ')
   else if (field.type === 'list') text = splitList(String(value)).join(', ')
   else if (field.type === 'map') text = String(value).split(/\r?\n/).map((line) => line.trim()).filter(Boolean).join('; ')
+  else if (field.type === 'root' && !String(value ?? '').trim()) text = t('set.noRoot')
   else if (field.type === 'select') text = field.options?.find((option) => option.value === value)?.label ?? String(value)
   else text = String(value ?? '').trim()
   if (!text) return t('set.value.empty')

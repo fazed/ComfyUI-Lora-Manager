@@ -79,6 +79,8 @@ const routeTab = computed(() => (typeof route.params.tab === 'string' ? route.pa
 const activeId = computed(() => resolveSettingsLocation(tabs, SETTINGS_SECTIONS, { param: routeTab.value, stored: storedTab.value }).tab)
 const activeTab = computed(() => tabs.find((tab) => tab.id === activeId.value)!)
 const scrollByTab = new Map<string, number>()
+/** Set while reveal() switches tabs: it scrolls to its own target, so the tab watcher must not restore. */
+let revealing = false
 
 function selectTab(id: string): void {
   if (query.value) query.value = ''
@@ -92,7 +94,7 @@ watch(
   activeId,
   async (id, previous) => {
     storedTab.value = id
-    if (previous === undefined) return
+    if (previous === undefined || revealing) return
     await nextTick()
     if (scroller.value) scroller.value.scrollTop = scrollByTab.get(id) ?? 0
   },
@@ -187,7 +189,13 @@ async function reveal(tabId: string, target: { fieldKey?: string | null; cardId?
   query.value = ''
   if (tabId !== activeId.value) {
     if (scroller.value) scrollByTab.set(activeId.value, scroller.value.scrollTop)
-    await router.replace({ path: settingsTabPath(tabId) })
+    revealing = true
+    try {
+      await router.replace({ path: settingsTabPath(tabId) })
+      await nextTick()
+    } finally {
+      revealing = false
+    }
   }
   await nextTick()
   const element = target.fieldKey ? document.getElementById(`${fieldDomId(target.fieldKey)}-row`) : target.cardId ? document.getElementById(cardDomId(target.cardId)) : null
@@ -278,7 +286,7 @@ const nightly = computed(() => server.value?.update_channel === 'nightly')
 </script>
 
 <template>
-  <div ref="scroller" class="flex min-h-0 flex-1 flex-col overflow-y-auto">
+  <div ref="scroller" class="flex min-h-0 flex-1 flex-col overflow-y-auto [scrollbar-gutter:stable]">
     <div class="lm-page mx-auto flex w-full max-w-[1180px] flex-1 flex-col gap-5">
       <header class="flex flex-wrap items-end gap-x-6 gap-y-3">
         <div class="min-w-[min(100%,260px)] flex-1">
@@ -295,7 +303,7 @@ const nightly = computed(() => server.value?.update_channel === 'nightly')
             id="settings-filter"
             ref="searchInput"
             v-model="query"
-            class="lm-input pr-[40px] pl-[calc(var(--lm-space-3)*2+16px)]"
+            class="lm-input pr-[40px] pl-[calc(var(--lm-space-3)*2+16px)] [&::-webkit-search-cancel-button]:appearance-none"
             type="search"
             autocomplete="off"
             :placeholder="t('set.search')"
@@ -308,7 +316,7 @@ const nightly = computed(() => server.value?.update_channel === 'nightly')
         </div>
       </header>
 
-      <div class="grid flex-1 grid-cols-[220px_minmax(0,1fr)] items-start gap-6 tablet:grid-cols-1 tablet:gap-4">
+      <div class="grid flex-1 grid-cols-[220px_minmax(0,1fr)] content-start items-start gap-6 tablet:grid-cols-1 tablet:gap-4">
         <!-- Tabs: sticky vertical list on wide screens, horizontal strip below the tablet breakpoint -->
         <div class="sticky top-0 z-10 self-start bg-page tablet:-mx-6 tablet:px-6 tablet:py-2 tablet:hairline-b tablet:border-border phone:-mx-4 phone:px-4">
           <SettingsTabList :tabs="tabs" :active="activeId" :orientation="narrow ? 'horizontal' : 'vertical'" :changes="changeCounts" :matches="searching ? search.counts : null" @select="selectTab" />
@@ -324,7 +332,7 @@ const nightly = computed(() => server.value?.update_channel === 'nightly')
 
           <!-- Search results across all tabs -->
           <section v-if="searching" id="settings-search-results" class="flex flex-col gap-4" aria-live="polite" :aria-label="t('set.searchResults', { count: search.total, query: query.trim() })">
-            <p class="text-sm text-muted">{{ t('set.searchResults', { count: search.total, query: query.trim() }) }}</p>
+            <p v-if="search.total" class="text-sm text-muted">{{ t('set.searchResults', { count: search.total, query: query.trim() }) }}</p>
             <div v-if="!search.total" class="lm-panel flex flex-col items-center gap-2 px-6 py-10 text-center">
               <AppIcon name="search" :size="28" class="text-muted" />
               <p class="font-medium">{{ t('set.searchEmptyTitle', { query: query.trim() }) }}</p>

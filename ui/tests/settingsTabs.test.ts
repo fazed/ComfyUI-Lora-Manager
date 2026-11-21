@@ -194,6 +194,7 @@ describe('reset to default', () => {
     expect(formatDraftValue(byKey('download_backend'), 'aria2')).toBe('aria2')
     expect(formatDraftValue(byKey('lora_syntax_format'), 'full')).toBe('Full (folder and file name)')
     expect(formatDraftValue(byKey('aria2c_path'), '')).toBe(t('set.value.empty'))
+    expect(formatDraftValue(byKey('default_lora_root'), '')).toBe(t('set.noRoot'))
     expect(formatDraftValue(byKey('download_skip_base_models'), 'SD 1.5\nSDXL')).toBe('SD 1.5, SDXL')
     expect(formatDraftValue(byKey('default_lora_root'), 'x'.repeat(200)).length).toBeLessThanOrEqual(60)
   })

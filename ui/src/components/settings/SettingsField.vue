@@ -248,7 +248,8 @@ function toggleCheck(value: string, checked: boolean): void {
         <slot />
       </div>
 
-      <div class="flex min-h-control w-[68px] flex-none items-center justify-end">
+      <!-- Below the tablet breakpoint the slot only takes space when Reset shows (controls get the full width). -->
+      <div class="flex min-h-control w-[68px] flex-none items-center justify-end tablet:w-auto">
         <button
           v-if="showReset"
           type="button"
