@@ -2351,6 +2351,9 @@ class ModelDownloadHandler:
             model_version_id = resolved.get("model_version_id", model_version_id)
             model_name = model_name or resolved.get("model_name", "")
             version_name = version_name or resolved.get("version_name", "")
+            # A caller-provided thumbnail wins; otherwise use the preview the
+            # resolve step already fetched (no extra CivitAI request).
+            thumbnail_url = thumbnail_url or resolved.get("thumbnail_url") or ""
             file_params = resolved.get("file_params", file_params)
 
             service = await DownloadQueueService.get_instance()

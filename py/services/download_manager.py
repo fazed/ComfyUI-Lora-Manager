@@ -36,7 +36,11 @@ from ..utils.constants import (
     VALID_OTHER_CIVITAI_TYPES,
     WORKFLOW_CIVITAI_TYPES,
 )
-from ..utils.civitai_utils import normalize_civitai_download_url, rewrite_preview_url
+from ..utils.civitai_utils import (
+    build_civitai_thumbnail_url,
+    normalize_civitai_download_url,
+    rewrite_preview_url,
+)
 from ..utils.paid_access import (
     is_early_access_deadline_active,
     is_gate_active,
@@ -50,6 +54,7 @@ from ..utils.utils import calculate_filename_for_model, decode_percent_encoded_f
 from ..utils.exif_utils import ExifUtils
 from ..utils.metadata_manager import MetadataManager
 from ..utils.sidecar_paths import get_metadata_path, get_preview_dir, get_preview_path
+from .civitai_lookup_cache import civitai_lookup_cache
 from .service_registry import ServiceRegistry
 from .download_routing import (
     is_diffusion_model_download,
@@ -597,17 +602,20 @@ class DownloadManager:
             if source == "civarchive"
             else await get_default_metadata_provider()
         )
-        try:
-            version_info = await metadata_provider.get_model_version(
-                cast(int, model_id), cast(int, model_version_id)
-            )
-        except Exception:
-            if source != "civarchive":
-                raise
-            metadata_provider = await get_default_metadata_provider()
-            version_info = await metadata_provider.get_model_version(
-                cast(int, model_id), cast(int, model_version_id)
-            )
+        # The short-TTL lookup cache lets a batch of adds for one model share
+        # the /models call, and the worker reuse this data when it starts.
+        with civitai_lookup_cache():
+            try:
+                version_info = await metadata_provider.get_model_version(
+                    cast(int, model_id), cast(int, model_version_id)
+                )
+            except Exception:
+                if source != "civarchive":
+                    raise
+                metadata_provider = await get_default_metadata_provider()
+                version_info = await metadata_provider.get_model_version(
+                    cast(int, model_id), cast(int, model_version_id)
+                )
         if not version_info:
             raise ValueError("Failed to fetch model metadata")
 
@@ -643,6 +651,7 @@ class DownloadManager:
             "model_name": (version_info.get("model") or {}).get("name") or "",
             "version_name": version_info.get("name") or "",
             "file_params": resolved_file_params,
+            "thumbnail_url": build_civitai_thumbnail_url(version_info.get("images")) or "",
         }
 
     @staticmethod
@@ -1952,9 +1961,11 @@ class DownloadManager:
             # Get version info based on the provided identifier
             civarchive_rate_limit: Optional[RateLimitError] = None
             try:
-                version_info = await metadata_provider.get_model_version(
-                    cast(int, model_id), cast(int, model_version_id)
-                )
+                # Reuses what queue/add resolved moments ago (short-TTL cache).
+                with civitai_lookup_cache():
+                    version_info = await metadata_provider.get_model_version(
+                        cast(int, model_id), cast(int, model_version_id)
+                    )
             except RateLimitError as exc:
                 if source != "civarchive":
                     raise
@@ -1974,9 +1985,10 @@ class DownloadManager:
                         "CivArchive metadata fetch failed, trying default provider"
                     )
                     metadata_provider = await get_default_metadata_provider()
-                    version_info = await metadata_provider.get_model_version(
-                        cast(int, model_id), cast(int, model_version_id)
-                    )
+                    with civitai_lookup_cache():
+                        version_info = await metadata_provider.get_model_version(
+                            cast(int, model_id), cast(int, model_version_id)
+                        )
 
             if not version_info:
                 if civarchive_rate_limit is not None:

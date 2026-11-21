@@ -18,6 +18,12 @@ from .model_metadata_provider import (
     CivitaiModelMetadataProvider,
     ModelMetadataProviderManager,
 )
+from .civitai_lookup_cache import (
+    MODEL_LOOKUP_CACHE_MAX_ENTRIES,
+    VERSION_LOOKUP_CACHE_MAX_ENTRIES,
+    TTLLookupCache,
+    lookup_cache_enabled,
+)
 from .downloader import get_downloader
 from .errors import RateLimitError, ResourceNotFoundError
 from ..utils.civitai_utils import (
@@ -55,6 +61,17 @@ def _is_host_level_refusal(message: str) -> bool:
     return "forbidden" in message.lower()
 
 
+def _optional_int(value: Any) -> Optional[int]:
+    """Normalize a lookup id for cache keys (``"12"`` and ``12`` are one key)."""
+
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 class CivitaiClient:
     _instance = None
     _lock = asyncio.Lock()
@@ -89,6 +106,14 @@ class CivitaiClient:
             str, Tuple[Optional[Dict[str, Any]], Optional[str]]
         ] = OrderedDict()
         self._MAX_CACHE_ENTRIES = 500
+        # Short-TTL caches for the download paths (queue/add resolve + worker
+        # start); only consulted inside ``civitai_lookup_cache()``.
+        self._model_lookup_cache = TTLLookupCache(
+            max_entries=MODEL_LOOKUP_CACHE_MAX_ENTRIES
+        )
+        self._version_lookup_cache = TTLLookupCache(
+            max_entries=VERSION_LOOKUP_CACHE_MAX_ENTRIES
+        )
         # Model-page host bookkeeping: which host last worked, and which ones are
         # currently refusing us (see get_model_prices).
         self._page_host_preference: Optional[str] = None
@@ -556,7 +581,41 @@ class CivitaiClient:
     async def get_model_version(
         self, model_id: int | None = None, version_id: int | None = None
     ) -> Optional[Dict[str, Any]]:
-        """Get specific model version with additional metadata."""
+        """Get specific model version with additional metadata.
+
+        Inside ``civitai_lookup_cache()`` the result is served from / stored in
+        a short-TTL cache keyed by ``(model_id, version_id)``; concurrent
+        identical lookups share one fetch. Elsewhere it always fetches.
+        """
+        key = (_optional_int(model_id), _optional_int(version_id))
+        cacheable = (
+            key != (None, None)
+            and (model_id is None) == (key[0] is None)
+            and (version_id is None) == (key[1] is None)
+        )
+        if lookup_cache_enabled() and cacheable:
+            result = await self._version_lookup_cache.get_or_fetch(
+                key, lambda: self._get_model_version_uncached(model_id, version_id)
+            )
+            if isinstance(result, dict):
+                # Also file it under its canonical ids, so the worker's lookup
+                # with the resolved (model_id, version_id) hits after a
+                # version-only or model-only add.
+                canonical = (
+                    _optional_int(
+                        result.get("modelId") or (result.get("model") or {}).get("id")
+                    ),
+                    _optional_int(result.get("id")),
+                )
+                if canonical != key and None not in canonical:
+                    if self._version_lookup_cache.peek(canonical) is None:
+                        self._version_lookup_cache.store(canonical, result)
+            return result
+        return await self._get_model_version_uncached(model_id, version_id)
+
+    async def _get_model_version_uncached(
+        self, model_id: int | None = None, version_id: int | None = None
+    ) -> Optional[Dict[str, Any]]:
         try:
             if model_id is None and version_id is not None:
                 return await self._get_version_by_id_only(version_id)
@@ -646,6 +705,15 @@ class CivitaiClient:
         return version
 
     async def _fetch_model_data(self, model_id: int) -> Optional[Dict[str, Any]]:
+        model_key = _optional_int(model_id)
+        if lookup_cache_enabled() and model_key is not None:
+            # N versions of one model queued together share one /models call.
+            return await self._model_lookup_cache.get_or_fetch(
+                model_key, lambda: self._fetch_model_data_uncached(model_id)
+            )
+        return await self._fetch_model_data_uncached(model_id)
+
+    async def _fetch_model_data_uncached(self, model_id: int) -> Optional[Dict[str, Any]]:
         success, data = await self._make_request(
             "GET",
             f"{self.base_url}/models/{model_id}",
