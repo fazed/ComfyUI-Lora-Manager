@@ -52,6 +52,7 @@ from ...services.websocket_progress_callback import (
 )
 from ...services.download_queue_service import DownloadQueueService
 from ...services.download_queue_worker import (
+    apply_queue_destination,
     get_download_queue_worker,
     wake_download_queue_worker,
 )
@@ -2250,7 +2251,71 @@ class ModelDownloadHandler:
             )
             return web.json_response({"success": False, "error": str(exc)}, status=500)
 
+    @staticmethod
+    def _parse_queue_destination(query: Mapping[str, str]) -> Optional[Dict[str, Any]]:
+        """Validate the optional destination of ``queue/add``.
+
+        Returns ``None`` when no ``model_root`` / ``relative_path`` is given
+        (legacy behaviour: default root + path template). Raises
+        ``ValueError`` for anything unsafe: the root must be one of the
+        configured model roots (LoRA, checkpoint/unet, embedding, including
+        extra roots) and the folder a relative path below it without ``..``,
+        drive letters or characters that are invalid in folder names.
+        """
+        raw_root = (query.get("model_root") or "").strip()
+        raw_relative = (query.get("relative_path") or "").strip()
+        use_default = str(query.get("use_default_paths", "true")).strip().lower() not in (
+            "false",
+            "0",
+            "no",
+        )
+        if not raw_root:
+            if raw_relative:
+                raise ValueError("relative_path requires model_root")
+            return None
+
+        configured: List[str] = []
+        for attr in (
+            "loras_roots",
+            "base_models_roots",
+            "embeddings_roots",
+            "extra_loras_roots",
+            "extra_checkpoints_roots",
+            "extra_unet_roots",
+            "extra_embeddings_roots",
+        ):
+            configured.extend(getattr(config, attr, None) or [])
+
+        def _key(path: str) -> str:
+            return os.path.normcase(os.path.normpath(path))
+
+        matches = [root for root in configured if root and _key(root) == _key(raw_root)]
+        if not matches:
+            raise ValueError("model_root is not a configured model root")
+        model_root = os.path.normpath(matches[0]).replace(os.sep, "/")
+
+        relative = ""
+        if not use_default and raw_relative:
+            candidate = raw_relative.replace("\\", "/")
+            if candidate.startswith("/") or re.match(r"^[A-Za-z]:", candidate):
+                raise ValueError("relative_path must be relative")
+            segments = [segment for segment in candidate.split("/") if segment]
+            for segment in segments:
+                if segment in (".", "..") or re.search(r'[<>:"|?*]', segment) or segment != segment.rstrip(" ."):
+                    raise ValueError(f"Invalid folder name: {segment}")
+            relative = "/".join(segments)
+
+        return {
+            "model_root": model_root,
+            "relative_path": relative,
+            "use_default_paths": use_default,
+        }
+
     async def add_to_download_queue(self, request: web.Request) -> web.Response:
+        try:
+            destination = self._parse_queue_destination(request.query)
+        except ValueError as exc:
+            return web.json_response({"success": False, "error": str(exc)}, status=400)
         try:
             import uuid
 
@@ -2298,6 +2363,7 @@ class ModelDownloadHandler:
                 thumbnail_url=thumbnail_url,
                 source=source,
                 file_params=file_params,
+                destination=destination,
             )
             duplicate = item.pop("duplicate", False)
             if item and not duplicate:
@@ -2524,6 +2590,7 @@ class ModelDownloadHandler:
             "source": item.get("source") or "retry",
             "file_params": file_params or None,
         }
+        apply_queue_destination(payload, item.get("destination"))
         return await get_download_queue_worker().run_download(
             payload, runner=self._download_use_case.execute
         )

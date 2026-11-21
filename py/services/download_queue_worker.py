@@ -102,6 +102,34 @@ def build_queue_download_payload(row: Dict[str, Any]) -> Dict[str, Any]:
     file_params = _decode_file_params(row.get("file_params"))
     if file_params:
         payload["file_params"] = file_params
+    apply_queue_destination(payload, row.get("destination"))
+    return payload
+
+
+def apply_queue_destination(payload: Dict[str, Any], raw: Any) -> Dict[str, Any]:
+    """Apply a row's optional destination (modern UI download dialog).
+
+    ``{"model_root", "relative_path", "use_default_paths"}``. Without one
+    (or when it cannot be decoded) the payload keeps the default root and
+    path template. With ``use_default_paths`` the chosen root is kept and the
+    path template is applied below it (``use_save_dir_as_root``); otherwise
+    the file goes to ``model_root/relative_path`` as chosen. The values were
+    validated by ``queue/add`` (root is a configured model root, the folder
+    stays below it).
+    """
+    destination = _decode_file_params(raw)
+    if not destination:
+        return payload
+    model_root = destination.get("model_root")
+    if not isinstance(model_root, str) or not model_root:
+        return payload
+    payload["model_root"] = model_root
+    if destination.get("use_default_paths"):
+        payload["use_default_paths"] = True
+        payload["use_save_dir_as_root"] = True
+    else:
+        payload["use_default_paths"] = False
+        payload["relative_path"] = str(destination.get("relative_path") or "")
     return payload
 
 
