@@ -141,6 +141,7 @@ export type UpdateReason =
   | 'parallel_line'
   | 'lower_version_number'
   | 'same_version_number'
+  | 'new_label'
   | 'variant_tokens'
   | 'unknown_release_date'
   | 'unknown_base'

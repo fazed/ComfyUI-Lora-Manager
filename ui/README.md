@@ -1746,7 +1746,8 @@ lower id but a newer date). Each candidate then gets:
 | possible | `sibling_variant` | another flavour of a newer release (e.g. low noise when you own high noise) |
 | possible | `same_day_as_owned` | released within 24 h of your version, other size |
 | possible | `parallel_line` | the name's words neither contain nor are contained in your version's (style A vs style B) |
-| possible | `lower_version_number` / `same_version_number` | released later but numbered lower / the same |
+| possible | `lower_version_number` / `same_version_number` | released later but numbered lower / the same. The same number is never likely, whatever the other words ("context detail base v1" -> "context detail sft v1"), except when the candidate only drops pre-release words (beta, alpha, wip, preview, rc, test, early, pre, experimental, draft) and adds none ("v1.0beta" -> "v1.0" stays likely) |
+| possible | `new_label` | your newest version is named only by a number ("1.0") and the candidate has no number but new words ("More_Realism-IL"): probably another style. A Roman numeral counts as a number ("v12" -> "XIV" stays likely) |
 | possible | `variant_tokens` | newer, but the name carries format words your file does not have |
 | possible | `unknown_release_date` | no dates: newer only by id |
 | possible | `unknown_base` | your file has no base model |
@@ -1754,7 +1755,10 @@ lower id but a newer date). Each candidate then gets:
 
 Version names are parsed by `name_signature` (version number, variant words,
 the remaining words; base-model words and parameter counts like "2.9B" are
-ignored). Independent of the confidence, `hiddenBecause` lists the gates:
+ignored; a base word of four or more letters glued to a version number is
+split first, so "IllustriousV2" and "animav2.0_better" read as version 2,
+while "ILv10" stays one word). `new_label` is checked right after the
+version-number rules and before the variant-word rule. Independent of the confidence, `hiddenBecause` lists the gates:
 `ignored` (version or model), `not_downloadable` (`usage_control` other than
 Download), `no_files` (`file_count == 0`), `early_access` / `paid` (only when
 the existing settings `hide_early_access_updates` / `hide_paid_updates` are
@@ -1770,7 +1774,12 @@ extracted LoRAs). They are still listed under **All** with the reason.
 Dry run against a read-only copy of the real databases (no endpoint called):
 LoRAs 3 likely / 11 possible / 56 hidden lines (915 up to date, 304 models
 not checked yet); checkpoints 1 / 3 / 4 (84 up to date, 33 not checked);
-embeddings: all 47 never checked.
+embeddings: all 47 never checked. With the stricter same-number rule and
+`new_label` (later data): LoRAs 1 likely / 13 possible / 56 hidden (the
+"1.0" -> "More_Realism-IL" and "context detail base v1" -> "... sft v1"
+lines moved to possible), checkpoints 1 / 2 / 5 unchanged. Simulating
+"you own version i" for every line of the database, 2023 of 2084 likely
+candidates stay likely (39 become `new_label`, 22 `same_version_number`).
 
 ### Page
 

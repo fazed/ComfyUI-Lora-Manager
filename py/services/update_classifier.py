@@ -75,6 +75,7 @@ REASON_VARIANT_TOKENS = "variant_tokens"
 REASON_UNKNOWN_RELEASE_DATE = "unknown_release_date"
 REASON_UNKNOWN_BASE = "unknown_base"
 REASON_OTHER_BASE = "other_base"
+REASON_NEW_LABEL = "new_label"
 
 REASON_CODES = (
     REASON_NEXT_VERSION,
@@ -85,6 +86,7 @@ REASON_CODES = (
     REASON_PARALLEL_LINE,
     REASON_LOWER_VERSION_NUMBER,
     REASON_SAME_VERSION_NUMBER,
+    REASON_NEW_LABEL,
     REASON_VARIANT_TOKENS,
     REASON_UNKNOWN_RELEASE_DATE,
     REASON_UNKNOWN_BASE,
@@ -162,6 +164,20 @@ _BARE_VERSION_PATTERN = re.compile(r"(?:^|[^a-z0-9.])(\d+(?:\.\d+)+)(?:$|[^0-9.a
 # Parameter counts such as "2.9B" or "14b" name the base, not the version.
 _PARAM_COUNT = re.compile(r"(?<![a-z0-9.])\d+(?:\.\d+)?b(?![a-z0-9])")
 _TOKEN_SPLIT = re.compile(r"[^a-z0-9]+")
+# A base word glued to a version number ("IllustriousV2", "animav2.0") is
+# split before parsing. Only words of four or more letters: "ILv10" stays.
+_GLUED_BASE_VERSION = re.compile(
+    r"(?<![a-z0-9])(illustrious|anima|pony|noob|noobai|flux|sdxl|krea|chroma|qwen|hunyuan)"
+    r"[\s._-]?v(?=\d)",
+    re.IGNORECASE,
+)
+# Words that mark a pre-release. A candidate with the same version number
+# that only drops such words ("v1.0 beta" -> "v1.0") is the final release.
+PRERELEASE_TOKENS = frozenset(
+    {"beta", "alpha", "wip", "preview", "rc", "test", "early", "pre", "experimental", "draft"}
+)
+# A Roman numeral token such as "xiv": a numbered successor without digits.
+_ROMAN_NUMERAL = re.compile(r"^(?=[ivx]{2,5}$)x{0,2}(ix|iv|v?i{0,3})$")
 
 
 @dataclass(frozen=True)
@@ -188,7 +204,8 @@ def _parse_version_number(name: str) -> Optional[tuple]:
 def name_signature(name: Optional[str], base_model: Optional[str] = None) -> NameSignature:
     """Split a version name into version number, variant tokens and core words."""
 
-    text = _PARAM_COUNT.sub(" ", (name or "").lower())
+    text = _GLUED_BASE_VERSION.sub(r" v", (name or "").lower())
+    text = _PARAM_COUNT.sub(" ", text)
     version = _parse_version_number(text)
     variant: Set[str] = set()
     for quant in _GGUF_QUANT.findall(text):
@@ -414,15 +431,29 @@ def _classify(
         return CONFIDENCE_POSSIBLE, REASON_PARALLEL_LINE
 
     # 6. Released later but numbered lower than (or the same as) what the
-    #    user has: a re-upload or another line, not a clear successor.
+    #    user has: a re-upload or another line, not a clear successor. The
+    #    one exception: the same number that only drops pre-release words
+    #    ("v1.0 beta" -> "v1.0") is the final release.
     if _version_lower(sig.version, newest_owned.signature.version):
         return CONFIDENCE_POSSIBLE, REASON_LOWER_VERSION_NUMBER
+    if sig.version is not None and sig.version == newest_owned.signature.version:
+        added = cand_core - owned_core
+        removed = owned_core - cand_core
+        if added or not removed or not removed <= PRERELEASE_TOKENS:
+            return CONFIDENCE_POSSIBLE, REASON_SAME_VERSION_NUMBER
+
+    # 6b. The owned version is named only by a number ("1.0") and the
+    #     candidate brings new words without any number ("More Realism"):
+    #     probably another style, not the next version. A Roman numeral
+    #     ("XIV") still counts as a number.
     if (
-        sig.version is not None
-        and sig.version == newest_owned.signature.version
-        and cand_core == owned_core
+        sig.version is None
+        and cand_core - owned_core
+        and not owned_core
+        and newest_owned.signature.version is not None
+        and not any(_ROMAN_NUMERAL.match(token) for token in sig.core)
     ):
-        return CONFIDENCE_POSSIBLE, REASON_SAME_VERSION_NUMBER
+        return CONFIDENCE_POSSIBLE, REASON_NEW_LABEL
 
     # 7. Variant words the owned file does not have.
     if sig.variant_tokens - owned_tokens:

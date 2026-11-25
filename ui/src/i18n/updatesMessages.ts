@@ -42,6 +42,8 @@ export const updatesMessages = {
   'updates.reason.parallel_line': 'Newer, but the name suggests a separate line of this model',
   'updates.reason.lower_version_number': 'Released later, but with a lower version number than yours',
   'updates.reason.same_version_number': 'Released later with the same version number as yours: maybe a re-upload',
+  'updates.reason.new_label':
+    'Newer, but named differently from your version and without a version number: maybe another style',
   'updates.reason.variant_tokens': 'Newer on {base}, but the name mentions a format or flavour your file does not have',
   'updates.reason.unknown_release_date': 'Newer by Civitai id; the release dates are unknown',
   'updates.reason.unknown_base': 'Your file has no base model, so this cannot be matched to the same base',

@@ -537,6 +537,129 @@ def test_lower_version_number_released_later_is_possible():
     assert entry["reason"] == "lower_version_number"
 
 
+def _pair(owned_name, candidate_name, *, base="Illustrious", owned_size=200_000_000, cand_size=150_000_000):
+    """One owned version and one candidate released a month later."""
+
+    payload = overview(
+        [item(1, 10, base=base)],
+        [
+            record(
+                1,
+                [
+                    version(10, owned_name, base=base, released="2026-03-01T00:00:00Z", size=owned_size),
+                    version(11, candidate_name, base=base, released="2026-04-01T00:00:00Z", size=cand_size),
+                ],
+            )
+        ],
+    )
+    return candidate(only_group(payload), 11)
+
+
+def test_new_label_without_number_after_a_bare_number_is_possible():
+    # Anonymised from a real model: the user owns "Illustrious - V2" and "1.0"
+    # on Illustrious plus the Anima and Krea 2 versions; "More_Realism-IL" is
+    # a parallel style line, not the next version.
+    model_id = 900
+    versions = [
+        version(1232278, "Illustrious - V2", released="2025-01-02T18:17:39.090Z", size=228466596),
+        version(1617422, "1.0", released="2025-04-03T19:53:57.695Z", size=228453876),
+        version(1994181, "More_Realism-IL", released="2025-07-10T14:00:00.000Z", size=228454572),
+        version(2659019, "PONY", base="Pony", released="2026-02-04T09:28:03.247Z", size=456506404),
+        version(2685421, "FLUX", base="Flux.1 D", released="2026-02-13T12:00:00.000Z", size=306432472),
+        version(2988484, "Flux.2 Klein 9B", base="Flux.2 Klein 9B", released="2026-05-29T23:18:54.462Z", size=82867920),
+        version(3050316, "ANIMA", base="Anima", released="2026-06-19T19:14:43.302Z", size=69391584),
+        version(3182058, "Krea 2", base="Krea 2", released="2026-07-30T16:47:21.117Z", size=114326440),
+    ]
+    items = [
+        item(model_id, 1232278, base="Illustrious"),
+        item(model_id, 1617422, base="Illustrious"),
+        item(model_id, 3050316, base="Anima"),
+        item(model_id, 3182058, base="Krea 2"),
+    ]
+    payload = overview(items, [record(model_id, versions)])
+    assert payload["totals"]["likely"] == 0
+    group = only_group(payload)
+    assert group["baseModel"] == "Illustrious"
+    assert group["tier"] == "possible"
+    assert group["newestOwned"]["versionId"] == 1617422
+    entry = candidate(group, 1994181)
+    assert entry["confidence"] == "possible"
+    assert entry["reason"] == "new_label"
+    assert entry["hiddenBecause"] == []
+    # Pony / Flux / Flux.2 Klein are older than the newest owned version
+    # (Krea 2), so they are no candidates at all; nothing else is visible.
+    visible = [c for c in group["candidates"] if not c["hiddenBecause"]]
+    assert [c["versionId"] for c in visible] == [1994181]
+
+
+def test_new_label_needs_a_bare_number_as_owned_name():
+    # The owned name has its own words: not the narrow new_label rule.
+    entry = _pair("Watercolor v1", "Watercolor Soft")
+    assert entry["reason"] != "new_label"
+
+
+def test_roman_numeral_successor_stays_likely():
+    entry = _pair("v12", "XIV (SDXL)", base="SDXL 1.0")
+    assert entry["confidence"] == "likely"
+    assert entry["reason"] == "next_version_same_base"
+
+
+def test_same_number_with_other_words_is_possible():
+    entry = _pair("context detail base v1", "context detail sft v1", base="MOSS Image")
+    assert entry["confidence"] == "possible"
+    assert entry["reason"] == "same_version_number"
+
+
+def test_same_number_dropping_a_prerelease_word_stays_likely():
+    entry = _pair("v1.0beta [x]", "v1.0 [x]")
+    assert entry["confidence"] == "likely"
+    assert entry["reason"] == "next_version_same_base"
+
+
+def test_same_number_adding_a_word_after_prerelease_is_possible():
+    # Drops "beta" but adds "sft": not just the final release.
+    entry = _pair("v1.0 beta", "v1.0 sft")
+    assert entry["confidence"] == "possible"
+
+
+@pytest.mark.parametrize(
+    "name, number, core",
+    [
+        ("IllustriousV2", (2,), ()),
+        ("animav2.0_better", (2,), ("better",)),
+        ("Pony_v3", (3,), ()),
+        # "il" is too short to split: parsed exactly as before.
+        ("ILv10_NPi", None, ("ilv10", "npi")),
+    ],
+)
+def test_glued_base_word_and_version(name, number, core):
+    sig = name_signature(name, "Illustrious")
+    assert sig.version == number
+    assert sig.core == core
+
+
+def test_glued_base_word_successor_stays_likely():
+    entry = _pair("v1", "IllustriousV2")
+    assert entry["confidence"] == "likely"
+
+
+@pytest.mark.parametrize(
+    "owned_name, candidate_name, base",
+    [
+        ("v1.0 Anima", "v2.0 Anima", "Anima"),
+        ("α", "β", "Krea 2"),
+    ],
+)
+def test_real_successors_stay_likely(owned_name, candidate_name, base):
+    entry = _pair(owned_name, candidate_name, base=base, owned_size=13_491_967_624, cand_size=13_491_966_960)
+    assert entry["confidence"] == "likely"
+    assert entry["reason"] == "next_version_same_base"
+
+
+def test_new_label_is_a_known_reason_code():
+    assert "new_label" in REASON_CODES
+
+
 # --------------------------------------------------------------------------
 # Cause 5: stale / missing records
 # --------------------------------------------------------------------------

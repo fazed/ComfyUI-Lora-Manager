@@ -277,6 +277,15 @@ describe('updates helpers', () => {
     const table = messages as Record<string, string>
     for (const code of reasons) expect(table[`updates.reason.${code}`], code).toBeTruthy()
     for (const code of gates) expect(table[`updates.hidden.${code}`], code).toBeTruthy()
+    expect(reasons).toContain('new_label')
+  })
+
+  it('explains a new label without a version number', () => {
+    const [, possible] = data.groups
+    const entry = cand({ versionId: 22, name: 'More Realism', confidence: 'possible', reason: 'new_label' })
+    expect(reasonText(possible, entry)).toBe(
+      'Newer, but named differently from your version and without a version number: maybe another style, released 3 days after yours.',
+    )
   })
 
   it('labels the gates that hide a candidate', () => {
