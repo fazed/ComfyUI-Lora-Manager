@@ -30,7 +30,7 @@ function onClick(): void {
   <button
     v-if="refresh.showButton.value"
     type="button"
-    :class="variant === 'row' ? 'lm-btn min-h-touch justify-start' : 'lm-btn lm-btn--icon flex-none'"
+    :class="variant === 'row' ? 'lm-btn min-h-touch justify-start' : 'lm-btn lm-btn--icon flex-none phone:size-touch'"
     :aria-label="variant === 'icon' ? t('refresh.label') : undefined"
     :aria-busy="busy || undefined"
     :aria-disabled="busy || undefined"

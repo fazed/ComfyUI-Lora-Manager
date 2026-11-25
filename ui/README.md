@@ -53,7 +53,8 @@ ui/
                           useLibraryFilters, useAppSettings, useFeedback, useSearch,
                           useFolderPanel, useDismiss (overlay stack: Escape and
                           outside/backdrop clicks close only the topmost overlay;
-                          a backdrop click needs pointerdown + click on the backdrop)
+                          a backdrop click needs pointerdown + click on the backdrop),
+                          useRefresh (page refresh registry, see "Refresh")
     components/           TopBar, AppMenu/ThemeOptions, SearchCombobox, VirtualGrid,
                           ModelCard, ModelRow (list view), ModelDrawer, ExampleLightbox,
                           BaseModelQuickFilter, NodePickerDialog, FolderTree,
@@ -106,7 +107,9 @@ cleans up with the component scope. Currently used:
   on change only, blocked storage ignored);
 - `usePreferredDark` (the "System" theme follows the OS live);
 - `onLongPress` (touch long press opens the item menu on cards, rows and
-  recipe cards; see Context menus).
+  recipe cards; see Context menus);
+- `useDocumentVisibility` (the silent refresh after the tab was hidden; see
+  Refresh).
 
 Kept custom on purpose: `createPoller` (shared, scope-less download poller with
 no-overlap rescheduling and visibility pause; `useIntervalFn` cannot express
@@ -667,8 +670,8 @@ pages only supply data, tool entries and bulk actions through props and slots.
   selected items are not in view ("3 selected (2 not in view)"), Escape leaves
   selection mode when no drawer, dialog or menu is above it (dismiss stack).
   Ctrl+A, delete/undo and the other bulk flows are unchanged.
-* **Shortcuts.** Bare `f` toggles Filters (the sheet on phones) and `s` toggles
-  selection mode. They are ignored with a modifier, while typing in a field,
+* **Shortcuts.** Bare `f` toggles Filters (the sheet on phones), `s` toggles
+  selection mode and `r` refreshes the page (every page, see Refresh). They are ignored with a modifier, while typing in a field,
   inside a dialog, menu or listbox, and while a drawer is open
   (`shouldHandleShortcut` in `utils/browse.ts`). The toolbars have
   `role="toolbar"` and an `aria-label`; the buttons carry `aria-keyshortcuts`.
@@ -739,6 +742,106 @@ pages only supply data, tool entries and bulk actions through props and slots.
 * **Cards.** Tags are one ellipsised line (no dangling separator), the scrim
   behind titles is taller, card titles are paragraphs (no heading flood) and the
   recipe card's send button is hidden on phones (it stays in the menu).
+
+## Refresh
+
+Every page can re-read its data without a browser reload (new downloads
+finished, edits made in ComfyUI or the classic UI, ...).
+
+* **Registry** (`composables/useRefresh.ts`): the routed page registers one
+  handler while it is mounted (`useRefreshHandler`, `onMounted` /
+  `onBeforeUnmount`; an older page that unmounts late never removes a newer
+  page's handler). The shell runs the current one: `RefreshButton`
+  (`components/RefreshButton.vue`) and the `r` shortcut (`useRefreshHost`,
+  installed once in `App.vue`). One run at a time: a click or `r` while a
+  refresh runs is ignored.
+* **Where the button is.** Library pages and Recipes: an icon button directly
+  before **Tools** in the toolbar (always visible from 901px up; hidden in
+  selection mode with the rest of the toolbar row, `r` still works) and a
+  labelled 44px **Refresh** row in the phone "Filters and sort" sheet (the
+  sheet stays open so the busy state is visible). Content pages (Downloads,
+  Statistics, Settings, Search): `PageShell` puts it at the end of the header
+  actions (next to the title when the page has no actions; 44px on phones).
+  Diagnostics keeps its own **Run again** button (`button: false`; `r` runs
+  the checks, the button's tooltip says so). Not found has no refresh.
+* **Look and state.** New `reload` icon (two arrows; the single-arrow
+  `refresh` icon stays for "Refresh from Civitai"). Tooltip "Refresh (R)"
+  (`aria-keyshortcuts="R"`), on the browse pages extended with the rescan
+  note below. While running: the icon turns (`animate-spinner`, transform
+  only, `motion-reduce:animate-none`), the button is `aria-busy` and
+  `aria-disabled` (not `disabled`, so keyboard focus stays) and the sheet row
+  reads "Refreshing...". No success toast (the existing toasts report
+  actions, not reloads); a failure is an error toast "Could not refresh:
+  <message>" (the usual `ApiError` text, e.g. the backend-not-reachable
+  message) and the page keeps what it showed.
+* **Shortcut `r`**: bare key only (no Ctrl/Meta/Alt/Shift), ignored while
+  typing in a field, inside a dialog, menu or listbox, while a modal
+  `<dialog>` or menu is open (`shouldHandleShortcut`), and for key repeats.
+  No clash with `f`, `s`, `j`, `k`, `/`. With a drawer open focus is inside
+  it, so `r` does nothing there; close the drawer, or rely on the tab-return
+  refresh, which also updates the open drawer.
+* **Tab return.** Library pages and Recipes (`onVisible: true`) refresh
+  silently (no toast) when the tab becomes visible after being hidden for at
+  least 60 s (`AUTO_REFRESH_AFTER_MS`). The other pages do not (Downloads
+  already polls, visibility-aware; Diagnostics would call Civitai; Statistics
+  and Settings are refreshed by hand).
+
+What each page re-reads (GET only; the page keeps its UI state):
+
+| Page | Refresh |
+| --- | --- |
+| LoRAs / Checkpoints / Embeddings | the loaded range of the list with the same filters, sort, search and folder (`useInfiniteList.refresh`: pages 1..n again, at most `RESTORE_MAX_ITEMS` = 600 items, i.e. 10 pages of 60, stopping at the server's last page; the result replaces the items at once, so the grid never empties), the folder tree, base-model chips and tag filters; selection mode and the selected keys stay; the open drawer gets the refreshed copy of its model and re-reads its metadata (examples, trigger words, description) and, once loaded, the versions, without placeholders, keeping its tab and scroll; new notes / tags from the server are shown unless the notes hold an unsaved draft |
+| Recipes | the same for the recipe list (plus "missing only"), folder tree, base models and tags; the open recipe drawer re-reads `GET /api/lm/recipe/<id>` (the "opened" POST is sent only when a drawer opens, not on refresh) |
+| Downloads | the queue (also polled every 1.5 s while open) and the history |
+| Statistics | the six stats endpoints and the opened "most used" lists (the rows already shown, one request each); the charts stay on screen while loading |
+| Search | the four library searches of the current query; the results stay until the new ones arrive |
+| Settings | the stored settings (`form.reloadKeeping`: unsaved edits are kept on top) and the root lists; a failure shows the existing load-error banner |
+| Diagnostics | runs the checks again (`r` only; the page's own Run again button stays) |
+
+**Scroll and items.** The list is re-read in place, so the grid keeps its
+scroll position. `utils/refreshList.ts` remembers the first item of the top
+visible row (`VirtualGrid` `anchor()`, `anchorAt` in `utils/gridLayout.ts`)
+and, when items were added or removed above it, scrolls so that item stays at
+the same spot (`scrollToAnchor`). Items that moved between pages while the
+pages were read are kept once (by `file_path` / recipe id). A `loadMore`
+asked for during a refresh runs after it; a filter change (reset) during a
+refresh wins. Beyond 600 loaded items only the first 600 are re-read;
+scrolling further loads the rest again.
+
+**Light refresh versus rescan.** The backend keeps the library in an
+in-memory cache; the list, tree and count endpoints read that cache. Changes
+made through LoRA Manager itself (downloads, rename / move / delete, metadata
+edits from the classic UI or the ComfyUI widgets) update the cache, so the
+light refresh shows them. Files added, removed or renamed **outside** LoRA
+Manager (another tool, the file manager) are only picked up by a **rescan**:
+`GET /api/lm/{prefix}/scan` (quick reconcile, or `full_rebuild=true`) and
+`GET /api/lm/recipes/scan`, which the classic UI's Refresh menu calls, and the
+full rebuild `POST /api/lm/doctor/repair-cache` behind Diagnostics >
+**Rebuild cache...** (offered only when the cache check reports a problem).
+The scan routes are **GET requests that change server state**; the modern UI
+never calls them. It has no general "rescan library" action: the refresh
+tooltip on the browse pages points to the classic UI's Refresh menu for that.
+`ModelVersionsStatusCache` (`GET /api/lm/model-versions-status?refresh=1`) is
+not used by the modern UI.
+
+Tests: `tests/refresh.test.ts` (written first): registry (register /
+unregister, route changes through a real router, no double run, busy state,
+error toast, silent runs), the `r` shortcut (modifiers, fields, dialogs,
+menus, no clash with f/s/j/k), the tab-return refresh (60 s threshold,
+opt-in), `useInfiniteList.refresh` (in-place swap, page cap, early stop,
+duplicates, failure keeps the items, reset wins, deferred loadMore),
+`refreshInPlace` / `anchorAt`, `RefreshButton` (visibility, aria-busy, no
+`disabled`, reduced-motion class), its places in the toolbar and `PageShell`,
+and `LibraryPage` against a mocked backend (same filters in the re-fetch,
+selection mode kept, open drawer kept and re-read, an unsaved notes draft
+kept, GET requests only and no scan / repair URL). Checked in the browser
+against the live backend (read-only): LoRAs filtered by a base model,
+scrolled and in selection mode with one card selected, then `r` and the
+button: same scroll offset, same first visible card, selection kept, only
+GET requests (list pages 1-2, tree, base models, tags); `r` on Checkpoints,
+Recipes, Search, Settings, Statistics, Downloads and Diagnostics (GET only);
+the toolbar button at 1100px in Dark, Midnight and Light; the sheet row and
+the header buttons (44px) at 375px.
 
 ## Library quick filter, detail drawer and "Send to ComfyUI"
 
