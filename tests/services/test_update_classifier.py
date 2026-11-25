@@ -240,6 +240,7 @@ def test_precision_variant_of_owned_version_is_variant():
         ("v5", "v5 plus"),
         ("v4 matte", "v4 cute"),
         ("v1 bf16", "v1 fp16"),
+        ("Base_V1", "Base_V1_INT8_CONVROT"),  # real checkpoint naming
     ],
 )
 def test_variant_token_pairs_are_variants(owned_name, candidate_name):
