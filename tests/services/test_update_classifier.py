@@ -740,6 +740,36 @@ def test_ignored_model_hides_everything():
     assert candidate(group, 11)["isIgnored"] is True
 
 
+def test_ignored_lines_stay_in_the_payload_for_the_ignored_view():
+    """The Updates page lists ignored models and versions from the overview
+    itself: an ignored line is a hidden group, not dropped, and an ignored
+    version stays a candidate next to the visible ones."""
+
+    ignored_model = record(
+        1,
+        [version(10, "v1", released="2026-01-01T00:00:00Z"), version(11, "v2", released="2026-03-01T00:00:00Z")],
+        ignore_model=True,
+    )
+    ignored_version = record(
+        2,
+        [
+            version(20, "v1", released="2026-01-01T00:00:00Z"),
+            version(21, "v2", released="2026-02-01T00:00:00Z", ignore=True),
+            version(22, "v3", released="2026-03-01T00:00:00Z"),
+        ],
+    )
+    payload = overview([item(1, 10), item(2, 20)], [ignored_model, ignored_version])
+    by_model = {g["modelId"]: g for g in payload["groups"]}
+    assert by_model[1]["isIgnored"] is True
+    assert by_model[1]["tier"] == "hidden"
+    assert payload["totals"]["hidden"] == 1
+    assert by_model[2]["isIgnored"] is False
+    assert by_model[2]["tier"] == "likely"
+    assert candidate(by_model[2], 21)["isIgnored"] is True
+    assert candidate(by_model[2], 21)["hiddenBecause"] == ["ignored"]
+    assert candidate(by_model[2], 22)["isIgnored"] is False
+
+
 def test_early_access_follows_the_setting():
     future = "2026-12-31T00:00:00Z"
     shown = only_group(overview([item(1, 10)], [base_record(early_access=True, early_access_ends_at=future)]))
@@ -820,6 +850,7 @@ def test_payload_shape_and_local_cards():
         "versionId", "name", "baseModel", "releasedAt", "sizeBytes", "fileCount",
         "usageControl", "isEarlyAccess", "earlyAccessEndsAt", "isPaid", "previewUrl",
         "hasBeenDownloaded", "isIgnored", "confidence", "reason", "hiddenBecause",
+        "description", "fileFormat", "precision", "files",
     }
     assert entry["previewUrl"] == "https://image.civitai.com/x.jpeg"
     assert payload["settings"] == {"hideEarlyAccessUpdates": False, "hidePaidUpdates": False}
