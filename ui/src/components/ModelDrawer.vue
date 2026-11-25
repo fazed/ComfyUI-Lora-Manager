@@ -563,6 +563,8 @@ useEventListener(document, 'keydown', onKey)
             type="button"
             class="lm-badge lm-badge--warning cursor-pointer hover:opacity-80 phone:hidden touch:min-h-touch touch:px-3"
             :aria-label="t('detail.showUpdates')"
+            :title="t('library.updatesFlagHint')"
+            data-testid="update-flag"
             @click="tab = 'versions'"
           >
             {{ t('card.update') }}

@@ -91,6 +91,8 @@ export const messages = {
   'library.tags': 'Tags',
   'library.favoritesOnly': 'Favorites only',
   'library.updatesOnly': 'Updates available',
+  'library.updatesFlagHint': 'Per-file update flag from LoRA Manager. The Updates page shows only likely updates.',
+  'library.openUpdates': 'Open Updates',
   'library.clearFilters': 'Clear all',
   'library.removeFilter': 'Remove filter {name}',
   'library.cardSize': 'Card size',

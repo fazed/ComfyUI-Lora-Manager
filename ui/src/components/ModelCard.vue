@@ -76,7 +76,14 @@ function pause(): void {
     </LazyMedia>
     <div class="pointer-events-none absolute inset-x-2 top-2 z-3 flex items-start gap-1">
       <span v-if="item.base_model" :class="[pillClass, 'bg-scrim text-on-scrim']">{{ item.base_model }}</span>
-      <span v-if="item.update_available" :class="[pillClass, 'bg-accent text-on-accent']">
+      <!-- Takes the pointer only for its tooltip; a click still opens / selects the card. -->
+      <span
+        v-if="item.update_available"
+        :class="[pillClass, 'pointer-events-auto cursor-pointer bg-accent text-on-accent']"
+        :title="t('library.updatesFlagHint')"
+        data-testid="update-flag"
+        @click="activate"
+      >
         <AppIcon name="arrowUp" :size="12" />{{ t('card.update') }}
       </span>
       <span class="flex-1"></span>

@@ -1850,9 +1850,11 @@ candidates stay likely (39 become `new_label`, 22 `same_version_number`).
   badges, `aria-pressed` segmented buttons, a polite live region for queue and
   check results, 44px controls and a stacked row on phones.
 
-Tests: `tests/services/test_update_classifier.py` (52 fixture cases: name
-parsing, every reason, read-time ownership vs a stale flag, cards of one
-line, base lines, other base, unchecked counts, gates, payload shape),
+Tests: `tests/services/test_update_classifier.py` (66 fixture cases: name
+parsing including glued base words, every reason including `new_label` and
+the stricter same-number rule on anonymised real cases, real successors that
+must stay likely, read-time ownership vs a stale flag, cards of one line,
+base lines, other base, unchecked counts, gates, payload shape),
 `tests/routes/test_updates_overview_route.py` (route table, per-prefix
 routing, bulk reads only - the fakes fail on any other call, no metadata
 provider, history failure tolerated) and `ui/tests/updates.test.ts` (API
@@ -1860,16 +1862,34 @@ client, helpers including destinations, every backend code has a message,
 the row, the page against a mocked backend: tiers, type switch, Update with
 the right params and fallback, duplicates and errors, queue states and
 completion, Check now confirm / cancel / 429 / 503 / error, refresh
-registry, empty / never-checked / error states, the top-bar badge).
+registry, empty / never-checked / error states, the top-bar badge with its
+split, the type-button counts, the refresh triggers with fake timers:
+mount, Check now, a finished update, visibility, no double read, GET only,
+silent failure) and `ui/tests/updateFlag.test.ts` (the library flag's
+tooltips, described checkbox and Open Updates link; the filter unchanged).
 Checked in a browser against a local mock backend (never the live one) at
 1440, 1100 and 375 px in Dark, Midnight and Light.
+
+### The library's per-file flag
+
+The library filter **Updates available** (`update_available_only`) and the
+**Update** pills on cards, rows and the drawer still use LoRA Manager's old
+per-file flag (`update_available`), which includes the false positives the
+Updates page filters out (in the audited library 22 LoRA and 14 checkpoint
+cards against 1 + 1 likely lines). Their behaviour is unchanged, but they are
+labelled: the pills' tooltip and the checkbox's description say "Per-file
+update flag from LoRA Manager. The Updates page shows only likely updates.",
+and the filter's help text has an **Open Updates** link to `/updates`. The
+card and row pills take the pointer only for that tooltip; a click on them
+still opens (or selects) the item.
 
 ### Phase 2 (not built yet)
 
 Bulk select and "update all", ignore version / model from the page, changelog
-and file-format choice per row, the same counts on the library toolbar's
-update filter, the drawer Versions tab using the classification, and an
-optional background re-check.
+and file-format choice per row, an `update_tier` parameter on the library
+list so the toolbar's update filter and the pills use the classification
+instead of the per-file flag, the drawer Versions tab using the
+classification, and an optional background re-check.
 
 ## Roadmap: still in the classic UI
 

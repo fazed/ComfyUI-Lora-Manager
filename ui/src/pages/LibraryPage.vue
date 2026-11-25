@@ -765,7 +765,21 @@ function bulkSend(event: MouseEvent): void {
         <template #filters>
           <LibraryFilterPanel :groups="filterGroups" :selected="state" :id-prefix="prefix" @toggle="filters.toggle">
             <label><input v-model="state.favoritesOnly" class="accent-accent" type="checkbox" /> {{ t('library.favoritesOnly') }}</label>
-            <label v-if="config.supportsUpdates"><input v-model="state.updatesOnly" class="accent-accent" type="checkbox" /> {{ t('library.updatesOnly') }}</label>
+            <span v-if="config.supportsUpdates" class="flex flex-col gap-1" data-testid="updates-flag-filter">
+              <label :title="t('library.updatesFlagHint')">
+                <input
+                  v-model="state.updatesOnly"
+                  class="accent-accent"
+                  type="checkbox"
+                  :aria-describedby="`${prefix}-updates-flag-hint`"
+                />
+                {{ t('library.updatesOnly') }}
+              </label>
+              <span :id="`${prefix}-updates-flag-hint`" class="max-w-[46ch] text-xs text-muted">
+                {{ t('library.updatesFlagHint') }}
+                <RouterLink to="/updates" class="font-medium text-accent underline underline-offset-2 hover:no-underline">{{ t('library.openUpdates') }}</RouterLink>
+              </span>
+            </span>
           </LibraryFilterPanel>
         </template>
         <template #selection>

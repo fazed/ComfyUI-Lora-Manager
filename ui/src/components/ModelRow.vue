@@ -104,7 +104,13 @@ function pause(): void {
     <div class="pointer-events-none relative min-w-[96px] flex-1">
       <p class="flex min-w-0 items-center gap-2 text-sm leading-tight font-medium">
         <span data-cell="name" class="truncate" :title="displayName">{{ displayName }}</span>
-        <span v-if="item.update_available" class="lm-badge lm-badge--accent flex-none"><AppIcon name="arrowUp" :size="12" />{{ t('card.update') }}</span>
+        <span
+          v-if="item.update_available"
+          class="lm-badge lm-badge--accent pointer-events-auto relative z-2 flex-none cursor-pointer"
+          :title="t('library.updatesFlagHint')"
+          data-testid="update-flag"
+          @click="activate"
+        ><AppIcon name="arrowUp" :size="12" />{{ t('card.update') }}</span>
       </p>
       <p data-cell="folder" class="mt-px truncate text-xs leading-tight text-muted phone:hidden" :title="folderText">{{ folderText }}</p>
       <p class="mt-px hidden min-w-0 items-center gap-2 text-xs leading-tight text-muted phone:flex">
