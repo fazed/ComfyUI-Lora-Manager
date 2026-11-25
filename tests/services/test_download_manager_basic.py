@@ -2790,3 +2790,82 @@ async def test_download_root_rule_tag_match_routes_to_rule_root(
     assert result["success"] is True
     assert captured["model_type"] == "lora"
     assert str(captured["save_dir"]).startswith(str(archive_root))
+
+
+# --- path safety: relative_path join -----------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "relative_path",
+    ["/abs", "\abs", "C:evil", "C:\abs", "..", "a/../../b", "a\..\..\b", "x:ads", "CON"],
+)
+async def test_download_rejects_unsafe_client_relative_path(
+    monkeypatch, scanners, metadata_provider, tmp_path, relative_path
+):
+    """A rooted or drive-relative relative_path replaced save_dir in
+    os.path.join on Windows; it must be refused before anything is created."""
+    manager = DownloadManager()
+    captured = {}
+    _capture_execute_download(monkeypatch, captured)
+    root = tmp_path / "loras"
+    root.mkdir()
+
+    result = await manager.download_from_civitai(
+        model_version_id=99,
+        save_dir=str(root),
+        relative_path=relative_path,
+        use_default_paths=False,
+        progress_callback=None,
+        source=None,
+    )
+
+    assert result["success"] is False
+    assert "outside allowed directory" in result["error"]
+    assert captured == {}
+    assert list(root.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_download_rejects_template_path_escaping_root(
+    monkeypatch, scanners, metadata_provider, tmp_path
+):
+    """{base_model}/{author} come from the remote API unsanitized."""
+    manager = DownloadManager()
+    captured = {}
+    _capture_execute_download(monkeypatch, captured)
+    metadata_provider.payload = _lora_payload("..\..\..\Startup")
+
+    result = await manager.download_from_civitai(
+        model_version_id=99,
+        save_dir=str(tmp_path),
+        use_default_paths=True,
+        progress_callback=None,
+        source=None,
+    )
+
+    assert result["success"] is False
+    assert captured == {}
+
+
+@pytest.mark.asyncio
+async def test_download_accepts_nested_client_relative_path(
+    monkeypatch, scanners, metadata_provider, tmp_path
+):
+    manager = DownloadManager()
+    captured = {}
+    _capture_execute_download(monkeypatch, captured)
+    root = tmp_path / "loras"
+    root.mkdir()
+
+    result = await manager.download_from_civitai(
+        model_version_id=99,
+        save_dir=str(root),
+        relative_path="SDXL 1.0/犬 style",
+        use_default_paths=False,
+        progress_callback=None,
+        source=None,
+    )
+
+    assert result["success"] is True
+    assert captured["save_dir"] == root / "SDXL 1.0" / "犬 style"

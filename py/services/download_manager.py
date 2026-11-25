@@ -51,6 +51,7 @@ from ..utils.paid_access import (
 from ..utils.file_utils import calculate_sha256, calculate_autov3, detect_media_extension, reconcile_media_extension
 from ..utils.preview_selection import resolve_mature_threshold, select_preview_media
 from ..utils.utils import calculate_filename_for_model, decode_percent_encoded_filename, fit_stem_to_path_budget, sanitize_folder_name
+from ..utils.safe_paths import UnsafePathError, is_within, validate_relative_path
 from ..utils.exif_utils import ExifUtils
 from ..utils.metadata_manager import MetadataManager
 from ..utils.sidecar_paths import get_metadata_path, get_preview_dir, get_preview_path
@@ -2415,14 +2416,22 @@ class DownloadManager:
                 base_save_dir = save_dir
                 # relative_path is posix-normalized ("SDXL 1.0/utility"), so
                 # normalize the joined directory back to native separators.
+                # Security: a rooted ("/x", "\\x") or drive-relative ("C:x")
+                # relative_path replaces save_dir in os.path.join on Windows,
+                # so refuse anything that is not strictly relative and verify
+                # containment (case-insensitively on Windows) after joining.
+                try:
+                    validate_relative_path(relative_path)
+                except UnsafePathError as exc:
+                    logger.warning(
+                        "Rejected download relative_path %r: %s", relative_path, exc
+                    )
+                    return {"success": False, "error": "Download path is outside allowed directory"}
                 save_dir = os.path.normpath(os.path.join(save_dir, relative_path))
-                # Security: validate path containment after joining
-                resolved_dir = os.path.abspath(os.path.normpath(save_dir))
-                base_dir = os.path.abspath(os.path.normpath(base_save_dir))
-                if not resolved_dir.startswith(base_dir + os.sep) and resolved_dir != base_dir:
+                if not is_within(base_save_dir, save_dir):
                     logger.warning(
                         "Path traversal detected: %s escapes %s",
-                        resolved_dir, base_dir,
+                        save_dir, base_save_dir,
                     )
                     return {"success": False, "error": "Download path is outside allowed directory"}
                 # Create directory if it doesn't exist

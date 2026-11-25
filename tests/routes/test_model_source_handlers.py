@@ -40,6 +40,23 @@ class FakeRequest:
         return self._json_data
 
 
+@pytest.fixture(autouse=True)
+def _tmp_path_is_a_configured_root(tmp_path, monkeypatch):
+    """Downloads only accept a configured library root as ``model_root``.
+
+    The download tests use *tmp_path* as that root, so register it (next to
+    the real configured roots) for the destination check only.
+    """
+    from py.utils import library_roots
+
+    real = library_roots.configured_download_roots
+    monkeypatch.setattr(
+        library_roots,
+        "configured_download_roots",
+        lambda config_obj=None: [*real(config_obj), str(tmp_path)],
+    )
+
+
 def _sidecar_path(model_path) -> str:
     return f"{os.path.splitext(str(model_path))[0]}.metadata.json"
 
@@ -689,21 +706,34 @@ async def test_download_model_source_rejects_unsafe_input(tmp_path, monkeypatch)
         ({"repo": "u/r", "filename": "../../etc/passwd"}, "Invalid filename"),
         (
             {"repo": "u/r", "filename": "f.safetensors", "relative_path": "/abs"},
-            "relative_path must not be absolute",
+            "Invalid relative_path",
         ),
         (
             {"repo": "u/r", "filename": "f.safetensors", "relative_path": "../up"},
             "Invalid relative_path",
         ),
+        (
+            # Drive-relative: os.path.join(base, "C:x") drops base on Windows.
+            {"repo": "u/r", "filename": "f.safetensors", "relative_path": "C:evil"},
+            "Invalid relative_path",
+        ),
+        (
+            {"repo": "u/r", "filename": "f.safetensors", "relative_path": "\\abs"},
+            "Invalid relative_path",
+        ),
+        (
+            {"repo": "u/r", "filename": "f.safetensors", "relative_path": "a\\..\\..\\b"},
+            "Invalid relative_path",
+        ),
+        (
+            {"repo": "u/r", "filename": "sub\\CON.safetensors"},
+            "Invalid filename",
+        ),
+        (
+            {"repo": "u/r", "filename": "f.safetensors:ads"},
+            "Invalid filename",
+        ),
     ]
-    if os.name == "nt":
-        # Drive-relative: os.path.join(base, "C:x") drops base on Windows.
-        cases.append(
-            (
-                {"repo": "u/r", "filename": "f.safetensors", "relative_path": "C:evil"},
-                "relative_path must not be absolute",
-            )
-        )
     for extra, expected in cases:
         response = await ModelSourceHandler().download_model_source(
             FakeRequest(
@@ -716,6 +746,59 @@ async def test_download_model_source_rejects_unsafe_input(tmp_path, monkeypatch)
         )
         assert response.status == 400, extra
         assert expected in _json_payload(response)["error"], extra
+
+
+@pytest.mark.asyncio
+async def test_download_model_source_rejects_unconfigured_model_root(tmp_path, monkeypatch):
+    """Any HTTP client can call this endpoint: model_root must be a root."""
+    captured = _stub_download_backend(monkeypatch)
+    for model_root in (
+        "",
+        "loras",
+        str(tmp_path / "elsewhere"),
+        str(tmp_path) + "_evil",
+        str(tmp_path / "sub"),
+    ):
+        response = await ModelSourceHandler().download_model_source(
+            FakeRequest(
+                json_data={
+                    "platform": "modelscope",
+                    "repo": "u/r",
+                    "filename": "f.safetensors",
+                    "model_root": model_root,
+                }
+            )
+        )
+        assert response.status == 400, model_root
+        assert "model_root" in _json_payload(response)["error"], model_root
+    assert captured == {}
+    assert not (tmp_path / "elsewhere").exists()
+    assert not (tmp_path / "sub").exists()
+
+
+@pytest.mark.asyncio
+async def test_download_model_source_accepts_root_spelling_variants(tmp_path, monkeypatch):
+    captured = _stub_download_backend(monkeypatch)
+    monkeypatch.setattr(model_source_handlers, "_save_source_metadata", AsyncMock())
+    variants = [str(tmp_path) + os.sep, str(tmp_path).replace(os.sep, "/")]
+    if os.name == "nt":
+        variants.append(str(tmp_path).upper())
+    for index, variant in enumerate(variants):
+        response = await ModelSourceHandler().download_model_source(
+            FakeRequest(
+                json_data={
+                    "platform": "modelscope",
+                    "repo": "u/r",
+                    "filename": f"dir/f{index}.safetensors",
+                    "model_root": variant,
+                    "relative_path": "SDXL\\style",
+                }
+            )
+        )
+        assert response.status == 200, variant
+        assert captured["save_path"] == str(
+            tmp_path / "SDXL" / "style" / f"f{index}.safetensors"
+        )
 
 
 @pytest.mark.asyncio
