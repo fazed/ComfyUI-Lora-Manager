@@ -62,6 +62,7 @@ class TestRequirePathInLibraryRoots:
         scanner = ScannerWithRoots([str(root)])
         _require_path_in_library_roots(str(root), scanner)
 
+    @pytest.mark.requires_symlinks
     def test_accepts_symlink_within_root(self, tmp_path):
         """Symlinks under a configured root are legitimate business paths
         and should be accepted — containment works on business-path space,

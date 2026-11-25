@@ -1553,6 +1553,7 @@ def test_relative_path_sanitizes_double_slashes():
     assert relative_path == "SDXL/no tags/Author"
 
 
+@pytest.mark.requires_symlinks
 def test_download_containment_accepts_symlink_save_dir(tmp_path):
     """Verify the download path containment check (download_manager.py:1395-1397)
     accepts save directories reached through user-created symlinks inside the

@@ -219,6 +219,7 @@ async def test_preview_handler_allows_custom_recipes_path(tmp_path):
     assert Path(response._path) == preview_file
 
 
+@pytest.mark.requires_symlinks
 async def test_preview_handler_allows_symlinked_recipes_path(tmp_path):
     lora_root = tmp_path / "library"
     lora_root.mkdir()
@@ -334,6 +335,7 @@ def test_is_preview_path_allowed_rejects_prefix_without_separator(tmp_path):
         f"Path in '{sibling_root}' should NOT be allowed when root is '{library_root}'"
 
 
+@pytest.mark.requires_symlinks
 async def test_preview_handler_serves_from_deep_symlink(tmp_path):
     """Test that previews under deep symlinks are served correctly."""
     library_root = tmp_path / "library"
@@ -374,6 +376,7 @@ async def test_preview_handler_serves_from_deep_symlink(tmp_path):
     assert Path(response._path) == preview_file.resolve()
 
 
+@pytest.mark.requires_symlinks
 async def test_deep_symlink_discovered_on_first_access(tmp_path):
     """Test that deep symlinks are discovered on first preview access."""
     library_root = tmp_path / "library"

@@ -61,6 +61,7 @@ async def test_browse_directory_lists_subdirs_sorted_and_filters(tmp_path):
     assert payload["directory_count"] == 2
 
 
+@pytest.mark.requires_symlinks
 @pytest.mark.asyncio
 async def test_browse_directory_preserves_symlinked_path(tmp_path):
     # The picker result is stored as a configured library path (a business

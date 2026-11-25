@@ -15,6 +15,7 @@ def _normalize(path: str) -> str:
 class TestCheckpointPathOverlap:
     """Test detection of overlapping paths between checkpoints and unet."""
 
+    @pytest.mark.requires_symlinks
     def test_overlapping_paths_prioritizes_checkpoints(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path, caplog
     ):
@@ -112,6 +113,7 @@ class TestCheckpointPathOverlap:
         assert len(checkpoint_roots) == 1
         assert len(unet_roots) == 1
 
+    @pytest.mark.requires_symlinks
     def test_partial_overlap_prioritizes_checkpoints(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path, caplog
     ):

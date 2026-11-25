@@ -41,6 +41,7 @@ def _setup_paths(monkeypatch: pytest.MonkeyPatch, tmp_path):
     return loras_dir, settings_dir
 
 
+@pytest.mark.requires_symlinks
 def test_symlink_scan_skips_file_links(monkeypatch: pytest.MonkeyPatch, tmp_path):
     loras_dir, settings_dir = _setup_paths(monkeypatch, tmp_path)
 
@@ -67,6 +68,7 @@ def test_symlink_scan_skips_file_links(monkeypatch: pytest.MonkeyPatch, tmp_path
     assert cache_path.exists()
 
 
+@pytest.mark.requires_symlinks
 def test_symlink_cache_reuses_previous_scan(monkeypatch: pytest.MonkeyPatch, tmp_path):
     loras_dir, settings_dir = _setup_paths(monkeypatch, tmp_path)
 
@@ -90,6 +92,7 @@ def test_symlink_cache_reuses_previous_scan(monkeypatch: pytest.MonkeyPatch, tmp
     assert second_cfg.map_path_to_link(str(target_dir)) == _normalize(str(dir_link))
 
 
+@pytest.mark.requires_symlinks
 def test_symlink_cache_survives_noise_mtime(monkeypatch: pytest.MonkeyPatch, tmp_path):
     loras_dir, settings_dir = _setup_paths(monkeypatch, tmp_path)
 
@@ -118,6 +121,7 @@ def test_symlink_cache_survives_noise_mtime(monkeypatch: pytest.MonkeyPatch, tmp
     assert second_cfg.map_path_to_link(str(target_dir)) == _normalize(str(dir_link))
 
 
+@pytest.mark.requires_symlinks
 def test_retargeted_symlink_triggers_rescan(monkeypatch: pytest.MonkeyPatch, tmp_path):
     """Changing a symlink's target should trigger automatic cache invalidation."""
     loras_dir, _ = _setup_paths(monkeypatch, tmp_path)
@@ -144,6 +148,7 @@ def test_retargeted_symlink_triggers_rescan(monkeypatch: pytest.MonkeyPatch, tmp
     assert second_cfg.map_path_to_link(str(new_target)) == _normalize(str(dir_link))
 
 
+@pytest.mark.requires_symlinks
 def test_symlink_roots_are_preserved(monkeypatch: pytest.MonkeyPatch, tmp_path):
     settings_dir = tmp_path / "settings"
     real_loras = tmp_path / "loras_real"
@@ -185,6 +190,7 @@ def test_symlink_roots_are_preserved(monkeypatch: pytest.MonkeyPatch, tmp_path):
     assert payload["path_mappings"][normalized_real] == normalized_link
 
 
+@pytest.mark.requires_symlinks
 def test_symlink_subfolder_to_external_location(monkeypatch: pytest.MonkeyPatch, tmp_path):
     """Symlink under root pointing outside root should be detected and allowed."""
     loras_dir, settings_dir = _setup_paths(monkeypatch, tmp_path)
@@ -210,6 +216,7 @@ def test_symlink_subfolder_to_external_location(monkeypatch: pytest.MonkeyPatch,
     assert cfg.is_preview_path_allowed(str(preview_file))
 
 
+@pytest.mark.requires_symlinks
 def test_new_symlink_triggers_rescan(monkeypatch: pytest.MonkeyPatch, tmp_path):
     """Adding a new symlink should trigger cache invalidation."""
     loras_dir, settings_dir = _setup_paths(monkeypatch, tmp_path)
@@ -230,6 +237,7 @@ def test_new_symlink_triggers_rescan(monkeypatch: pytest.MonkeyPatch, tmp_path):
     assert normalized_external in second_cfg._path_mappings
 
 
+@pytest.mark.requires_symlinks
 def test_removed_first_level_symlink_triggers_rescan(monkeypatch: pytest.MonkeyPatch, tmp_path):
     """Removing a first-level symlink should trigger cache invalidation."""
     loras_dir, settings_dir = _setup_paths(monkeypatch, tmp_path)
@@ -253,6 +261,7 @@ def test_removed_first_level_symlink_triggers_rescan(monkeypatch: pytest.MonkeyP
     assert normalized_external not in second_cfg._path_mappings
 
 
+@pytest.mark.requires_symlinks
 def test_retargeted_first_level_symlink_triggers_rescan(monkeypatch: pytest.MonkeyPatch, tmp_path):
     """Changing a first-level symlink's target should trigger cache invalidation."""
     loras_dir, settings_dir = _setup_paths(monkeypatch, tmp_path)
@@ -280,6 +289,7 @@ def test_retargeted_first_level_symlink_triggers_rescan(monkeypatch: pytest.Monk
     assert _normalize(str(target_v1)) not in second_cfg._path_mappings
 
 
+@pytest.mark.requires_symlinks
 def test_deep_symlink_not_scanned(monkeypatch: pytest.MonkeyPatch, tmp_path):
     """Deep symlinks (below first level) are not scanned to avoid performance issues."""
     loras_dir, settings_dir = _setup_paths(monkeypatch, tmp_path)
@@ -298,6 +308,7 @@ def test_deep_symlink_not_scanned(monkeypatch: pytest.MonkeyPatch, tmp_path):
     assert normalized_external not in cfg._path_mappings
 
 
+@pytest.mark.requires_symlinks
 def test_deep_symlink_discovered_on_preview_access(monkeypatch: pytest.MonkeyPatch, tmp_path):
     """Deep symlinks are discovered dynamically when preview is accessed."""
     loras_dir, settings_dir = _setup_paths(monkeypatch, tmp_path)
@@ -332,6 +343,7 @@ def test_deep_symlink_discovered_on_preview_access(monkeypatch: pytest.MonkeyPat
     assert cfg.is_preview_path_allowed(str(preview_file))
 
 
+@pytest.mark.requires_symlinks
 def test_deep_symlink_at_third_level(monkeypatch: pytest.MonkeyPatch, tmp_path):
     """Deep symlinks at third level are also discovered dynamically."""
     loras_dir, settings_dir = _setup_paths(monkeypatch, tmp_path)
@@ -362,6 +374,7 @@ def test_deep_symlink_at_third_level(monkeypatch: pytest.MonkeyPatch, tmp_path):
     assert cfg._path_mappings[normalized_external] == normalized_deep_link
 
 
+@pytest.mark.requires_symlinks
 def test_deep_symlink_points_outside_roots(monkeypatch: pytest.MonkeyPatch, tmp_path):
     """Deep symlinks can point to locations outside configured roots."""
     loras_dir, settings_dir = _setup_paths(monkeypatch, tmp_path)
@@ -404,6 +417,7 @@ def test_normal_path_unaffected_by_discovery(monkeypatch: pytest.MonkeyPatch, tm
     assert len(cfg._path_mappings) == 0
 
 
+@pytest.mark.requires_symlinks
 def test_first_level_symlink_still_works(monkeypatch: pytest.MonkeyPatch, tmp_path):
     """First-level symlinks continue to work as before."""
     loras_dir, settings_dir = _setup_paths(monkeypatch, tmp_path)

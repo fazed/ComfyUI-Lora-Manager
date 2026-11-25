@@ -1182,6 +1182,7 @@ def test_moving_recipes_path_back_to_parent_directory_is_allowed(manager, tmp_pa
     assert not old_json_path.exists()
 
 
+@pytest.mark.requires_symlinks
 def test_set_recipes_path_rewrites_symlinked_recipe_metadata(manager, tmp_path):
     real_recipes_dir = tmp_path / "real_recipes"
     real_recipes_dir.mkdir()
@@ -1310,6 +1311,7 @@ def test_get_extra_folder_paths(manager, tmp_path):
     assert str(extra_dir) in extra_paths.get("loras", [])
 
 
+@pytest.mark.requires_symlinks
 def test_extra_paths_validation_no_overlap_with_active_primary_lora_root(
     manager, tmp_path
 ):
@@ -1327,6 +1329,7 @@ def test_extra_paths_validation_no_overlap_with_active_primary_lora_root(
         manager.update_extra_folder_paths({"loras": [str(real_lora_dir)]})
 
 
+@pytest.mark.requires_symlinks
 def test_extra_paths_validation_no_overlap_with_active_primary_lora_root_case_insensitive(
     manager, monkeypatch, tmp_path
 ):
@@ -1385,6 +1388,7 @@ def test_extra_paths_validation_allows_missing_non_overlapping_lora_root(
     assert extra_paths["loras"] == [str(missing_extra)]
 
 
+@pytest.mark.requires_symlinks
 def test_extra_paths_validation_rejects_primary_root_first_level_symlink_target(
     manager, tmp_path
 ):
