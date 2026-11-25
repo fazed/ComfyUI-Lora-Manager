@@ -2869,3 +2869,110 @@ async def test_download_accepts_nested_client_relative_path(
 
     assert result["success"] is True
     assert captured["save_dir"] == root / "SDXL 1.0" / "犬 style"
+
+
+# --- path safety: remote file names ------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("remote_name", "expected"),
+    [
+        # Percent-decoding happens after the mini lookup's basename, so the
+        # decoded name may carry separators; only the last component is kept.
+        ("%E2%80%A6%5C..%5C..%5C..%5Cevil.safetensors", "evil.safetensors"),
+        ("%E2%80%A6%2F..%2F..%2Fevil.safetensors", "evil.safetensors"),
+        ("%E2%80%A6C%3A%5CUsers%5CPublic%5Cx.safetensors", "x.safetensors"),
+        ("..\..\evil.safetensors", "evil.safetensors"),
+        ("sub/dir/model.safetensors", "model.safetensors"),
+        ("%E7%8A%AC.safetensors", "犬.safetensors"),
+        # Still unsafe after stripping: refused.
+        ("C:evil.safetensors", None),
+        ("%E2%80%A6C%3Aevil.safetensors", None),
+        ("CON.safetensors", None),
+        ("model.safetensors:ads", None),
+        ("model.safetensors.", None),
+        ("..", None),
+        ("%E2%80%A6%5C..", None),
+    ],
+)
+async def test_download_confines_remote_file_name_to_save_dir(
+    monkeypatch, scanners, metadata_provider, tmp_path, remote_name, expected
+):
+    manager = DownloadManager()
+    metadata_provider.payload = _lora_payload("Illustrious")
+    metadata_provider.payload["files"][0]["name"] = remote_name
+    metadata_provider.get_version_file_mini = AsyncMock()
+    monkeypatch.setattr(
+        download_manager,
+        "get_metadata_provider",
+        AsyncMock(return_value=metadata_provider),
+    )
+    captured = {}
+
+    async def fake_execute_download(self, **kwargs):
+        captured["file_path"] = kwargs["metadata"].file_path
+        captured["save_dir"] = kwargs["save_dir"]
+        return {"success": True}
+
+    monkeypatch.setattr(
+        DownloadManager, "_execute_download", fake_execute_download, raising=False
+    )
+
+    result = await manager.download_from_civitai(
+        model_version_id=99,
+        save_dir=str(tmp_path),
+        use_default_paths=True,
+        progress_callback=None,
+        source="civarchive",
+    )
+
+    if expected is None:
+        assert result["success"] is False
+        assert "Unsafe file name" in result["error"]
+        assert captured == {}
+        return
+    assert result["success"] is True
+    file_path = captured["file_path"]
+    assert os.path.basename(file_path) == expected
+    assert os.path.normcase(os.path.dirname(os.path.abspath(file_path))) == os.path.normcase(
+        os.path.abspath(captured["save_dir"])
+    )
+    assert os.path.normcase(os.path.abspath(file_path)).startswith(
+        os.path.normcase(str(tmp_path))
+    )
+
+
+@pytest.mark.asyncio
+async def test_download_strips_decoded_separators_from_mini_name(
+    monkeypatch, scanners, metadata_provider, tmp_path
+):
+    manager = DownloadManager()
+    metadata_provider.payload = _lora_payload("Illustrious")
+    metadata_provider.payload["files"][0]["id"] = 1001
+    metadata_provider.get_version_file_mini = AsyncMock(
+        return_value={"fileName": "%E2%80%A6%5C..%5C..%5C..%5C..%5C..%5C..%5C..%5C..%5C..%5C..%5C..%5C..%5Cevil.safetensors"}
+    )
+    captured = {}
+
+    async def fake_execute_download(self, **kwargs):
+        captured["file_path"] = kwargs["metadata"].file_path
+        return {"success": True}
+
+    monkeypatch.setattr(
+        DownloadManager, "_execute_download", fake_execute_download, raising=False
+    )
+
+    result = await manager.download_from_civitai(
+        model_version_id=42,
+        save_dir=str(tmp_path),
+        use_default_paths=True,
+        progress_callback=None,
+        source=None,
+    )
+
+    assert result["success"] is True
+    assert os.path.basename(captured["file_path"]) == "evil.safetensors"
+    assert os.path.normcase(os.path.abspath(captured["file_path"])).startswith(
+        os.path.normcase(str(tmp_path))
+    )

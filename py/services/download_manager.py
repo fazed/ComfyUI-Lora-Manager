@@ -51,7 +51,12 @@ from ..utils.paid_access import (
 from ..utils.file_utils import calculate_sha256, calculate_autov3, detect_media_extension, reconcile_media_extension
 from ..utils.preview_selection import resolve_mature_threshold, select_preview_media
 from ..utils.utils import calculate_filename_for_model, decode_percent_encoded_filename, fit_stem_to_path_budget, sanitize_folder_name
-from ..utils.safe_paths import UnsafePathError, is_within, validate_relative_path
+from ..utils.safe_paths import (
+    UnsafePathError,
+    is_within,
+    validate_path_segment,
+    validate_relative_path,
+)
 from ..utils.exif_utils import ExifUtils
 from ..utils.metadata_manager import MetadataManager
 from ..utils.sidecar_paths import get_metadata_path, get_preview_dir, get_preview_path
@@ -1863,10 +1868,14 @@ class DownloadManager:
                 f"Filename conflict detected. Changing '{original_filename}' to '{unique_filename}'"
             )
             save_path = os.path.join(save_dir, unique_filename)
+            if not is_within(save_dir, save_path):
+                return False, "Download path is outside allowed directory"
             metadata.file_path = save_path.replace(os.sep, "/")
             metadata.file_name = os.path.splitext(unique_filename)[0]
             return True, save_path
 
+        if not is_within(save_dir, metadata.file_path):
+            return False, "Download path is outside allowed directory"
         return True, metadata.file_path
 
     async def _execute_original_download(
@@ -2534,6 +2543,30 @@ class DownloadManager:
                 )
                 file_name = decoded_file_name
                 file_info = {**file_info, "name": file_name}
+            # The name comes from the remote API (REST, mini endpoint or
+            # CivArchive) and was only just decoded, so "%5C..%5C" or
+            # "C%3A%5C" may now be separators or a drive. Keep only the last
+            # component (the mini lookup already did that before decoding)
+            # and refuse anything that is still not one safe file name.
+            base_file_name = file_name.replace("\\", "/").rsplit("/", 1)[-1]
+            try:
+                validate_path_segment(base_file_name)
+            except UnsafePathError:
+                logger.warning(
+                    "[download] Refusing unsafe file name from the model source: %r",
+                    file_name,
+                )
+                return {
+                    "success": False,
+                    "error": f"Unsafe file name from the model source: {file_name!r}",
+                }
+            if base_file_name != file_name:
+                logger.warning(
+                    "[download] Stripped directory components from file name %r",
+                    file_name,
+                )
+                file_name = base_file_name
+                file_info = {**file_info, "name": file_name}
             # Raw stored filenames carry no length cap, and the fixed stem
             # cap only applies to template renames; trim to the real path
             # budget (model path and sidecar mirror alike) so the target
@@ -2559,6 +2592,8 @@ class DownloadManager:
                 file_name = fitted_stem + file_ext
                 file_info = {**file_info, "name": file_name}
             save_path = os.path.join(save_dir, file_name)
+            if not is_within(save_dir, save_path):
+                return {"success": False, "error": "Download path is outside allowed directory"}
 
             # 5. Prepare metadata based on model type
             if model_type == "checkpoint":
