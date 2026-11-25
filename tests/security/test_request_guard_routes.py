@@ -22,6 +22,8 @@ from py.middleware.error_middleware import api_json_error
 from py.utils.request_guard import (
     GUARDED_GET_ROUTES,
     READ_ONLY_GET_ROUTES,
+    UNSAFE_METHOD_EXEMPTIONS,
+    is_guarded_request,
     is_guarded_route,
     matching_templates,
     request_guard,
@@ -39,6 +41,10 @@ def comfy_app(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> web.Applicatio
     # Replace the module-level name, not an attribute of the shared conftest
     # MagicMock (undoing that would delete the attribute for later tests).
     monkeypatch.setattr(lora_manager, "PromptServer", SimpleNamespace(instance=SimpleNamespace(app=app)))
+    # Keep the host-check scope of this throwaway app out of the global one.
+    from py.utils import host_guard
+
+    monkeypatch.setattr(host_guard, "LM_ROUTE_SCOPE", host_guard.LmRouteScope())
     example_dir = tmp_path / "example_images"
     example_dir.mkdir()
     monkeypatch.setattr(
@@ -150,8 +156,12 @@ def test_extension_read_endpoints_stay_open(path) -> None:
 
 
 def test_guard_registered_after_json_error_middleware(comfy_app) -> None:
+    from py.utils.host_guard import host_guard
+
     middlewares = list(comfy_app.middlewares)
-    assert middlewares.index(request_guard) == middlewares.index(api_json_error) + 1
+    # api_json_error, then the host check (DNS rebinding), then this guard.
+    assert middlewares.index(host_guard) == middlewares.index(api_json_error) + 1
+    assert middlewares.index(request_guard) == middlewares.index(host_guard) + 1
     # Idempotent: a second add_routes run does not stack another copy.
     from py.utils.request_guard import install_request_guard
 
@@ -163,11 +173,53 @@ def test_standalone_server_uses_the_guard() -> None:
     # Checked on the source: importing standalone.py rewrites sys.modules and
     # the environment for the whole test session.
     source = (REPO_ROOT / "standalone.py").read_text(encoding="utf-8")
-    assert "from py.utils.request_guard import request_guard" in source
+    assert "from py.utils.request_guard import standalone_request_guard" in source
     assert re.search(
-        r"middlewares: list\[Any\] = \[api_json_error, request_guard, cache_control\]",
+        r"middlewares: list\[Any\] = \[\s*api_json_error,\s*standalone_host_guard,"
+        r"\s*standalone_request_guard,\s*cache_control,?\s*\]",
         source,
     )
+
+
+def _non_get_routes(app: web.Application) -> list[tuple[str, str]]:
+    routes = []
+    for route in app.router.routes():
+        if route.method in ("GET", "HEAD", "*"):
+            continue
+        canonical = route.resource.canonical if route.resource is not None else None
+        assert canonical is not None
+        routes.append((route.method, canonical))
+    return routes
+
+
+def test_every_non_get_route_is_guarded_in_standalone_only(comfy_app) -> None:
+    routes = _non_get_routes(comfy_app)
+    assert len(routes) > 100, "route table looks incomplete"
+    methods = {method for method, _ in routes}
+    assert methods <= {"POST", "PUT", "PATCH", "DELETE"}, methods
+    unguarded = [
+        f"{method} {path}"
+        for method, path in routes
+        if not is_guarded_request(method, path, guard_unsafe_methods=True)
+    ]
+    # Exemptions must be listed (with a reason) in UNSAFE_METHOD_EXEMPTIONS.
+    exempt = [
+        f"{method} {path}"
+        for method, path in routes
+        if matching_templates(path, UNSAFE_METHOD_EXEMPTIONS)
+    ]
+    assert unguarded == exempt
+    # ComfyUI mode leaves non-GET methods to ComfyUI's origin middleware.
+    assert not any(
+        is_guarded_request(method, path, guard_unsafe_methods=False) for method, path in routes
+    )
+
+
+def test_unsafe_method_exemptions_are_not_stale(comfy_app) -> None:
+    paths = {path for _, path in _non_get_routes(comfy_app)}
+    for template, reason in UNSAFE_METHOD_EXEMPTIONS.items():
+        assert reason.strip(), template
+        assert any(matching_templates(path, {template: ""}) for path in paths), template
 
 
 _LM_PATH_RE = re.compile(r"(?:/api)?/lm/[A-Za-z0-9_\-./${}]+")

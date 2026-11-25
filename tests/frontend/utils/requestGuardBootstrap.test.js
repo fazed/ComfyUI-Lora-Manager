@@ -61,6 +61,27 @@ describe('request_guard_bootstrap.html', () => {
         expect(headers.get('X-LM-Client')).toBe('lm-classic');
     });
 
+    it('adds the header to every method (standalone guards non-safe methods too)', async () => {
+        for (const method of ['PUT', 'PATCH', 'DELETE']) {
+            await window.fetch('/api/lm/settings', { method, body: '{}' });
+        }
+        for (const call of fetchMock.mock.calls) {
+            expect(headerOf(call)).toBe('lm-classic');
+        }
+        expect(fetchMock.mock.calls.map(([, init]) => init.method)).toEqual(['PUT', 'PATCH', 'DELETE']);
+    });
+
+    it('leaves Content-Type unset for FormData uploads (the browser adds the boundary)', async () => {
+        const form = new FormData();
+        form.append('file', new Blob(['x'], { type: 'image/png' }), 'x.png');
+        await window.fetch('/api/lm/loras/upload-preview', { method: 'POST', body: form });
+        const [, init] = fetchMock.mock.calls[0];
+        const headers = new Headers(init.headers);
+        expect(init.body).toBe(form);
+        expect(headers.get('X-LM-Client')).toBe('lm-classic');
+        expect(headers.has('Content-Type')).toBe(false);
+    });
+
     it('handles absolute same-origin URLs, URL objects and Request objects', async () => {
         await window.fetch(`${window.location.origin}/api/lm/loras/scan`);
         await window.fetch(new URL('/api/lm/recipes/scan', window.location.origin));
