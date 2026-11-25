@@ -367,7 +367,7 @@ See [Request guard for state-changing GET routes](#request-guard-for-state-chang
 | File | Change / behaviour to preserve |
 | --- | --- |
 | `py/lora_manager.py` | Imports `install_request_guard` from `.utils.request_guard` and calls `install_request_guard(app)` in `LoraManager.add_routes`, right after the `api_json_error` insertion (guard runs directly after the JSON error middleware). |
-| `standalone.py` | Imports `request_guard` and builds the app with `middlewares=[api_json_error, request_guard, cache_control]`. |
+| `standalone.py` | Imports `standalone_host_guard` and `standalone_request_guard` and builds the app with `middlewares=[api_json_error, standalone_host_guard, standalone_request_guard, cache_control]` (see the next table). |
 | `py/routes/handlers/model_handlers.py` | `complete_download_in_queue`: an optional `file_path` must pass `require_within_any(file_path, configured_download_roots())` (400 otherwise, nothing moved to history). |
 | `py/routes/handlers/misc_handlers.py` | `set_model_version_download_status`: an optional `filePath` with `downloaded=true` must pass the same check (400 otherwise). |
 | `templates/base.html` | `{% include 'components/request_guard_bootstrap.html' %}` directly after the base-path bootstrap include. |
@@ -379,6 +379,20 @@ Fork-only files of the guard: `py/utils/request_guard.py`,
 `tests/security/test_request_guard_{decision,middleware,routes}.py`,
 `tests/frontend/utils/requestGuardBootstrap.test.js`; the modern UI sends the
 header from `ui/src/api/http.ts` (tested in `ui/tests/api.test.ts`).
+
+**Host check (DNS rebinding) and standalone method guard (3, in addition to the above)**
+
+See [Host check (DNS rebinding)](#host-check-dns-rebinding). Keep every change when re-applying.
+
+| File | Change / behaviour to preserve |
+| --- | --- |
+| `py/lora_manager.py` | Imports `install_host_guard`, `register_lm_routes` from `.utils.host_guard`. In `LoraManager.add_routes`: `resources_before = set(app.router.resources())` right after `app = ...`; `install_host_guard(app)` right after `install_request_guard(app)` (order `api_json_error, host_guard, request_guard`); `register_lm_routes(r for r in app.router.resources() if r not in resources_before)` after the last route (the websocket routes), before the `on_startup` hooks. Every route LoRA Manager registers must be added before that call. |
+| `standalone.py` | `middlewares=[api_json_error, standalone_host_guard, standalone_request_guard, cache_control]`. |
+| `py/services/settings_manager.py` | `DEFAULT_SETTINGS["allowed_hosts"] = []`; `set()` normalises `allowed_hosts` with `normalize_allowed_hosts` from `..utils.host_guard`. |
+
+Fork-only files: `py/utils/host_guard.py`,
+`tests/security/test_host_guard_{decision,middleware,settings}.py`,
+`tests/security/test_request_guard_unsafe_methods.py`.
 
 No upstream docs were changed. A "Modern UI" link inside the classic UI
 pages would require more template edits, so it was left out; use `/lm-ui/`
@@ -533,7 +547,7 @@ is defence in depth for:
   carries no `Origin`;
 * future changes to ComfyUI's middleware.
 
-DNS rebinding stays uncovered (see the end of this section).
+DNS rebinding is handled separately by the [host check](#host-check-dns-rebinding).
 
 ### Protocol
 
@@ -586,9 +600,11 @@ Why same-origin clients must still send the header: when `Sec-Fetch-Site` is
 missing (browsers before 2023, or a proxy that strips it) but the request
 has a same-host `Origin`, only rule 3 can allow it.
 
-Requests the guard does not touch: every method other than `GET`/`HEAD`
-(ComfyUI's origin middleware covers those in ComfyUI mode), read-only `GET`
-routes, unknown paths (404 as before), and everything outside `/api/lm/`.
+Requests the guard does not touch: in ComfyUI mode every method other than
+`GET`/`HEAD` (ComfyUI's origin middleware covers those; in standalone mode
+they are guarded, see [Standalone mode: non-safe methods](#standalone-mode-non-safe-methods)),
+read-only `GET` routes, unknown paths (404 as before), and `GET`s outside
+`/api/lm/`.
 
 ### What the browser extension does
 
@@ -643,9 +659,145 @@ aiohttp app with spy handlers: blocked requests have no side effect),
 `..._routes.py` (classification, registration in both entry points),
 `tests/frontend/utils/requestGuardBootstrap.test.js`, `ui/tests/api.test.ts`.
 
-Not covered: DNS rebinding (the attacker's page is then same-origin, so rule
-1 allows it; ComfyUI does not check `Host` either), and `POST`/`PUT`/`DELETE`
-in standalone mode, which has no ComfyUI origin middleware.
+DNS rebinding (the attacker's page is then same-origin, so rule 1 allows it)
+is covered by the [host check](#host-check-dns-rebinding); non-safe methods
+in standalone mode by [Standalone mode: non-safe methods](#standalone-mode-non-safe-methods).
+
+## Host check (DNS rebinding)
+
+**Threat.** An attacker's site makes its own domain (`evil.example.com`)
+resolve to `127.0.0.1`. The browser then treats the attacker's page and
+ComfyUI as the same origin: `Sec-Fetch-Site` is `same-origin`, so the request
+guard above and ComfyUI's origin middleware let the requests through, and the
+page can even **read** the responses (settings with the Civitai API key, the
+library, the queue). ComfyUI does not validate `Host`. What the attacker
+cannot change is the `Host` header: it carries the attacker's domain.
+
+`py/utils/host_guard.py` rejects LoRA Manager requests whose `Host` is a
+domain name it does not know. It is an aiohttp middleware right after
+`api_json_error` (before the request guard) in both entry points.
+
+### Rules
+
+The hostname is taken from the `Host` header: port stripped, IPv6 brackets
+removed, lower-cased, one trailing dot removed. Then:
+
+1. **No `Host` header** (HTTP/1.0 clients, some tools): **allow**. Browsers
+   always send `Host`, so a missing header is never a rebinding attack.
+2. **IP literal** (IPv4 or IPv6, any address, e.g. `127.0.0.1:8188`,
+   `[::1]:8188`, `192.168.1.20`): **allow**. Rebinding needs a domain name,
+   and LAN access by IP must keep working. `127.0.0.1.evil.com` is a domain,
+   not an IP.
+3. **`localhost` or `*.localhost`** (any case, any port): **allow**. Browsers
+   resolve these to loopback themselves. `localhost.evil.com` is not one.
+4. **Listed in `allowed_hosts`** (setting) or `LORA_MANAGER_ALLOWED_HOSTS`
+   (environment variable): **allow**.
+5. **Anything else**: **reject** with HTTP 403 and
+   `{"success": false, "error": "Host not allowed: <host>. Add it to the LoRA Manager setting allowed_hosts if you access ComfyUI through this hostname.", "code": "host_not_allowed"}`.
+   This includes malformed headers: userinfo (`a@b`), a non-numeric or
+   six-digit port, characters outside a hostname (raw Unicode, spaces, `/`,
+   `%`), empty labels, more than 255 characters (the host shown in the
+   message is cut to 80 characters). Clients must rely on `code`. The first
+   block per host is logged as a warning (`py.utils.host_guard`), repeats at
+   debug level.
+
+All methods are checked, including `HEAD`, `OPTIONS` (CORS preflights) and
+websocket upgrades (`/ws/...`, rejected before the upgrade). The raw `Host`
+header is used, not `X-Forwarded-Host`.
+
+### `allowed_hosts`
+
+A list of strings, default `[]`. Entries are case-insensitive; a port is
+accepted and ignored (`comfy.lan:8188` = `comfy.lan`); a leading `*.` matches
+subdomains only (`*.my.tld` matches `pc.my.tld` and `a.b.my.tld`, not
+`my.tld`: list both if needed); Unicode names are stored as punycode (the form
+browsers send); a pasted URL is reduced to its host. Invalid entries are
+dropped when the setting is saved. Hostnames with underscores work.
+
+There is no field in the settings pages yet. Set it either
+
+* in `settings.json` (stop ComfyUI first, or the running app may overwrite
+  the file):
+
+  ```json
+  "allowed_hosts": ["comfy.lan", "*.my.tld"]
+  ```
+
+* or through the settings API, from an address that is already accepted (an
+  IP address or `localhost`):
+
+  ```sh
+  curl -X POST http://127.0.0.1:8188/api/lm/settings \
+    -H "Content-Type: application/json" \
+    -d '{"allowed_hosts": ["comfy.lan", "*.my.tld"]}'
+  ```
+
+  This takes effect immediately: the middleware reads the in-memory setting
+  and re-parses it only when it changes (no file access per request).
+
+`LORA_MANAGER_ALLOWED_HOSTS` (comma-separated, same entry syntax, e.g.
+`LORA_MANAGER_ALLOWED_HOSTS=comfy.lan,*.my.tld`) is **added** to the setting;
+it does not replace it.
+
+**Who needs it:** anyone who opens ComfyUI / LoRA Manager through a
+**hostname** other than `localhost`: a LAN name (`mypc`, `mypc.local`,
+`comfy.lan`), a dynamic-DNS or Tailscale name, or a **reverse proxy** with a
+custom domain. A reverse proxy usually forwards the original `Host`
+(`comfy.example.com`), sometimes its upstream address instead; either way the
+name the backend receives must be listed (an IP upstream needs nothing).
+Access by IP address or `localhost` needs no configuration. Without the entry
+the LoRA Manager pages and API answer 403 `host_not_allowed`, while ComfyUI's
+own pages keep loading.
+
+The browser extension: when its configured backend address is a hostname,
+that name needs the same entry. The extension shows a specific message for
+`host_not_allowed` (separate change).
+
+### Scope
+
+* **Standalone mode**: every path (the whole app is LoRA Manager).
+* **ComfyUI mode**: the app belongs to ComfyUI, and ComfyUI's own routes
+  (`/prompt`, `/api/queue`, `/ws`, the frontend, `/extensions/...`) are left
+  alone. `LoraManager.add_routes` snapshots the router's resources before it
+  registers anything and passes the new ones to `register_lm_routes`, which
+  derives the scope from that route table: plain routes as exact paths
+  (`/loras`, `/statistics`, `/ws/fetch-progress` ...), static routes as
+  prefixes (`/loras_static/`, `/locales/`, `/example_images_static/`),
+  dynamic routes by their static part (`/api/lm/`, `/lm-ui/`). `/api/lm/` is
+  always in scope, so unknown paths there are checked too, and a derived
+  prefix of `/` is never used. A request is checked when its path is in that
+  scope or its matched resource is one of ours.
+
+Limit: ComfyUI's own APIs remain reachable through a rebound name (ComfyUI
+does not check `Host`); this protects LoRA Manager's routes only.
+
+Tests: `tests/security/test_host_guard_decision.py` (parsing, allowlist,
+decision matrix), `..._middleware.py` (in-process aiohttp apps for ComfyUI
+mode and standalone with spy handlers, plus the real ComfyUI-mode route
+table), `..._settings.py` (setting, settings POST).
+
+### Standalone mode: non-safe methods
+
+Standalone mode has no ComfyUI origin middleware, so there the request guard
+(`standalone_request_guard`) also applies the [protocol](#protocol) above to
+**every non-safe method** (anything other than `GET`, `HEAD`, `OPTIONS`,
+`TRACE`; in practice `POST`, `PUT`, `PATCH`, `DELETE`) on **every path**.
+ComfyUI mode is unchanged (`request_guard`: `GET`/`HEAD` on guarded routes
+only).
+
+Effect: a cross-site `<form method="post">` or `fetch` against the standalone
+server gets 403 `csrf_blocked`. Same-origin requests from the classic UI and
+`/lm-ui/` pass: `Sec-Fetch-Site: same-origin`, and both send `X-LM-Client` on
+every method (the classic fetch wrapper adds it to every same-origin `fetch`
+regardless of method and leaves `Content-Type` alone, so multipart uploads
+keep their boundary; the classic UI uses no `XMLHttpRequest` or
+`sendBeacon`). Scripts and curl without `Origin`/`Sec-Fetch-Site` pass
+(rule 4). Exemptions would go in `UNSAFE_METHOD_EXEMPTIONS`
+(`py/utils/request_guard.py`); there are none.
+`tests/security/test_request_guard_routes.py` enumerates every non-`GET`
+route and checks that it is guarded in standalone mode and not in ComfyUI
+mode; `tests/security/test_request_guard_unsafe_methods.py` covers the
+decision and the middleware (spies, multipart).
 
 ## Theming
 
