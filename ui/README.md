@@ -319,6 +319,47 @@ Fork-only files of this hardening: `py/utils/safe_paths.py`,
 `tests/routes/test_{example_workflows,model_handlers}_path_safety.py`,
 `tests/services/test_{backup_restore,download_destination}_path_safety.py`.
 
+**Path-safety hardening, phase B1 (in addition to the tables above)**
+
+See [Path safety](#path-safety). Keep every guard when re-applying.
+
+| File | Change / behaviour to preserve |
+| --- | --- |
+| `py/config.py` | `is_preview_path_allowed` / `_is_path_in_allowed_roots`: a UNC/device path is decided as a string (allowed only lexically under a UNC preview root) before `Path.resolve` or the deep-symlink walk; control characters refused; root check via `is_within` (drive roots work). |
+| `py/nodes/lora_loader.py` | Stack paths: `is_absolute_like` instead of `os.path.isabs`. |
+| `py/routes/handlers/misc_handlers.py` | `open_file_location`: `require_within_any` over library roots + recipes dir + example images path before `isfile` (400). `open_model_sidecar_location`: library roots only. `_resolve_allowed_local_path` (send image): UNC/device paths decided before any `realpath`. `_is_within_root` = `is_within(resolve=True)`. |
+| `py/routes/handlers/model_handlers.py` | `_parse_queue_destination`: `match_configured_root` + `validate_relative_path` (repeated separators still folded). |
+| `py/routes/handlers/model_source_handlers.py` | `_find_matching_root`: longest `is_within` match (case-insensitive on Windows); `set_hf_url` checks the root before `isfile`. |
+| `py/routes/handlers/recipe_handlers.py` | `reimport_recipe`: a `file_path` outside the recipes dir is neither read as source nor used as target folder. |
+| `py/services/base_model_service.py` | Relative-path search: `is_within` instead of `startswith(root)`. |
+| `py/services/batch_import_service.py` | `_validate_local_path`: `is_absolute_like`, `..` as a segment, UNC only inside a UNC library/recipes/example root; `_discover_images` validates before `isdir`. |
+| `py/services/download_manager.py` | Archive extraction: last component (either separator) must pass `validate_path_segment`; `is_within` on the destination. |
+| `py/services/metadata_archive_manager.py` | `extractall` replaced by per-member `safe_join` (unsafe members skipped). |
+| `py/services/model_file_service.py` | `normalize_relative_folder`: `posixpath.normpath` then `validate_relative_path` (`"."` kept); `resolve_folder` and `_find_model_root` use `is_within`. |
+| `py/services/pending_delete_service.py` | `undo`: every pending entry's `original` must be inside model roots / library roots / recipes dir / sidecar root, `staged` inside a `.lm-pending-delete` folder; checked before any move, whole batch refused. |
+| `py/services/recipe_scanner.py` | EXIF rewrites only for images inside the recipes dir; `get_recipe_json_path` ignores a `folder` that escapes; preview URL rewrite via `is_absolute_like`. |
+| `py/services/recipes/persistence_service.py` | `_recipe_image_inside_root` guards delete, bulk delete, move and the four reconnect/restore EXIF writes; move target via `is_inside_recipes_dir` (also after `realpath`). |
+| `py/services/wildcard_parser.py` | `_safe_member_name` via `validate_relative_path` (leading `./`, repeated `/` folded). |
+| `py/utils/directory_browser.py` | `_validate_new_directory_name` via `validate_path_segment` (same error codes). |
+| `py/utils/example_images_file_manager.py` | `get_files` / `has_images` / `open_folder`: 400 unless `model_hash` is a 64-hex hash, before any filesystem call; `_is_within_root` = `is_within`. |
+| `py/utils/example_images_paths.py` | `get_model_folder` returns `""` for a non-hash value (before `makedirs`). |
+| `py/utils/recipes_paths.py` | `is_inside_recipes_dir` (business path and `realpath`). |
+| `py/utils/sidecar_paths.py` | `_path_contains` / `is_workflow_artifact_path` via `is_within`; `_best_root_for` handles a drive root (still case-sensitive). |
+| `py/utils/utils.py` | `calculate_relative_path_for_model`: `{base_model}` (per segment, mappings may nest) and `{author}` sanitized, reserved device names suffixed with `_`; `get_lora_info_absolute` via `is_absolute_like`; LoRA root match via `is_within`. |
+| `static/js/components/shared/ModelVersionsTab.js` | `matchLibraryRoot` (exported): case-insensitive, boundary-aware, most specific root. |
+| `tests/routes/test_misc_routes.py` | Open-location tests register `tmp_path` as a library root. |
+| `tests/routes/test_pending_delete_routes.py`, `tests/services/test_pending_delete_service.py` | Recipe undo tests register `tmp_path` as the recipes dir. |
+| `tests/routes/test_recipe_routes.py` | Two re-import tests for a planted `file_path`. |
+| `tests/services/test_recipe_scanner.py` | EXIF rematch tests keep the image inside the recipes dir. |
+| `tests/services/test_example_images_download_manager_async.py` | 64-hex test hashes. |
+
+Fork-only files of phase B1: `tests/config/test_preview_unc_path_safety.py`,
+`tests/nodes/test_lora_loader_absolute_path.py`,
+`tests/routes/test_open_location_path_safety.py`,
+`tests/services/test_{archive_extraction,pending_delete_undo,recipe_file,validator_migration}_path_safety.py`,
+`tests/utils/test_{absolute_and_template,example_images_hash}_path_safety.py`,
+`tests/frontend/components/modelVersionsTab.rootMatch.test.js`.
+
 No upstream docs were changed. A "Modern UI" link inside the classic UI
 pages would require more template edits, so it was left out; use `/lm-ui/`
 directly (the new UI links back to the classic one).
@@ -400,6 +441,45 @@ applies Windows and POSIX rules on every OS:
   checked against library roots. The current GET guards use
   `require_within_any` instead, because a library root may itself be a UNC
   share.
+* `is_unc_or_device(path)`: string test for `\\host\share`, `//host/share`,
+  `\\?\`, `\\.\`.
+* `is_absolute_like(path)`: the pre-3.13 meaning of "absolute" on every OS
+  (drive + root, UNC/device, rooted `/x` or `\x`; not `C:x`). Use it where
+  an absolute path is intended by design (batch import, LoRA stack paths,
+  recipe preview URLs) instead of `os.path.isabs`.
+
+`py/utils/recipes_paths.is_inside_recipes_dir(path)` checks a recipe's
+`file_path`/folder (from the editable `.recipe.json`) against the recipes
+folder, both as a business path and after `realpath`, so a junction inside
+the folder cannot lead out.
+
+Decisions (phase B1):
+
+* **UNC on GET.** A UNC/device path is decided as a string before any
+  `resolve`/`realpath`/`stat` (those would make Windows send NTLM
+  credentials to the host). Where a configured root can itself be a UNC
+  share (previews, send-image, batch import), the path is allowed only when
+  it lies lexically under such a UNC root; otherwise it is refused.
+  Example-image GETs need no UNC rule: `model_hash` must be a 64-hex hash.
+* **Open/browse endpoints.** `open-file-location` acts only inside library
+  roots, the recipes folder and the example images folder;
+  `open-model-sidecar-location` only inside library roots (400 otherwise,
+  before `isfile`). `browse-directory`, `create-directory` and
+  `validate-path` stay unrestricted: the settings UI uses them to choose new
+  roots outside the current ones. `create-directory` validates the new name
+  with `validate_path_segment`.
+* **Download roots per model type.** `model_root` is still checked against
+  the union of all configured roots. The model type is only known after the
+  CivitAI lookup inside `download_from_civitai`, the frontends legitimately
+  cross types (diffusion models in unet roots from the checkpoints page,
+  LoCon/DoRA in LoRA roots), and the union already confines every write to a
+  library root, so a per-type check would add breakage risk for little gain.
+* **Archive members** are flattened into the target folder (model archives)
+  or joined with `safe_join` (metadata archive); a member whose name is not
+  safe is skipped, never extracted.
+* **Pending-delete undo** refuses the whole batch when any pending entry's
+  `original` is outside the library/recipes/sidecar roots or its `staged`
+  file is not inside a `.lm-pending-delete` folder.
 
 `py/utils/library_roots.py` lists every configured library root
 (`configured_download_roots`) and matches a client `model_root` against it
