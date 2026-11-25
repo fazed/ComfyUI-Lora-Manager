@@ -93,6 +93,7 @@ from ...utils.lora_metadata import extract_trained_words
 from ...utils import library_roots
 from ...utils.safe_paths import (
     UnsafePathError,
+    is_unc_or_device,
     is_within,
     require_within_any,
     validate_path_segment,
@@ -5036,13 +5037,8 @@ class NodeRegistryHandler:
 
     @staticmethod
     def _is_within_root(root: str, path: str) -> bool:
-        """Return True when *path* resolves inside *root*."""
-        try:
-            root_normalized = os.path.normcase(os.path.realpath(root))
-            path_normalized = os.path.normcase(os.path.realpath(path))
-            return os.path.commonpath([root_normalized, path_normalized]) == root_normalized
-        except (OSError, ValueError):
-            return False
+        """Return True when *path* resolves inside *root* (``realpath``)."""
+        return is_within(root, path, resolve=True)
 
     @staticmethod
     def _input_directory() -> str:
@@ -5051,7 +5047,19 @@ class NodeRegistryHandler:
         return os.path.realpath(folder_paths.get_input_directory())
 
     def _resolve_allowed_local_path(self, path: str) -> str:
-        """Resolve a local image path only when it is inside a trusted root."""
+        """Resolve a local image path only when it is inside a trusted root.
+
+        A UNC/device path is decided as a string before any ``realpath``:
+        only the preview-root check (which allows a path lexically under a
+        UNC library root without resolving it) may accept one.
+        """
+        if not isinstance(path, str) or not path or "\x00" in path:
+            raise ValueError("Image path is not inside an allowed folder")
+        if is_unc_or_device(path):
+            if config.is_preview_path_allowed(path):
+                return os.path.abspath(path)
+            raise ValueError("Image path is not inside an allowed folder")
+
         candidate = os.path.abspath(os.path.expanduser(path))
 
         try:

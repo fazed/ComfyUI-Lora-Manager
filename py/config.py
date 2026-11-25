@@ -20,6 +20,7 @@ from .utils.constants import (
     OTHER_MODEL_FOLDER_SUBTYPES,
 )
 from .utils.root_paths import normalize_root_identity
+from .utils.safe_paths import is_unc_or_device, is_within
 from .utils.settings_paths import (
     ensure_settings_file,
     get_settings_dir,
@@ -1952,7 +1953,22 @@ class Config:
         If the path is initially rejected, attempts to discover deep symlinks
         that were not scanned during initialization. If a symlink is found,
         updates the in-memory path mappings and retries the check.
+
+        UNC and device paths (``\\\\host\\share``, ``//host/share``,
+        ``\\\\?\\``, ``\\\\.\\``) are decided as plain strings BEFORE any
+        filesystem call: resolving one (``Path.resolve``, the symlink walk)
+        would make Windows open an SMB connection and send NTLM credentials
+        to that host. Such a path is allowed only when it lies lexically
+        under a preview root that is itself a UNC path (a library on a
+        network share); it is never resolved first.
         """
+
+        if not isinstance(preview_path, str) or not preview_path:
+            return False
+        if any(ord(char) < 32 for char in preview_path):
+            return False
+        if is_unc_or_device(preview_path):
+            return self._is_unc_path_under_unc_root(preview_path)
 
         if self._is_path_in_allowed_roots(preview_path):
             return True
@@ -1967,6 +1983,9 @@ class Config:
 
         if not preview_path:
             return False
+        if is_unc_or_device(preview_path):
+            # Never resolve a UNC/device path (see is_preview_path_allowed).
+            return self._is_unc_path_under_unc_root(preview_path)
 
         try:
             candidate = Path(preview_path).expanduser().resolve(strict=False)
@@ -1975,8 +1994,7 @@ class Config:
 
         candidate_str = os.path.normcase(str(candidate))
         for root in self._preview_root_paths:
-            root_str = os.path.normcase(str(root))
-            if candidate_str == root_str or candidate_str.startswith(root_str + os.sep):
+            if is_within(str(root), str(candidate)):
                 return True
 
         logger.debug(
@@ -1986,6 +2004,16 @@ class Config:
             len(self._preview_root_paths),
         )
 
+        return False
+
+    def _is_unc_path_under_unc_root(self, preview_path: str) -> bool:
+        """String-only check of a UNC/device path against UNC preview roots."""
+
+        for root in self._preview_root_paths:
+            root_str = str(root)
+            if is_unc_or_device(root_str) and is_within(root_str, preview_path):
+                return True
+        logger.debug("UNC/device preview path refused: %s", preview_path)
         return False
 
     def _try_discover_deep_symlink(self, preview_path: str) -> bool:
