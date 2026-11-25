@@ -453,9 +453,9 @@ class ModelUpdateService:
         try:
             with closing_connection(self._connect()) as conn:
                 conn.execute("PRAGMA journal_mode=WAL")
-                conn.execute("PRAGMA foreign_keys = ON")
                 conn.executescript(self._SCHEMA)
                 self._apply_migrations(conn)
+                conn.execute("PRAGMA foreign_keys = ON")
                 self._migrate_from_legacy_snapshot(conn)
             self._schema_initialized = True
         except Exception as exc:  # pragma: no cover - defensive guard
@@ -565,7 +565,43 @@ class ModelUpdateService:
             logger.warning("Failed to migrate model update data: %s", exc, exc_info=True)
 
     def _apply_migrations(self, conn: sqlite3.Connection) -> None:
-        """Ensure legacy databases match the current schema without dropping data."""
+        """Ensure legacy databases match the current schema without dropping data.
+
+        Every step runs in one explicit transaction that is committed on
+        success and rolled back on any error, so a start either upgrades the
+        database completely or leaves it exactly as it was. SQLite DDL is
+        transactional, and the legacy ``sqlite3`` transaction control neither
+        begins nor commits around DDL on its own, hence the explicit
+        ``BEGIN IMMEDIATE``/``commit()``/``rollback()``.
+
+        Foreign key enforcement is off while the tables are rebuilt, as the
+        SQLite documentation prescribes for schema changes: the copy must not
+        fail on version rows whose model has no status row, and the status
+        de-duplication must not trip over a parent key that is not unique yet.
+        The pragma is a no-op inside a transaction, so it is switched before
+        ``BEGIN`` and restored after the transaction ends.
+        """
+
+        if conn.in_transaction:
+            conn.commit()
+        foreign_keys = conn.execute("PRAGMA foreign_keys").fetchone()[0]
+        conn.execute("PRAGMA foreign_keys = OFF")
+        try:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                self._apply_schema_migrations(conn)
+            except BaseException:
+                conn.rollback()
+                raise
+            conn.commit()
+        finally:
+            if foreign_keys:
+                conn.execute("PRAGMA foreign_keys = ON")
+
+    def _apply_schema_migrations(self, conn: sqlite3.Connection) -> None:
+        """The migration steps; the caller owns the transaction."""
+
+        self._recover_stranded_versions_rebuild(conn)
 
         status_columns = self._get_table_columns(conn, "model_update_status")
         if "should_ignore_model" not in status_columns:
@@ -764,127 +800,163 @@ class ModelUpdateService:
         expected = ["model_id", "version_id"]
         return [row["name"] for row in ordered] != expected
 
+    # Columns of the current ``model_update_versions`` table, in schema order,
+    # with the value a legacy table that lacks one of them contributes.
+    _VERSION_COLUMN_DEFAULTS: Dict[str, str] = {
+        "model_id": "NULL",
+        "version_id": "NULL",
+        "sort_index": "0",
+        "name": "NULL",
+        "base_model": "NULL",
+        "released_at": "NULL",
+        "size_bytes": "NULL",
+        "preview_url": "NULL",
+        "is_in_library": "0",
+        "should_ignore": "0",
+        "early_access_ends_at": "NULL",
+        "is_early_access": "0",
+        "usage_control": "NULL",
+        "paid_access": "NULL",
+        "is_paid": "0",
+        "file_count": "NULL",
+        "gate_lapsed_at": "NULL",
+        "price_buzz": "NULL",
+        "list_price_buzz": "NULL",
+        "generation_price_buzz": "NULL",
+        "accepts_blue_buzz": "0",
+        "price_sale_ends_at": "NULL",
+        "price_checked_at": "NULL",
+        "price_check_attempted_at": "NULL",
+        "description": "NULL",
+        "files_meta": "NULL",
+    }
+
+    def _copy_versions_rows(
+        self,
+        conn: sqlite3.Connection,
+        source: str,
+        target: str,
+        *,
+        or_ignore: bool = False,
+    ) -> None:
+        """Copy the rows of one versions table into another.
+
+        Only the columns the target has are written; a column the source lacks
+        gets its schema default.
+        """
+
+        source_columns = self._get_table_columns(conn, source)
+        target_columns = self._get_table_columns(conn, target)
+        columns = [
+            column for column in self._VERSION_COLUMN_DEFAULTS if column in target_columns
+        ]
+        select_parts = []
+        for column in columns:
+            default = self._VERSION_COLUMN_DEFAULTS[column]
+            if column not in source_columns:
+                select_parts.append(default)
+            elif column in {"sort_index", "is_in_library", "should_ignore"}:
+                select_parts.append(f"COALESCE({column}, {default})")
+            else:
+                select_parts.append(column)
+
+        conn.execute(
+            "INSERT {verb} INTO {target} ({columns}) SELECT {select_clause} FROM {source}".format(
+                verb="OR IGNORE" if or_ignore else "",
+                target=target,
+                columns=", ".join(columns),
+                select_clause=", ".join(select_parts),
+                source=source,
+            )
+        )
+
+    def _recover_stranded_versions_rebuild(self, conn: sqlite3.Connection) -> None:
+        """Bring back rows an interrupted primary key rebuild left behind.
+
+        Earlier builds ran the rebuild without committing it: the first rename
+        reached the disk but the rest rolled back, which left the versions in
+        ``model_update_versions_legacy`` (and an empty ``_new`` table) while the
+        next start created a fresh, empty ``model_update_versions``. Copy those
+        rows back, keeping any row the current table already has, and drop the
+        leftovers.
+        """
+
+        stranded = [
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN "
+                "('model_update_versions_legacy', 'model_update_versions_new') "
+                "ORDER BY name"
+            ).fetchall()
+        ]
+        for table in stranded:
+            logger.warning("Recovering rows from interrupted migration table %s", table)
+            self._copy_versions_rows(conn, table, "model_update_versions", or_ignore=True)
+            conn.execute(f"DROP TABLE {table}")
+
     def _migrate_model_update_versions_primary_key(
         self, conn: sqlite3.Connection, legacy_columns: set[str]
     ) -> None:
-        """Upgrade the versions table to use a composite primary key."""
+        """Upgrade the versions table to use a composite primary key.
+
+        The rebuild runs inside a savepoint, so it is all-or-nothing even when
+        the caller has no transaction open: on any error the savepoint is
+        rolled back and the original table is left untouched. Inside
+        ``_apply_migrations`` the surrounding transaction makes it durable.
+        """
 
         logger.info("Migrating model_update_versions table to composite primary key")
-        conn.execute(
-            "ALTER TABLE model_update_versions RENAME TO model_update_versions_legacy"
-        )
-        conn.execute(
-            """
-            CREATE TABLE model_update_versions_new (
-                model_id INTEGER NOT NULL,
-                version_id INTEGER NOT NULL,
-                sort_index INTEGER NOT NULL DEFAULT 0,
-                name TEXT,
-                base_model TEXT,
-                released_at TEXT,
-                size_bytes INTEGER,
-                preview_url TEXT,
-                is_in_library INTEGER NOT NULL DEFAULT 0,
-                should_ignore INTEGER NOT NULL DEFAULT 0,
-                early_access_ends_at TEXT,
-                is_early_access INTEGER NOT NULL DEFAULT 0,
-                paid_access TEXT,
-                is_paid INTEGER NOT NULL DEFAULT 0,
-                file_count INTEGER,
-                gate_lapsed_at TEXT,
-                price_buzz INTEGER,
-                list_price_buzz INTEGER,
-                generation_price_buzz INTEGER,
-                accepts_blue_buzz INTEGER NOT NULL DEFAULT 0,
-                price_sale_ends_at TEXT,
-                price_checked_at REAL,
-                price_check_attempted_at REAL,
-                description TEXT,
-                files_meta TEXT,
-                PRIMARY KEY (model_id, version_id),
-                FOREIGN KEY(model_id) REFERENCES model_update_status(model_id) ON DELETE CASCADE
+        conn.execute("SAVEPOINT model_update_versions_pk")
+        try:
+            conn.execute(
+                "ALTER TABLE model_update_versions RENAME TO model_update_versions_legacy"
             )
-            """
-        )
-
-        target_columns = [
-            "model_id",
-            "version_id",
-            "sort_index",
-            "name",
-            "base_model",
-            "released_at",
-            "size_bytes",
-            "preview_url",
-            "is_in_library",
-            "should_ignore",
-            "early_access_ends_at",
-            "is_early_access",
-            "paid_access",
-            "is_paid",
-            "file_count",
-            "gate_lapsed_at",
-            "price_buzz",
-            "list_price_buzz",
-            "generation_price_buzz",
-            "accepts_blue_buzz",
-            "price_sale_ends_at",
-            "price_checked_at",
-            "price_check_attempted_at",
-            "description",
-            "files_meta",
-        ]
-        defaults = {
-            "sort_index": "0",
-            "name": "NULL",
-            "base_model": "NULL",
-            "released_at": "NULL",
-            "size_bytes": "NULL",
-            "preview_url": "NULL",
-            "is_in_library": "0",
-            "should_ignore": "0",
-            "early_access_ends_at": "NULL",
-            "is_early_access": "0",
-            "paid_access": "NULL",
-            "is_paid": "0",
-            "file_count": "NULL",
-            "gate_lapsed_at": "NULL",
-            "price_buzz": "NULL",
-            "list_price_buzz": "NULL",
-            "generation_price_buzz": "NULL",
-            "accepts_blue_buzz": "0",
-            "price_sale_ends_at": "NULL",
-            "price_checked_at": "NULL",
-            "price_check_attempted_at": "NULL",
-            "description": "NULL",
-            "files_meta": "NULL",
-        }
-
-        select_parts = []
-        for column in target_columns:
-            if column in legacy_columns:
-                if column in {"sort_index", "is_in_library", "should_ignore"}:
-                    select_parts.append(f"COALESCE({column}, {defaults[column]})")
-                else:
-                    select_parts.append(column)
-            else:
-                select_parts.append(defaults.get(column, "NULL"))
-
-        conn.execute(
-            """
-            INSERT INTO model_update_versions_new ({columns})
-            SELECT {select_clause}
-            FROM model_update_versions_legacy
-            """.format(
-                columns=", ".join(target_columns),
-                select_clause=", ".join(select_parts),
+            conn.execute(
+                """
+                CREATE TABLE model_update_versions_new (
+                    model_id INTEGER NOT NULL,
+                    version_id INTEGER NOT NULL,
+                    sort_index INTEGER NOT NULL DEFAULT 0,
+                    name TEXT,
+                    base_model TEXT,
+                    released_at TEXT,
+                    size_bytes INTEGER,
+                    preview_url TEXT,
+                    is_in_library INTEGER NOT NULL DEFAULT 0,
+                    should_ignore INTEGER NOT NULL DEFAULT 0,
+                    early_access_ends_at TEXT,
+                    is_early_access INTEGER NOT NULL DEFAULT 0,
+                    usage_control TEXT,
+                    paid_access TEXT,
+                    is_paid INTEGER NOT NULL DEFAULT 0,
+                    file_count INTEGER,
+                    gate_lapsed_at TEXT,
+                    price_buzz INTEGER,
+                    list_price_buzz INTEGER,
+                    generation_price_buzz INTEGER,
+                    accepts_blue_buzz INTEGER NOT NULL DEFAULT 0,
+                    price_sale_ends_at TEXT,
+                    price_checked_at REAL,
+                    price_check_attempted_at REAL,
+                    description TEXT,
+                    files_meta TEXT,
+                    PRIMARY KEY (model_id, version_id),
+                    FOREIGN KEY(model_id) REFERENCES model_update_status(model_id) ON DELETE CASCADE
+                )
+                """
             )
-        )
-
-        conn.execute("DROP TABLE model_update_versions_legacy")
-        conn.execute(
-            "ALTER TABLE model_update_versions_new RENAME TO model_update_versions"
-        )
+            self._copy_versions_rows(
+                conn, "model_update_versions_legacy", "model_update_versions_new"
+            )
+            conn.execute("DROP TABLE model_update_versions_legacy")
+            conn.execute(
+                "ALTER TABLE model_update_versions_new RENAME TO model_update_versions"
+            )
+        except BaseException:
+            conn.execute("ROLLBACK TO model_update_versions_pk")
+            conn.execute("RELEASE model_update_versions_pk")
+            raise
+        conn.execute("RELEASE model_update_versions_pk")
 
     def _deduplicate_model_update_status(self, conn: sqlite3.Connection) -> None:
         """Remove duplicate status rows before applying uniqueness constraints."""

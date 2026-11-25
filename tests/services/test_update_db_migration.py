@@ -399,3 +399,54 @@ def test_orphan_versions_survive_the_rebuild(tmp_path):
     assert _rows(
         db_path, "SELECT model_id, version_id, name FROM model_update_versions ORDER BY version_id"
     ) == [(5, 51, "v1"), (5, 52, "v2"), (6, 61, "c1"), (404, 99, "orphan")]
+
+
+# --------------------------------------------------------------------------
+# Recovery of a rebuild an earlier build left half-done
+# --------------------------------------------------------------------------
+
+
+def test_rows_stranded_by_an_interrupted_rebuild_are_recovered(tmp_path):
+    """Earlier builds committed only the first rename of the rebuild.
+
+    The versions ended up in ``model_update_versions_legacy`` next to an empty
+    ``_new`` table, and the next start created a fresh, empty versions table
+    that newer checks have written to since.
+    """
+
+    db_path = tmp_path / "updates.sqlite"
+    ModelUpdateService(str(db_path))  # the fresh current-schema tables
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "INSERT INTO model_update_status (model_id, model_type) VALUES (5, 'lora'), (6, 'lora')"
+    )
+    conn.execute(
+        "CREATE TABLE model_update_versions_legacy ("
+        "version_id INTEGER PRIMARY KEY, model_id INTEGER NOT NULL, name TEXT, "
+        "should_ignore INTEGER NOT NULL DEFAULT 0)"
+    )
+    conn.execute(
+        "INSERT INTO model_update_versions_legacy (version_id, model_id, name, should_ignore) "
+        "VALUES (51, 5, 'old v1', 1), (61, 6, 'c1', 1)"
+    )
+    conn.execute(
+        "CREATE TABLE model_update_versions_new (model_id INTEGER NOT NULL, "
+        "version_id INTEGER NOT NULL, name TEXT, PRIMARY KEY (model_id, version_id))"
+    )
+    # Written by a newer check: it wins over the stranded copy.
+    conn.execute(
+        "INSERT INTO model_update_versions (model_id, version_id, name) VALUES (5, 51, 'new v1')"
+    )
+    conn.commit()
+    conn.close()
+
+    ModelUpdateService(str(db_path))
+
+    tables = _tables(db_path)
+    assert "model_update_versions_legacy" not in tables
+    assert "model_update_versions_new" not in tables
+    assert _rows(
+        db_path,
+        "SELECT model_id, version_id, name, should_ignore FROM model_update_versions "
+        "ORDER BY version_id",
+    ) == [(5, 51, "new v1", 0), (6, 61, "c1", 1)]
