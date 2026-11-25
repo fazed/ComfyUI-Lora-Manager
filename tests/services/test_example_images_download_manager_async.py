@@ -96,7 +96,7 @@ async def test_start_download_rejects_parallel_runs(
     monkeypatch.setitem(settings_manager.settings, "example_images_path", str(tmp_path))
 
     model = {
-        "sha256": "abc123",
+        "sha256": "abc123" + "0" * 58,
         "model_name": "Example",
         "file_path": str(tmp_path / "example.safetensors"),
         "file_name": "example.safetensors",
@@ -140,7 +140,7 @@ async def test_start_download_rejects_parallel_runs(
 
         snapshot = exc.value.progress_snapshot
         assert snapshot["status"] == "running"
-        assert snapshot["current_model"] == "Example (abc123)"
+        assert snapshot["current_model"] == "Example (abc12300)"
 
         statuses = [payload["status"] for payload in ws_manager.payloads]
         assert "running" in statuses
@@ -205,7 +205,7 @@ async def test_progress_is_persisted_for_downloaded_models(
 
     models = [
         {
-            "sha256": f"hash-{index}",
+            "sha256": f"{index:064x}",
             "model_name": f"Model {index}",
             "file_path": str(tmp_path / f"model-{index}.safetensors"),
             "file_name": f"model-{index}.safetensors",
@@ -302,14 +302,14 @@ async def test_pause_resume_blocks_processing(
 
     models = [
         {
-            "sha256": "hash-one",
+            "sha256": "1" * 64,
             "model_name": "Model One",
             "file_path": str(tmp_path / "model-one.safetensors"),
             "file_name": "model-one.safetensors",
             "civitai": {"images": [{"url": "https://example.com/one.png"}]},
         },
         {
-            "sha256": "hash-two",
+            "sha256": "2" * 64,
             "model_name": "Model Two",
             "file_path": str(tmp_path / "model-two.safetensors"),
             "file_name": "model-two.safetensors",
@@ -408,7 +408,7 @@ async def test_pause_resume_blocks_processing(
         )
         assert running_after > paused_index
         assert "completed" in statuses_after[running_after:]
-        assert call_order == ["hash-one", "hash-two"]
+        assert call_order == ["1" * 64, "2" * 64]
 
     finally:
         first_release.set()

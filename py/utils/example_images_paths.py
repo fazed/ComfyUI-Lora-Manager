@@ -58,9 +58,15 @@ def ensure_library_root_exists(library_name: Optional[str] = None) -> str:
 
 
 def get_model_folder(model_hash: str, library_name: Optional[str] = None) -> str:
-    """Return the folder path for a model's example images."""
+    """Return the folder path for a model's example images.
 
-    if not model_hash:
+    Returns ``""`` unless *model_hash* is a 64-character hex SHA256: the hash
+    becomes a path segment, and a request-supplied value such as ``..``, an
+    absolute path or a UNC path must never be joined onto the root (or reach
+    ``makedirs`` below).
+    """
+
+    if not model_hash or not is_hash_folder(model_hash):
         return ""
 
     root = ensure_library_root_exists()

@@ -9,7 +9,9 @@ from aiohttp import web
 from ..services.settings_manager import get_settings_manager
 from ..utils.example_images_paths import (
     get_model_folder,
+    is_hash_folder,
 )
+from ..utils.safe_paths import is_within
 from ..utils.constants import SUPPORTED_MEDIA_EXTENSIONS
 
 logger = logging.getLogger(__name__)
@@ -19,10 +21,22 @@ _WINDOWS_DRIVE_PATTERN = re.compile(r"^[A-Za-z]:/")
 
 
 def _is_within_root(path: str, root: str) -> bool:
-    try:
-        return os.path.commonpath([os.path.abspath(path), os.path.abspath(root)]) == os.path.abspath(root)
-    except ValueError:
-        return False
+    return is_within(root, path)
+
+
+def _invalid_hash_response(model_hash: object, **extra: object):
+    """Return a 400 response unless *model_hash* is a 64-character hex hash.
+
+    Checked before any filesystem access: the hash is joined onto the example
+    images root, so ``..``, ``C:/Users/u/Pictures`` or a UNC path must be
+    refused as plain strings.
+    """
+
+    if isinstance(model_hash, str) and is_hash_folder(model_hash):
+        return None
+    payload = {'success': False, 'error': 'Invalid model_hash parameter'}
+    payload.update(extra)
+    return web.json_response(payload, status=400)
 
 
 def _join_local_example_path(local_root: str, relative_path: str) -> str:
@@ -99,6 +113,9 @@ class ExampleImagesFileManager:
                     'success': False,
                     'error': 'Missing model_hash parameter'
                 }, status=400)
+            invalid = _invalid_hash_response(model_hash)
+            if invalid is not None:
+                return invalid
             
             # Get example images path from settings
             settings_manager = get_settings_manager()
@@ -192,6 +209,9 @@ class ExampleImagesFileManager:
                     'success': False,
                     'error': 'Missing model_hash parameter'
                 }, status=400)
+            invalid = _invalid_hash_response(model_hash)
+            if invalid is not None:
+                return invalid
             
             # Get example images path from settings
             settings_manager = get_settings_manager()
@@ -269,6 +289,9 @@ class ExampleImagesFileManager:
                     'success': False,
                     'error': 'Missing model_hash parameter'
                 }, status=400)
+            invalid = _invalid_hash_response(model_hash, has_images=False)
+            if invalid is not None:
+                return invalid
             
             # Get example images path from settings
             settings_manager = get_settings_manager()
