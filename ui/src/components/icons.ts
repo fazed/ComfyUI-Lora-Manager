@@ -58,6 +58,8 @@ export const ICON_PATHS = {
   text: ['M4 6h16', 'M4 12h16', 'M4 18h10'],
   more: ['M12 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z', 'M12 13a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z', 'M12 20a1 1 0 1 0 0-2 1 1 0 0 0 0 2Z'],
   sparkle: ['M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3Z'],
+  /** Circle with an up arrow: the Updates page link. */
+  update: ['M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z', 'm8 12 4-4 4 4', 'M12 16V8'],
 } as const
 
 export type IconName = keyof typeof ICON_PATHS
