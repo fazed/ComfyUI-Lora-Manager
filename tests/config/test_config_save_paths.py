@@ -453,6 +453,7 @@ def test_extra_paths_deduplication(monkeypatch, tmp_path):
     assert _identity(config_instance.extra_loras_roots) == _identity([str(extra_loras_dir)])
 
 
+@pytest.mark.requires_symlinks
 def test_apply_library_settings_ignores_extra_lora_path_overlapping_primary_symlink(
     monkeypatch, tmp_path, caplog
 ):
@@ -497,6 +498,7 @@ def test_apply_library_settings_ignores_extra_lora_path_overlapping_primary_syml
     assert "duplicate items" in warning_messages[0].lower()
 
 
+@pytest.mark.requires_symlinks
 def test_apply_library_settings_detects_overlap_case_insensitively(
     monkeypatch, tmp_path, caplog
 ):
@@ -594,6 +596,7 @@ def test_apply_library_settings_ignores_missing_extra_lora_paths(monkeypatch, tm
     assert not any("same lora folder" in record.message.lower() for record in caplog.records)
 
 
+@pytest.mark.requires_symlinks
 def test_apply_library_settings_ignores_extra_lora_path_overlapping_primary_root_symlink(
     tmp_path, caplog
 ):

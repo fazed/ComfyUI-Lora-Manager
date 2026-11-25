@@ -2064,6 +2064,7 @@ async def test_p_model_walk_excludes_nested_staging_dir(
 #     PRE-FIX the batch was staged under the scanner ROOT, so
 #     ``real_batch.is_dir()`` (real_dir/.lm-pending-delete/<batch>) would have
 #     failed - the batch would have lived at <root>/.lm-pending-delete.
+@pytest.mark.requires_symlinks
 async def test_symlink1_stage_undo_round_trip_through_symlink(tmp_path: Path) -> None:
     root = tmp_path / "loras"
     root.mkdir()

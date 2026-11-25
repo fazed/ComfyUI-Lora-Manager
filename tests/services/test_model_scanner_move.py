@@ -196,6 +196,7 @@ async def test_concurrent_moves_of_same_source_are_serialized(library: Path):
     assert saved["file_path"] == _normalize(target_file)
 
 
+@pytest.mark.requires_symlinks
 @pytest.mark.asyncio
 async def test_move_through_symlinked_directory(library: Path, tmp_path: Path):
     """Moving a model that lives under a symlinked directory uses the

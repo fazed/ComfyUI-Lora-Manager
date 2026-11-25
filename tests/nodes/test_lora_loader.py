@@ -237,7 +237,8 @@ def test_lora_loader_does_not_warn_for_same_basename_in_different_folders(monkey
         _, _, _, loaded_loras = loader.load_loras(
             model,
             "",
-            lora_stack=[("/abs/a/same.safetensors", 1.0, 1.0)],
+            # abspath: "/abs/..." is not absolute on Windows with Python 3.13+.
+            lora_stack=[(os.path.abspath("/abs/a/same.safetensors"), 1.0, 1.0)],
             loras={"__value__": [{"active": True, "name": "same", "strength": 1.0}]},
         )
 
@@ -279,9 +280,11 @@ def test_stack_entry_keeps_resolved_absolute_path(monkeypatch):
         return name, ["trigger"]
 
     monkeypatch.setattr("py.nodes.lora_loader.get_lora_info_absolute", resolve)
-    result = _collect_stack_entries([("/models/b/same.safetensors", .7, .3)])
-    assert seen == ["/models/b/same.safetensors"]
-    assert result[0]["absolute_path"] == "/models/b/same.safetensors"
+    # abspath: "/models/..." is not absolute on Windows with Python 3.13+.
+    stack_path = os.path.abspath("/models/b/same.safetensors")
+    result = _collect_stack_entries([(stack_path, .7, .3)])
+    assert seen == [stack_path]
+    assert result[0]["absolute_path"] == stack_path
     assert result[0]["clip_strength"] == .3
 
 

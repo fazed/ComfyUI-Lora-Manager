@@ -918,6 +918,7 @@ async def test_reconcile_cache_applies_adjust_cached_entry(tmp_path: Path):
     assert new_entry["custom_field"] == "adjusted"
 
 
+@pytest.mark.requires_symlinks
 @pytest.mark.asyncio
 async def test_count_model_files_handles_symlink_loops(tmp_path: Path):
     scanner = DummyScanner(tmp_path)
@@ -938,6 +939,7 @@ async def test_count_model_files_handles_symlink_loops(tmp_path: Path):
     assert count == 2
 
 
+@pytest.mark.requires_symlinks
 @pytest.mark.asyncio
 async def test_initialize_cache_dedupes_files_reachable_via_primary_symlink_and_extra_root(
     tmp_path: Path,
@@ -958,6 +960,7 @@ async def test_initialize_cache_dedupes_files_reachable_via_primary_symlink_and_
     assert cache.raw_data[0]["file_path"] == _normalize_path(loras_root / "link" / "one.txt")
 
 
+@pytest.mark.requires_symlinks
 @pytest.mark.asyncio
 async def test_reconcile_cache_removes_duplicate_alias_when_same_real_file_seen_once(
     tmp_path: Path,
@@ -994,6 +997,7 @@ async def test_reconcile_cache_removes_duplicate_alias_when_same_real_file_seen_
     assert cached_paths == {_normalize_path(loras_root / "link" / "one.txt")}
 
 
+@pytest.mark.requires_symlinks
 @pytest.mark.asyncio
 async def test_reconcile_cache_keeps_cached_path_when_walk_yields_a_live_alias(
     tmp_path: Path,

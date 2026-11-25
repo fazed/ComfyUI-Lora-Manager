@@ -499,7 +499,14 @@ class ModelSourceHandler:
 
         # Validate relative_path — must not be absolute or escape base directory
         if relative_path:
-            if os.path.isabs(relative_path):
+            # isabs alone misses "/x" (rooted, no drive) and "C:x" (drive-
+            # relative) on Windows with Python 3.13+; os.path.join would let
+            # either replace base_dir and escape model_root.
+            if (
+                os.path.isabs(relative_path)
+                or relative_path.startswith("/")
+                or os.path.splitdrive(relative_path)[0]
+            ):
                 return web.json_response({"error": "relative_path must not be absolute"}, status=400)
             if ".." in relative_path.split("/") or "\\" in relative_path:
                 return web.json_response({"error": "Invalid relative_path"}, status=400)

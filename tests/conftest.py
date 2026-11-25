@@ -419,3 +419,64 @@ def reset_singletons():
         ModelScanner._instances.clear()
     reset_first_run_manager()
 
+
+# ---------------------------------------------------------------------------
+# Symlink capability
+# ---------------------------------------------------------------------------
+# Creating a symlink on Windows needs SeCreateSymbolicLinkPrivilege (Developer
+# Mode or an elevated shell). Tests that build symlinked fixtures carry
+# ``@pytest.mark.requires_symlinks``; they are skipped only when a probe shows
+# that this process cannot create symlinks, so they still run on Linux/macOS,
+# on CI runners and on Windows machines that have the privilege.
+
+_REQUIRES_SYMLINKS_REASON = (
+    "os.symlink is not permitted for this process (on Windows: enable "
+    "Developer Mode or run elevated)"
+)
+_symlink_support: Optional[bool] = None
+
+
+def probe_symlink_support(base_dir: Optional[str] = None) -> bool:
+    """Return True when both a file and a directory symlink can be created."""
+
+    import shutil
+
+    probe_root = tempfile.mkdtemp(prefix="lm-symlink-probe-", dir=base_dir)
+    try:
+        target_dir = os.path.join(probe_root, "target_dir")
+        target_file = os.path.join(probe_root, "target_file")
+        os.mkdir(target_dir)
+        with open(target_file, "w", encoding="utf-8") as handle:
+            handle.write("probe")
+        os.symlink(target_dir, os.path.join(probe_root, "dir_link"), target_is_directory=True)
+        os.symlink(target_file, os.path.join(probe_root, "file_link"))
+    except (OSError, NotImplementedError, AttributeError):
+        return False
+    finally:
+        shutil.rmtree(probe_root, ignore_errors=True)
+    return True
+
+
+def symlinks_supported() -> bool:
+    """Cached result of :func:`probe_symlink_support` for this session."""
+
+    global _symlink_support
+    if _symlink_support is None:
+        _symlink_support = probe_symlink_support()
+    return _symlink_support
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "requires_symlinks: skip when this process cannot create symlinks",
+    )
+
+
+def pytest_collection_modifyitems(config, items):
+    marked = [item for item in items if item.get_closest_marker("requires_symlinks")]
+    if not marked or symlinks_supported():
+        return
+    skip = pytest.mark.skip(reason=_REQUIRES_SYMLINKS_REASON)
+    for item in marked:
+        item.add_marker(skip)

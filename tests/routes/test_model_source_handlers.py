@@ -696,6 +696,14 @@ async def test_download_model_source_rejects_unsafe_input(tmp_path, monkeypatch)
             "Invalid relative_path",
         ),
     ]
+    if os.name == "nt":
+        # Drive-relative: os.path.join(base, "C:x") drops base on Windows.
+        cases.append(
+            (
+                {"repo": "u/r", "filename": "f.safetensors", "relative_path": "C:evil"},
+                "relative_path must not be absolute",
+            )
+        )
     for extra, expected in cases:
         response = await ModelSourceHandler().download_model_source(
             FakeRequest(
