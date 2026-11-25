@@ -12,6 +12,57 @@ import { isVideoPreviewUrl } from '../../utils/mediaTypes.js';
 
 const PREVIEW_PLACEHOLDER_URL = '/loras_static/images/no-preview.png';
 
+/**
+ * Find the library root that contains `filePath` and the path below it.
+ *
+ * Separators are folded (`\` and `/`), a trailing separator on the root is
+ * ignored, and the match is boundary-aware: `D:/loras` does not contain
+ * `D:/loras_old/x`. Case is folded too (Windows paths are case-insensitive),
+ * but an exact-case match wins over a case-folded one, and a longer (more
+ * specific) root wins over a shorter one.
+ *
+ * @param {string} filePath
+ * @param {string[]} roots
+ * @returns {{ root: string, relativePath: string } | null}
+ */
+export function matchLibraryRoot(filePath, roots) {
+    if (typeof filePath !== 'string' || !filePath || !Array.isArray(roots)) {
+        return null;
+    }
+    const file = filePath.replace(/\\/g, '/');
+    let best = null;
+    for (const root of roots) {
+        if (typeof root !== 'string' || !root) {
+            continue;
+        }
+        const normalizedRoot = root.replace(/\\/g, '/').replace(/\/+$/, '');
+        if (!normalizedRoot) {
+            continue;
+        }
+        const prefix = `${normalizedRoot}/`;
+        let exact;
+        if (file.startsWith(prefix)) {
+            exact = true;
+        } else if (file.toLowerCase().startsWith(prefix.toLowerCase())) {
+            exact = false;
+        } else {
+            continue;
+        }
+        const better = !best
+            || (exact && !best.exact)
+            || (exact === best.exact && normalizedRoot.length > best.length);
+        if (better) {
+            best = {
+                root,
+                relativePath: file.slice(prefix.length),
+                exact,
+                length: normalizedRoot.length,
+            };
+        }
+    }
+    return best ? { root: best.root, relativePath: best.relativePath } : null;
+}
+
 function buildCivitaiVersionUrl(modelId, versionId) {
     return buildCivitaiModelUrl(
         modelId,
@@ -1428,21 +1479,9 @@ export function initVersionsTab({
                 return null;
             }
 
-            const normalizedFilePath = currentVersion.filePath.replace(/\\/g, '/');
-            let matchedRoot = null;
-            let relativePath = null;
-
-            for (const root of roots) {
-                const normalizedRoot = root.replace(/\\/g, '/');
-                if (normalizedFilePath.startsWith(normalizedRoot)) {
-                    matchedRoot = root;
-                    relativePath = normalizedFilePath.slice(normalizedRoot.length);
-                    if (relativePath.startsWith('/')) {
-                        relativePath = relativePath.slice(1);
-                    }
-                    break;
-                }
-            }
+            const match = matchLibraryRoot(currentVersion.filePath, roots);
+            const matchedRoot = match?.root ?? null;
+            const relativePath = match?.relativePath ?? null;
 
             if (!matchedRoot || !relativePath) {
                 return null;
