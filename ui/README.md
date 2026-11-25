@@ -381,6 +381,27 @@ Fork-only files of the guard: `py/utils/request_guard.py`,
 `tests/frontend/utils/requestGuardBootstrap.test.js`; the modern UI sends the
 header from `ui/src/api/http.ts` (tested in `ui/tests/api.test.ts`).
 
+**Version management (6, in addition to the above)**
+
+See [Version management](#version-management). Keep every change when re-applying.
+
+| File | Change / behaviour to preserve |
+| --- | --- |
+| `py/services/download_queue_service.py` | Columns `replace_targets TEXT` (JSON list) and `replace_status TEXT` on `download_queue` and `download_history` (additive migration in `_initialize_schema`, idempotent, old rows NULL); `add_to_queue(replace_targets=)` stores them with `replace_status = 'pending'`; `complete_download` copies them to history; retry / retry-all carry them only while still `pending` (`_retry_replace_fields`). New `claim_replace` (compare-and-set `pending` -> `running` on a `completed` history row), `finish_replace`, `interrupt_stale_replaces` (startup sweep). |
+| `py/services/download_queue_worker.py` (fork-only) | `_execute` calls `_run_replace` after a successful, not skipped / cancelled result; `recover_interrupted` calls `interrupt_stale_replaces`; optional `replace_runner` for tests. |
+| `py/services/model_lifecycle_service.py` | `delete_model(file_path, *, undo_ttl_seconds=None, allow_hard_delete=True)`: the background replace passes a longer undo window and `allow_hard_delete=False` (no direct-delete fallback; nothing is touched when staging fails). Defaults unchanged. |
+| `py/services/pending_delete_service.py` | `stage_model_delete(..., ttl_seconds=None)` sets the batch's `expires_at` (default `PENDING_DELETE_TTL_SECONDS`). |
+| `py/routes/handlers/model_handlers.py` | `add_to_download_queue`: repeatable `replace_file_path` validated by `validate_replace_targets` after the resolve step (400 + `code`, nothing queued), `replace_attached` in the answer, `_replace_scanners()` hook. `ModelUpdateHandler.get_old_versions` (read-only); `_build_version_context` adds `local_files` per version from the scanner cache (only when the cache has `raw_data`) and `_serialize_version` exposes it as `localFiles`. Mapping `get_old_versions`. |
+| `py/routes/model_route_registrar.py` | `GET /api/lm/{prefix}/updates/old-versions` -> `get_old_versions`. |
+| `py/services/base_model_service.py` | `_annotate_update_flags` overlays the scanner-owned version ids (`_owned_version_ids`, one pass over the cache per request) onto the records (`_with_owned_versions`, never mutates them) before `has_update` / `has_update_for_base`. |
+
+Fork-only files of version management: `py/services/version_replace.py`,
+`tests/services/test_version_replace.py`,
+`tests/services/test_update_flag_read_time_ownership.py`,
+`tests/routes/test_version_management_routes.py`; `py/utils/request_guard.py`
+lists the new route in `READ_ONLY_GET_ROUTES`; `py/services/update_classifier.py`
+has `build_old_versions`.
+
 No upstream docs were changed. A "Modern UI" link inside the classic UI
 pages would require more template edits, so it was left out; use `/lm-ui/`
 directly (the new UI links back to the classic one).
@@ -1393,7 +1414,8 @@ code only.
   accent border. Each row has one **Queue download** button and a ghost icon
   button **Download...** (opens the download dialog for the version) in a
   fixed-width column, so rows line up; a version that is already in the library
-  only shows the "In library" badge.
+  shows the "In library" badge, its local file(s) and **Delete this version…**
+  in that column instead (see [Version management](#version-management)).
 * **Touch and phone layout**: inside the drawer every control reaches
   `--lm-touch-target` (44px) with the `phone:` and `touch:` variants (tabs,
   header icons, chips, send buttons, versions actions, menu rows; tag chips keep
@@ -2257,7 +2279,7 @@ version when one is set, and `files[].metadata.{format, fp, size}`), and a
 response without them keeps the stored values. An older build of the fork or
 of upstream simply ignores the columns.
 
-**Drawer Versions tab.** **Queue download** now sends the same destination
+**Drawer Versions tab.** (See also [Version management](#version-management).) **Queue download** now sends the same destination
 as the Updates page (`destinationForFile`: the open file's root and folder,
 `/roots` read once per drawer; default root + path template when no root
 matches, which the toast says). Versions that are newer candidates get a chip
@@ -2286,6 +2308,159 @@ duplicates, the 403 stop and the option off, no double submit, optimistic
 ignore with rollback and Undo, the Ignored view and Restore, Check now stop,
 the drawer chip and destination). Checked in a browser against a local mock
 backend (never the live one) at 1100 and 375 px in Dark and Light.
+
+### Version management
+
+Code: `py/services/version_replace.py` (replace rules), `build_old_versions` in
+`py/services/update_classifier.py`, `composables/useReplaceChoice.ts`,
+`components/ReplaceChoiceDialog.vue`, `components/UpdatesBulkConfirmDialog.vue`,
+`components/ReplaceNote.vue`, `components/OldVersionsView.vue`,
+`utils/versionManagement.ts`, strings in `i18n/versionMessages.ts`.
+
+**Delete a specific version (drawer Versions tab).** `GET {prefix}/updates/versions/{id}`
+now carries `localFiles` per version: every local file of that version from the
+scanner cache at request time (`{filePath, fileName, folder, baseModel, sizeBytes, modified}`;
+absent on older backends, where the UI falls back to the persisted flag and the
+single `filePath`). "In library" follows `localFiles` (so a newer version added
+outside LoRA Manager shows as owned). Each owned version says "In your library as
+<file> in <folder>" and has a text-labelled **Delete this version…** in the actions
+column (where Queue download sits for versions you do not own); a version with
+several files (variants) lists each file with its own Delete. The Current row is no
+exception. Not offered while the version is being downloaded (shared queue) or for
+versions you do not own. The confirm names the version, the file, its folder and
+size and says the file and its sidecars go to the pending-delete folder with a
+20 s undo. The library page runs the **same delete as the cards**
+(`POST {prefix}/delete {file_path}`, Undo toast through `/api/lm/undo-delete`).
+Deleting the file the drawer shows closes the drawer and opens a sibling file of the
+model when there is one (another file of the same version, else the newest owned
+version of the same base); Undo reopens the restored file. Otherwise the drawer
+re-reads its versions.
+
+**Replace or keep when updating.** Before **Update** (Updates page) and **Queue
+download** (drawer) the UI asks about the files you own of that model line (same
+Civitai model; on the Updates page the line's `localCards`, in the drawer the owned
+versions on the same base model): one file is named in a sentence, several get
+checkboxes with **only the newest owned file ticked**. **Replace it** / **Keep both**
+/ **Cancel**; Replace is disabled while nothing is ticked. The dialog says that the
+old file is deleted only after the new download completed and was verified, by
+moving it to the pending-delete folder (restorable for 10 minutes), and that a
+problem keeps it. "Don't ask again, always keep both" remembers **Keep only**
+(`lm-ui.updates.alwaysKeepBoth`, VueUse `useStorage`); Replace is never remembered.
+While Keep is remembered the Updates page shows a notice with **Ask again**.
+**Update selected** opens one summary dialog: the existing count / size / folder
+text plus, per row, Keep (default, always) or Replace <newest owned file>, and
+**Keep all** / **Replace all**; the note switches from "Nothing is deleted" to the
+number of files that will be replaced. The choice goes to the backend as repeated
+`replace_file_path` on `downloads/queue/add`; a duplicate keeps the existing
+row unchanged (`replace_attached: false`, the UI says so).
+
+**Queue field `replace_file_path`** (GET, guarded like the rest of `queue/add`,
+repeatable, at most 8). Validated after the version is resolved, before anything is
+queued; a failure answers 400 with `{success: false, error, code}`:
+
+| Code | Rule |
+| --- | --- |
+| `replace_requires_version` | the new download needs a model id and a version id |
+| `replace_path_invalid` | an absolute path without `.` / `..` segments, control characters or a drive-relative `C:x`; not a symbolic link (string checks first, before any file access) |
+| `replace_path_outside_roots` | inside the library roots (`require_within_any`), and inside the roots of the scanner whose cache holds it |
+| `replace_not_in_library` | a regular file that the lora / checkpoint / embedding scanner cache knows |
+| `replace_model_mismatch` | its Civitai `modelId` equals the `model_id` being downloaded |
+| `replace_same_version` | its version id differs from the new `model_version_id` |
+| `replace_target_queued` | its version is not itself in the queue |
+| `replace_target_pending` | no queued item already replaces the same file |
+| `replace_too_many` | at most 8 files |
+
+The row stores `replace_targets` (JSON: `path` in the cache's spelling, `file_name`,
+`model_type`, `version_id`, `version_name`, `size`, later `status`, `note`,
+`batch_id`, `undo_until`) and `replace_status` (`pending` -> `running` -> `done`, or
+`interrupted`). Both are new optional fields of the queue and history payloads;
+the browser extension ignores them and every other field is unchanged.
+
+**At completion** the queue worker (also for `download-model-get` and a retry with
+`start=true`, which share it) runs the replace only when the download returned
+success and was not skipped or cancelled. It first **claims** the history row
+(compare-and-set: `status = completed` and `replace_status = pending` -> `running`),
+so a second hook, a retry or a restart can never run it twice. Then, per old file,
+everything is checked again and only then deleted:
+
+* the scanner now owns the new version (same model id + version id) through a
+  regular file larger than 0 bytes that is not the old file (the download pipeline
+  adds the new file to the cache with its hash before it reports success);
+* the old path is still shaped safely, inside the roots, still in the cache, a
+  regular non-symlink file, still the same model and still the version recorded at
+  queue time;
+* then `ModelLifecycleService.delete_model(path, undo_ttl_seconds=600,
+  allow_hard_delete=False)`: the **same staging as the user-facing delete** (the file,
+  metadata, workflow document and previews renamed into
+  `<folder>/.lm-pending-delete/<batch>/` with a manifest, cache entry removed, update
+  record re-synced).
+
+Outcomes per file: `replaced` (with `batch_id` and `undo_until`), `already_gone`
+(the old file was removed meanwhile; nothing deleted), or `kept` with a `note`
+(`new_file_not_verified`, `not_in_library`, `model_mismatch`, `version_changed`,
+`staging_failed`, `delete_failed: ...`, ...). A failure never fails or rolls back the
+download, and nothing else is ever deleted. Each outcome is logged at info level
+with the download id and the old path. A failed or cancelled download leaves the
+request `pending` (a retry carries it); a paused one is never claimed. At startup the
+worker marks every completed download whose replace is still `pending` or
+`running` as `interrupted` (targets `kept`): a replace is never resumed later.
+
+**Undo for a background replace.** The interactive delete's 20 s window makes no
+sense here (nobody is watching when a download finishes), so the replace stages
+with **10 minutes** (`REPLACE_UNDO_TTL_SECONDS`); the normal purge removes the
+batch afterwards. Downloads and the Updates page show "Replaced <file>; the old file
+was moved to the pending-delete folder" with **Restore old file** while the window
+is open (`POST /api/lm/undo-delete {batch_id}`), the toast after a finished update
+offers the same. When staging is impossible the old file is kept (no hard delete).
+
+**Queue rows** (Updates rows and `/downloads`; the popup is not covered): "Will
+replace <file> when finished", then "Replaced <file>…", "Kept <file>: could not
+replace (<reason>)", "<file> was already gone" or "Not replaced: the download did not
+complete" (Retry keeps the request).
+
+**Old versions** (Updates page, **Updates / Old versions** switch with the count).
+`GET /api/lm/{prefix}/updates/old-versions` (read-only: scanner cache + persisted
+records for names and dates; no Civitai request, no write; classified read-only for
+the request guard) lists model lines where the library owns **more than one
+version**. A line is one Civitai model on one base model (case-insensitive), as in
+the overview: different bases are different LoRAs in practice, and several files of
+one version (variants) are not old versions. The newest owned version (release date,
+record first then local Civitai data; undated versions rank below dated ones, the
+version id breaks ties) is marked **Newest in your library** and kept; every older
+version lists its files with date, size, folder and modification time and a
+**Delete…** (the single delete flow above), and the line has **Delete all older…**:
+one confirm listing every file with count and total size, then the existing
+`POST {prefix}/bulk-delete` (one merged undo batch). Nothing is preselected. Empty
+state "No older versions found".
+
+**The card flag uses read-time ownership.** The library's per-file `update_available`
+(cards, rows, drawer pill, "Updates available" filter) used the persisted
+`is_in_library` flag, which stays stale when a version is added outside LoRA
+Manager's download path: in the reported case v1.0 Anima showed "Update" although
+v2.0 Anima was on disk. `_annotate_update_flags` now treats every version a local
+file carries right now as owned (scanner cache, union with the persisted flag, so
+it can only remove false updates); settings, ignore flags and early-access hiding are
+unchanged. The cost is one pass over the cached items per list request (under
+10 ms on a 1,150-item fixture, asserted by a test). Only the `same_base` grouping
+(the default) uses it; the legacy `has_updates_bulk` path of other groupings still
+reads the persisted flag.
+
+Tests: `tests/services/test_version_replace.py` (56: add-time validation incl.
+`..`, drive-relative, UNC / device, prefix siblings, symlinked files
+(`requires_symlinks`), queued / pending targets; completion: only after verified
+success, failed / cancelled / paused, unverified or empty new file, old file gone,
+remapped, relinked, delete raising, staging impossible (no hard delete), two items on
+one file, at most once, restart sweep, retry carry, old-schema migration, the worker
+hook, queue/add and queue/history payloads; real staging asserted file by file in
+`tmp_path`), `tests/routes/test_version_management_routes.py` (old-versions grouping,
+route + guard classification, `localFiles`), `tests/services/test_update_flag_read_time_ownership.py`
+(the Eldreda case, real updates still flagged, ignores, early access, no record,
+variants, fallback, no mutation, timing) and `ui/tests/versionManagement.test.ts`
+(38: helpers, payloads, the prompt and its memory, single and bulk Update, the drawer
+rows and the emitted delete, the delete / undo / error flows, restore from a row, the
+Old versions view). Checked in a browser against a local mock backend (never the live
+one, no delete or queue request sent) at 1100 and 375 px in Dark and Light. **Not
+exercised against a real library**: see the manual checks in the hand-off.
 
 ### Still to do
 
