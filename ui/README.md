@@ -448,7 +448,7 @@ directly (the new UI links back to the classic one).
 | Modern-UI link from ComfyUI | `tests/frontend/components/modernUiLink.test.js`, `tests/frontend/components/topMenuExtension.modernUi.test.js` |
 | `/lm-ui/` route | `tests/routes/test_modern_ui_routes.py` |
 | Queue worker and its hooks | `tests/services/test_download_queue_worker.py`, `tests/routes/test_download_queue_handlers.py`, `tests/routes/test_download_queue_destination.py`, `tests/services/test_civitai_lookup_cache.py` |
-| Updates overview / versions status | `tests/routes/test_updates_overview_route.py`, `tests/services/test_update_classifier.py`, `tests/services/test_update_changelog.py`, `tests/services/test_model_versions_status_cache.py`, `tests/routes/test_misc_routes.py` |
+| Updates overview / versions status | `tests/routes/test_updates_overview_route.py`, `tests/services/test_update_classifier.py`, `tests/services/test_update_classifier_sort_index.py`, `tests/services/test_update_changelog.py`, `tests/services/test_model_versions_status_cache.py`, `tests/routes/test_misc_routes.py` |
 | Upstream behaviour the UI relies on | `tests/services/test_model_actions_contract.py`, `tests/services/test_model_tools_contract.py`, `tests/routes/test_recipe_ui_contract.py`, `tests/routes/test_b2b_ui_contract.py` |
 
 ### Sync procedure
@@ -2254,6 +2254,38 @@ embeddings: all 47 never checked. With the stricter same-number rule and
 lines moved to possible), checkpoints 1 / 2 / 5 unchanged. Simulating
 "you own version i" for every line of the database, 2023 of 2084 likely
 candidates stay likely (39 become `new_label`, 22 `same_version_number`).
+Measured again on 2026-11-26 on the live library: LoRAs 0 likely / 13
+possible / 55 hidden, checkpoints 1 / 2 / 5.
+
+#### Why the creator's version order is not used
+
+Civitai lets a creator order a model's versions, and LoRA Manager stores that
+position as `sort_index` in `model_update_versions`. The classifier ignores it
+on purpose (pinned by `tests/services/test_update_classifier_sort_index.py`:
+permuting `sort_index` must not change the overview).
+
+* **The stored value is wrong in a systematic way.** It is sticky after the
+  first insert (`sort_map.get(version_id, index)` in
+  `model_update_service.py`, upstream commit 58cafdb7), so creator reorders
+  never reach the database; local-only records get low positions by ascending
+  id, so owned versions float to the top; a newly published version arrives at
+  Civitai index 0, ties with the old top and loses on id, so it is stored at 1;
+  Civitai's index gaps are lost. In a sample of 96 models the stored order
+  matched the live Civitai order for only 56.
+* **Even the true Civitai order is not recency.** Only 35 of those 96 models
+  list their versions newest first; creators pin older favourites at the top
+  and group versions by family or bundle.
+* **Rules built on it made things worse.** Demoting a candidate only when the
+  order "confirms" it wrongly demoted real successors (about 73 % of the
+  out-of-family demotions, simulated with the true Civitai order). Promoting
+  `possible` candidates to `likely` was right 0 of 7 times: it promoted
+  parallel styles (More_Realism-IL, Wan low/high-noise pairs, an INT8 build of
+  a V6). Using the order only as a tiebreak, or per base model, changed
+  nothing.
+
+The real case that prompted the check, a multi-base LoRA whose newest owned
+Illustrious version is "1.0" and whose next Illustrious upload is
+"More_Realism-IL", is already `possible` / `new_label` without the order.
 
 ### Page
 
