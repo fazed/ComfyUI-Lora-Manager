@@ -2,7 +2,8 @@ from abc import ABC, abstractmethod
 import asyncio
 import re
 import random
-from typing import Any, Awaitable, Dict, List, Optional, Type, Union, TYPE_CHECKING, cast
+from dataclasses import is_dataclass, replace as dataclass_replace
+from typing import Any, Awaitable, Dict, List, Optional, Set, Type, Union, TYPE_CHECKING, cast
 import logging
 import os
 import time
@@ -33,6 +34,35 @@ logger = logging.getLogger(__name__)
 if TYPE_CHECKING:
     from .model_scanner import ReconcileScope
     from .model_update_service import ModelUpdateService
+
+
+def _with_owned_versions(record: Any, owned: Optional[Set[int]]) -> Any:
+    """Fork: ``record`` with every scanner-owned version marked in the library.
+
+    Read-time ownership for the per-file update flag: a version that a local
+    file carries right now counts as owned even when the persisted
+    ``is_in_library`` flag says otherwise (that flag is only refreshed on
+    refresh / download / delete through LoRA Manager). The persisted flag is
+    kept for versions the scanner does not see (union), so this only ever
+    removes false "update" flags. Returns the same object when nothing
+    changes and never mutates the stored record.
+    """
+    if not owned or record is None or not is_dataclass(record):
+        return record
+    versions = getattr(record, "versions", None) or []
+    if not any(
+        getattr(version, "version_id", None) in owned
+        and not getattr(version, "is_in_library", False)
+        for version in versions
+    ):
+        return record
+    patched = [
+        dataclass_replace(version, is_in_library=True)
+        if getattr(version, "version_id", None) in owned and not version.is_in_library
+        else version
+        for version in versions
+    ]
+    return dataclass_replace(record, versions=patched)
 
 
 class BaseModelService(ABC):
@@ -693,6 +723,15 @@ class BaseModelService(ABC):
             if callable(record_method):
                 try:
                     records = await cast(Awaitable[Any], record_method(self.model_type, ordered_ids))
+                    # Fork: read-time ownership. The persisted is_in_library
+                    # flag can be stale (a newer version added outside LoRA
+                    # Manager's download path); a version any local file
+                    # carries is owned, so it is never offered as an update.
+                    owned = await self._owned_version_ids(ordered_ids)
+                    records = {
+                        model_id: _with_owned_versions(record, owned.get(model_id))
+                        for model_id, record in records.items()
+                    }
                     resolved = {
                         model_id: record.has_update(
                             hide_early_access=hide_early_access,
@@ -891,6 +930,36 @@ class BaseModelService(ABC):
         if isinstance(value, str) and value.strip():
             return value.strip().lower()
         return "same_base"
+
+    async def _owned_version_ids(self, model_ids: List[int]) -> Dict[int, Set[int]]:
+        """Version ids owned right now, per Civitai model id (scanner cache).
+
+        One pass over the cached items, limited to ``model_ids``. Errors mean
+        "unknown" (empty map): the persisted flags are then used as before.
+        """
+        wanted = set(model_ids)
+        owned: Dict[int, Set[int]] = {}
+        if not wanted:
+            return owned
+        try:
+            cache = await self.scanner.get_cached_data()
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("Update flags: scanner cache unavailable: %s", exc)
+            return owned
+        for item in getattr(cache, "raw_data", None) or []:
+            if not isinstance(item, dict):
+                continue
+            civitai = item.get("civitai")
+            if not isinstance(civitai, dict):
+                continue
+            try:
+                model_id = int(civitai.get("modelId"))
+                version_id = int(civitai.get("id"))
+            except (TypeError, ValueError):
+                continue
+            if model_id in wanted:
+                owned.setdefault(model_id, set()).add(version_id)
+        return owned
 
     def _build_highest_local_versions_by_base(self, record) -> Dict[str, int]:
         """Return the highest local version id known for each normalized base model."""

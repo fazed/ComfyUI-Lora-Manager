@@ -174,8 +174,22 @@ class ModelLifecycleService:
         )
         self._update_service = update_service
 
-    async def delete_model(self, file_path: str) -> Dict[str, object]:
-        """Delete a model file and associated artefacts."""
+    async def delete_model(
+        self,
+        file_path: str,
+        *,
+        undo_ttl_seconds: Optional[int] = None,
+        allow_hard_delete: bool = True,
+    ) -> Dict[str, object]:
+        """Delete a model file and associated artefacts.
+
+        Fork additions for non-interactive callers (the replace after a
+        queued download): ``undo_ttl_seconds`` sets the undo window of the
+        staged batch, and ``allow_hard_delete=False`` refuses the direct hard
+        delete fallback - when staging is impossible nothing is touched and
+        ``{"success": False, "batch_id": None, "error": "staging_failed"}``
+        is returned. The defaults keep the user-facing behaviour.
+        """
 
         if not file_path:
             raise ValueError("Model path is required")
@@ -217,8 +231,16 @@ class ModelLifecycleService:
             main_extension=main_extension,
             original_file_path=file_path,
             cached_entry=cached_entry,
+            **({"ttl_seconds": undo_ttl_seconds} if undo_ttl_seconds is not None else {}),
         )
         deleted_files: List[str] = []
+        if batch_id is None and not allow_hard_delete:
+            return {
+                "success": False,
+                "deleted_files": [],
+                "batch_id": None,
+                "error": "staging_failed",
+            }
         if batch_id is None:
             deleted_files = await delete_model_artifacts(
                 target_dir, file_name, main_extension=main_extension

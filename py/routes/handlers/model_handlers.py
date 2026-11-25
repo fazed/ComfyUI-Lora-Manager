@@ -35,7 +35,11 @@ from ...services.service_registry import ServiceRegistry
 from ...services.settings_manager import SettingsManager, get_settings_manager
 from ...services.first_run_manager import get_first_run_manager
 from ...services.tag_update_service import TagUpdateService
-from ...services.update_classifier import build_updates_overview, collect_local_model_ids
+from ...services.update_classifier import (
+    build_old_versions,
+    build_updates_overview,
+    collect_local_model_ids,
+)
 from ...services.use_cases import (
     AutoOrganizeInProgressError,
     AutoOrganizeUseCase,
@@ -52,6 +56,11 @@ from ...services.websocket_progress_callback import (
     WebSocketProgressCallback,
 )
 from ...services.download_queue_service import DownloadQueueService
+from ...services.version_replace import (
+    ReplaceValidationError,
+    default_scanners as default_replace_scanners,
+    validate_replace_targets,
+)
 from ...services.download_queue_worker import (
     apply_queue_destination,
     get_download_queue_worker,
@@ -2455,6 +2464,27 @@ class ModelDownloadHandler:
             file_params = resolved.get("file_params", file_params)
 
             service = await DownloadQueueService.get_instance()
+
+            # Optional "replace the old version after this download" (modern
+            # UI). Validated against the scanner cache before anything is
+            # queued; see py/services/version_replace.py for the rules.
+            replace_targets: list[dict[str, Any]] = []
+            raw_replace = request.query.getall("replace_file_path", [])
+            if any(str(value).strip() for value in raw_replace):
+                try:
+                    replace_targets = await validate_replace_targets(
+                        raw_replace,
+                        model_id=model_id,
+                        model_version_id=model_version_id,
+                        queue_rows=await service.get_queue(),
+                        scanners=await self._replace_scanners(),
+                    )
+                except ReplaceValidationError as exc:
+                    return web.json_response(
+                        {"success": False, "error": str(exc), "code": exc.code},
+                        status=400,
+                    )
+
             item = await service.add_to_queue(
                 download_id=download_id,
                 model_id=model_id,
@@ -2465,6 +2495,7 @@ class ModelDownloadHandler:
                 source=source,
                 file_params=file_params,
                 destination=destination,
+                replace_targets=replace_targets or None,
             )
             duplicate = item.pop("duplicate", False)
             if item and not duplicate:
@@ -2475,12 +2506,19 @@ class ModelDownloadHandler:
                 "duplicate": duplicate,
                 "reason": "already_queued" if duplicate else None,
                 "item": item,
+                # Only a newly queued row carries the replace request; a
+                # duplicate keeps the existing row unchanged.
+                "replace_attached": bool(replace_targets) and bool(item) and not duplicate,
             })
         except Exception as exc:
             self._logger.error(
                 "Error adding to download queue: %s", exc, exc_info=True
             )
             return web.json_response({"success": False, "error": str(exc)}, status=500)
+
+    async def _replace_scanners(self) -> Dict[str, Any]:
+        """Scanners checked by ``replace_file_path`` (overridable in tests)."""
+        return await default_replace_scanners()
 
     async def remove_from_download_queue(self, request: web.Request) -> web.Response:
         try:
@@ -3746,6 +3784,40 @@ class ModelUpdateHandler:
         )
         return web.json_response(payload)
 
+    async def get_old_versions(self, request: web.Request) -> web.Response:
+        """Model lines with more than one owned version (read-only, fork).
+
+        Scanner cache plus the persisted update records (names and release
+        dates) only: no Civitai request and no write. See
+        ``update_classifier.build_old_versions``.
+        """
+
+        try:
+            cache = await self._service.scanner.get_cached_data()
+        except Exception as exc:  # pragma: no cover - defensive logging
+            self._logger.error("Old versions: cache unavailable: %s", exc, exc_info=True)
+            return web.json_response({"success": False, "error": str(exc)}, status=500)
+
+        local_items = list(getattr(cache, "raw_data", None) or [])
+        model_ids = collect_local_model_ids(local_items)
+        records: Mapping[int, Any] = {}
+        if model_ids:
+            try:
+                records = await self._update_service.get_records_bulk(
+                    self._service.model_type, model_ids
+                ) or {}
+            except Exception as exc:  # records only add names and dates
+                self._logger.debug("Old versions: records unavailable: %s", exc)
+                records = {}
+
+        payload = build_old_versions(
+            model_type=self._service.model_type,
+            local_items=local_items,
+            records=records,
+            preview_url_builder=config.get_preview_static_url,
+        )
+        return web.json_response(payload)
+
     def _uses_same_base_update_scope(self) -> bool:
         """Return True when update reporting must honor same-base scoping.
 
@@ -4241,6 +4313,14 @@ class ModelUpdateHandler:
             # Weight-file variant count (None when unknown); lets the UI hide
             # the download affordance for single-file in-library versions.
             "fileCount": getattr(version, "file_count", None),
+            # Fork: local files of this version from the scanner at read time
+            # ({filePath, fileName, folder, baseModel, sizeBytes, modified});
+            # absent when the scanner cache could not be read.
+            **(
+                {"localFiles": context["local_files"]}
+                if isinstance(context.get("local_files"), list)
+                else {}
+            ),
         }
 
     async def _build_version_context(
@@ -4277,6 +4357,49 @@ class ModelUpdateHandler:
                 "Failed to load cache while building preview overrides: %s", exc
             )
             return context
+
+        # Fork (version management): every local file of this model per
+        # version, read from the scanner at request time (not the persisted
+        # is_in_library flag), so the UI can offer "Delete this version" per
+        # file, variants included.
+        local_files: Dict[int, List[Dict[str, Any]]] = {}
+        raw_items = getattr(cache, "raw_data", None)
+        for item in raw_items or []:
+            if not isinstance(item, Mapping):
+                continue
+            civitai = item.get("civitai")
+            if not isinstance(civitai, Mapping):
+                continue
+            if self._normalize_model_id(civitai.get("modelId")) != record.model_id:
+                continue
+            local_version = self._normalize_model_id(civitai.get("id"))
+            file_path = item.get("file_path")
+            if local_version is None or not isinstance(file_path, str) or not file_path:
+                continue
+            local_files.setdefault(local_version, []).append(
+                {
+                    "filePath": file_path,
+                    "fileName": item.get("file_name") or os.path.basename(file_path),
+                    "folder": item.get("folder") or "",
+                    "baseModel": item.get("base_model") or None,
+                    "sizeBytes": item.get("size"),
+                    "modified": item.get("modified"),
+                }
+            )
+        for version in record.versions if raw_items is not None else []:
+            files = sorted(
+                local_files.get(version.version_id, []),
+                key=lambda entry: entry["filePath"],
+            )
+            context.setdefault(
+                version.version_id,
+                {
+                    "file_path": None,
+                    "file_name": None,
+                    "preview_override": None,
+                    "has_been_downloaded": version.version_id in downloaded_version_ids,
+                },
+            )["local_files"] = files
 
         version_index = getattr(cache, "version_index", None)
         if not version_index:
@@ -4404,5 +4527,6 @@ class ModelHandlerSet:
             "get_model_update_status": self.updates.get_model_update_status,
             "get_model_versions": self.updates.get_model_versions,
             "get_updates_overview": self.updates.get_updates_overview,
+            "get_old_versions": self.updates.get_old_versions,
             "cancel_task": self.query.cancel_task,
         }

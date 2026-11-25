@@ -372,6 +372,8 @@ export interface BulkItem {
   group: UpdateGroup
   candidate: UpdateCandidate
   destination: DerivedDestination
+  /** Old files this update replaces after its download is verified (bulk confirm; default none = keep). */
+  replacePaths?: string[]
 }
 
 /**
@@ -422,7 +424,7 @@ export function bulkSizeText(summary: Pick<BulkPlanSummary, 'totalBytes' | 'unkn
 }
 
 /** Body of the bulk-update confirm: count and size, the distinct folders, the default-path fallback. */
-export function bulkConfirmMessage(summary: BulkPlanSummary): string {
+export function bulkConfirmMessage(summary: BulkPlanSummary, replaceCount = 0): string {
   const lines = [
     t('updates.bulk.confirmCount', {
       count: summary.count,
@@ -434,7 +436,12 @@ export function bulkConfirmMessage(summary: BulkPlanSummary): string {
     lines.push('', t('updates.bulk.confirmFolders'), ...summary.folders.map((folder) => `- ${folder}`))
   }
   if (summary.defaultCount) lines.push('', t('updates.bulk.confirmDefault', { count: summary.defaultCount }))
-  lines.push('', t('updates.bulk.confirmNote'))
+  lines.push(
+    '',
+    replaceCount
+      ? t('replace.bulk.replaceSummary', { count: replaceCount, files: replaceCount === 1 ? t('replace.bulk.file') : t('replace.bulk.files') })
+      : t('updates.bulk.confirmNote'),
+  )
   return lines.join('\n')
 }
 

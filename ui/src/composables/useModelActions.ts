@@ -21,6 +21,7 @@ import {
   validateFileName,
   type MoveSummary,
 } from '@/utils/modelActions'
+import { formatBytes } from '@/utils/format'
 import { t } from '@/i18n'
 
 /** Backend undo window (PENDING_DELETE_TTL_SECONDS in py/services/pending_delete_service.py). */
@@ -35,6 +36,15 @@ export interface ModelActionHooks {
   changed: () => void
   /** Models that now live at a new path (move), so an open drawer can follow them. */
   moved?: (moves: { from: string; to: string }[]) => void
+}
+
+/** One local file of a specific version (drawer Versions tab, Old versions view). */
+export interface VersionFileTarget {
+  filePath: string
+  fileName: string
+  folder: string
+  sizeBytes: number | null
+  versionName: string | null
 }
 
 const displayName = (item: ModelItem) => item.model_name || item.file_name
@@ -109,6 +119,100 @@ export function useModelActions(api: ModelApi, hooks: ModelActionHooks) {
             error: summary.failed[0].message,
           })
         : t('actions.delete.bulkDone', { count: summary.deleted.length })
+      toasts.push(text, summary.failed.length ? 'warning' : 'success', ids.length ? UNDO_TOAST_MS : 7000, undoAction(ids))
+      return true
+    } catch (error) {
+      toasts.error(t('actions.delete.failed', { error: message(error) }))
+      hooks.changed()
+      return false
+    }
+  }
+
+  /**
+   * Delete one local file of a specific version (drawer Versions tab, Old
+   * versions view). Same endpoint and staging as the card delete
+   * (`POST {prefix}/delete {file_path}` -> pending-delete batch + Undo); only
+   * the confirm names the version, the file, its folder and size.
+   */
+  async function deleteVersionFile(file: VersionFileTarget, options: { onUndone?: () => void } = {}): Promise<boolean> {
+    const version = file.versionName || t('updates.unknownVersion')
+    const ok = await confirm({
+      title: t('versions.delete.title', { version }),
+      message: [
+        t('versions.delete.message', {
+          file: file.fileName,
+          size: file.sizeBytes ? formatBytes(file.sizeBytes) : t('versions.delete.sizeUnknown'),
+          folder: file.folder || t('versions.rootFolder'),
+          seconds: UNDO_WINDOW_SECONDS,
+        }),
+        '',
+        t('versions.delete.otherFiles'),
+      ].join('\n'),
+      confirmLabel: t('versions.delete.confirm'),
+      danger: true,
+    })
+    if (!ok) return false
+    try {
+      const result = await api.deleteModel(file.filePath)
+      hooks.removed([file.filePath])
+      const ids = undoBatchIds(result)
+      toasts.push(
+        t(ids.length ? 'versions.delete.done' : 'versions.delete.donePermanent', { version, file: file.fileName }),
+        'success',
+        ids.length ? UNDO_TOAST_MS : 5000,
+        ids.length
+          ? { label: t('actions.undo'), run: () => void undo(ids).then((restored) => restored && options.onUndone?.()) }
+          : undefined,
+      )
+      return true
+    } catch (error) {
+      toasts.error(t('versions.delete.failed', { file: file.fileName, error: message(error) }))
+      hooks.changed()
+      return false
+    }
+  }
+
+  /**
+   * "Delete all older" of one model line (Old versions view): one summary
+   * confirm listing every file, then the existing bulk delete
+   * (`POST {prefix}/bulk-delete`, one merged undo batch).
+   */
+  async function deleteVersionFiles(
+    files: VersionFileTarget[],
+    context: { modelName: string; keptName: string },
+  ): Promise<boolean> {
+    if (!files.length) return false
+    const filesWord = files.length === 1 ? t('replace.bulk.file') : t('replace.bulk.files')
+    const total = files.reduce((sum, file) => sum + (file.sizeBytes ?? 0), 0)
+    const ok = await confirm({
+      title: t('oldVersions.deleteAll.title', { count: files.length, files: filesWord, name: context.modelName }),
+      message: t('oldVersions.deleteAll.message', {
+        count: files.length,
+        files: filesWord,
+        size: formatBytes(total),
+        list: files
+          .map((file) => `- ${file.versionName || t('updates.unknownVersion')}: ${file.fileName}${file.folder ? ` (${file.folder})` : ''}`)
+          .join('\n'),
+        newest: context.keptName,
+        seconds: UNDO_WINDOW_SECONDS,
+      }),
+      confirmLabel: t('oldVersions.deleteAll.confirm', { count: files.length, files: filesWord }),
+      danger: true,
+    })
+    if (!ok) return false
+    try {
+      const result = await api.bulkDelete(files.map((file) => file.filePath))
+      const summary = summarizeBulkDelete(result)
+      hooks.removed(summary.deleted)
+      const ids = undoBatchIds(result)
+      const text = summary.failed.length
+        ? t('oldVersions.deleteAll.partial', {
+            ok: summary.deleted.length,
+            total: files.length,
+            failed: summary.failed.length,
+            error: summary.failed[0].message,
+          })
+        : t('oldVersions.deleteAll.done', { count: summary.deleted.length, files: filesWord, name: context.modelName })
       toasts.push(text, summary.failed.length ? 'warning' : 'success', ids.length ? UNDO_TOAST_MS : 7000, undoAction(ids))
       return true
     } catch (error) {
@@ -209,5 +313,5 @@ export function useModelActions(api: ModelApi, hooks: ModelActionHooks) {
     return { ok: okCount, failed }
   }
 
-  return { deleteItems, undo, renameItem, moveItems, excludeItem, addTags }
+  return { deleteItems, deleteVersionFile, deleteVersionFiles, undo, renameItem, moveItems, excludeItem, addTags }
 }

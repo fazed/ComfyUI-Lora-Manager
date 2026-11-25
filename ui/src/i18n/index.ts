@@ -11,6 +11,7 @@ import { browseMessages } from './browseMessages'
 import { drawerMessages } from './drawerMessages'
 import { settingsUxMessages } from './settingsUxMessages'
 import { updatesMessages } from './updatesMessages'
+import { versionMessages } from './versionMessages'
 
 export const messages = {
   ...b2bMessages,
@@ -18,6 +19,7 @@ export const messages = {
   ...drawerMessages,
   ...settingsUxMessages,
   ...updatesMessages,
+  ...versionMessages,
   'app.title': 'LoRA Manager',
   'app.skipToContent': 'Skip to content',
   'nav.main': 'Main navigation',

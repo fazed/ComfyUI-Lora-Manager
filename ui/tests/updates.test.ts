@@ -36,6 +36,7 @@ import {
 import { useConfirm, useToasts } from '@/composables/useFeedback'
 import { runRefresh } from '@/composables/useRefresh'
 import { resetUpdatesSummaryForTesting, useUpdatesSummary } from '@/composables/useUpdates'
+import { ALWAYS_KEEP_KEY, resetReplaceChoiceForTesting } from '@/composables/useReplaceChoice'
 import UpdatesPage from '@/pages/UpdatesPage.vue'
 import UpdateRow from '@/components/UpdateRow.vue'
 import TopBar from '@/components/TopBar.vue'
@@ -186,6 +187,10 @@ const answerConfirm = async (value: boolean) => {
 beforeEach(() => {
   setBasePathsForTesting({ appBase: 'http://host/lm-ui/', appPath: '/lm-ui/', mountPrefix: '' })
   localStorage.clear()
+  // These phase 1 tests cover queueing itself: the user chose "always keep both" (no replace prompt).
+  // The prompt has its own tests in versionManagement.test.ts.
+  localStorage.setItem(ALWAYS_KEEP_KEY, 'true')
+  resetReplaceChoiceForTesting()
   resetUpdatesSummaryForTesting()
   useToasts().toasts.value = []
 })

@@ -32,6 +32,7 @@ import type {
   ModelMetadata,
   ModelPrefix,
   ModelUpdateRecord,
+  OldVersionsResponse,
   PagedResponse,
   QueueItem,
   QueueResponse,
@@ -310,6 +311,21 @@ export interface QueueAddTarget {
   modelName?: string
   versionName?: string
   thumbnailUrl?: string
+  /**
+   * Old files to replace once this download completed and was verified
+   * (sent as repeated `replace_file_path`; the backend validates them and
+   * answers 400 with a `code` when one is not allowed).
+   */
+  replaceFilePaths?: string[]
+}
+
+/** `queue/add` answer. `replace_attached` is false for a duplicate (the existing row is unchanged). */
+export interface QueueAddResponse {
+  queued: boolean
+  duplicate: boolean
+  reason?: string | null
+  item: QueueItem | null
+  replace_attached?: boolean
 }
 
 export const downloadsApi = {
@@ -334,8 +350,9 @@ export const downloadsApi = {
    * default root and path template are used.
    */
   add: (target: QueueAddTarget) =>
-    request<{ queued: boolean; duplicate: boolean; reason?: string | null; item: QueueItem | null }>('downloads/queue/add', {
+    request<QueueAddResponse>('downloads/queue/add', {
       query: {
+        replace_file_path: target.replaceFilePaths?.length ? target.replaceFilePaths : undefined,
         model_id: target.modelId ?? undefined,
         model_version_id: target.versionId ?? undefined,
         source: 'civitai',
@@ -356,6 +373,12 @@ export const updatesApi = {
    */
   overview: (prefix: ModelPrefix, signal?: AbortSignal) =>
     request<UpdatesOverview>(`${prefix}/updates/overview`, { signal }),
+  /**
+   * Model lines with more than one owned version (version management).
+   * Read-only: scanner cache + persisted records, no Civitai request.
+   */
+  oldVersions: (prefix: ModelPrefix, signal?: AbortSignal) =>
+    request<OldVersionsResponse>(`${prefix}/updates/old-versions`, { signal }),
   /**
    * "Check now": asks Civitai for new versions of every model of the type
    * whose record is older than the backend TTL (24 h). A mutation with

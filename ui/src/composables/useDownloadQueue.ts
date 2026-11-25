@@ -65,3 +65,12 @@ export function useDownloadQueue(intervalMs = 5000) {
   }
   return { queue, stats, worker, queueWorker, error, loaded, active, waiting, paused, refresh }
 }
+
+/**
+ * Read-only view of the shared queue without subscribing to the poller (the
+ * top bar keeps it fresh). Used by the drawer to hide "Delete this version"
+ * for a version that is being downloaded right now.
+ */
+export function downloadQueueSnapshot() {
+  return queue
+}

@@ -1,0 +1,126 @@
+/**
+ * Strings of version management: delete a specific version (drawer Versions
+ * tab), the replace-or-keep prompt when updating, the replace state of queue
+ * rows and the Updates page's "Old versions" view. Merged into ./index.ts.
+ * Note texts are keyed on the backend's codes (py/services/version_replace.py).
+ */
+
+export const versionMessages = {
+  // --- drawer: local files and delete --------------------------------------------
+  'versions.inLibraryAs': 'In your library as {file}',
+  'versions.inFolder': 'in {folder}',
+  'versions.rootFolder': 'the library root',
+  'versions.deleteFile': 'Delete this version…',
+  'versions.deleteFileLabel': 'Delete {version}: {file}',
+  'versions.downloadingNoDelete': 'Being downloaded; delete is not available until it finishes.',
+  'versions.delete.title': 'Delete {version}?',
+  'versions.delete.message':
+    'File: {file} ({size})\nFolder: {folder}\n\nThe file and its sidecars (metadata, previews) are moved to the pending-delete folder next to it. You can undo this for {seconds} seconds; after that they are deleted for good.',
+  'versions.delete.otherFiles': 'Other files of this model stay in your library.',
+  'versions.delete.confirm': 'Delete this file',
+  'versions.delete.done': 'Deleted {version} ({file}).',
+  'versions.delete.donePermanent': 'Deleted {version} ({file}) permanently (no undo was possible).',
+  'versions.delete.failed': 'Could not delete {file}: {error}',
+  'versions.delete.sizeUnknown': 'size unknown',
+
+  // --- replace or keep -----------------------------------------------------------
+  'replace.title': 'Update {name} to {version}?',
+  'replace.youHave': 'You already have {version} ({file}, {size}).',
+  'replace.youHaveMany': 'You already have these files of this model. Choose which ones the new version replaces:',
+  'replace.fileLabel': '{version}: {file} ({size})',
+  'replace.fileFolder': 'Folder: {folder}',
+  'replace.explain':
+    'Replace it: the new version is downloaded first. Only after the download has completed and is verified in your library, the old file is moved to the pending-delete folder (restorable for 10 minutes from Downloads), then deleted for good. If anything is off, the old file is kept.',
+  'replace.keepExplain': 'Keep both: nothing is deleted.',
+  'replace.replace': 'Replace it',
+  'replace.replaceCount': 'Replace {count} files',
+  'replace.keep': 'Keep both',
+  'replace.cancel': 'Cancel',
+  'replace.remember': "Don't ask again, always keep both",
+  'replace.rememberHint': 'Replacing is never remembered; you can turn this back on from the Updates page.',
+  'replace.noneSelected': 'Select at least one file to replace, or choose Keep both.',
+  'replace.alwaysKeepNotice': 'Updates keep the old versions without asking.',
+  'replace.alwaysKeepReset': 'Ask again',
+  'replace.alwaysKeepResetDone': 'The Update buttons ask again whether to replace the old version.',
+  'replace.notAttached': 'Already queued; the replace choice was not added to the existing download.',
+  'replace.queuedReplace': 'Queued {name} {version}; it will replace {file} when finished.',
+
+  // --- bulk ------------------------------------------------------------------------
+  'replace.bulk.heading': 'Old versions',
+  'replace.bulk.hint': 'Per update: keep the old version, or replace the newest file you own of that line after the download is verified. Nothing is preselected for replacing.',
+  'replace.bulk.keepAll': 'Keep all',
+  'replace.bulk.replaceAll': 'Replace all',
+  'replace.bulk.rowLabel': 'Old version of {name}',
+  'replace.bulk.keepRow': 'Keep',
+  'replace.bulk.replaceRow': 'Replace {file}',
+  'replace.bulk.noOld': 'No other version in your library',
+  'replace.bulk.replaceSummary': '{count} old {files} will be replaced after the downloads are verified.',
+  'replace.bulk.file': 'file',
+  'replace.bulk.files': 'files',
+
+  // --- queue / history rows ----------------------------------------------------------
+  'replace.row.willReplace': 'Will replace {file} when finished',
+  'replace.row.replaced': 'Replaced {file}; the old file was moved to the pending-delete folder',
+  'replace.row.restorable': 'Restore old file',
+  'replace.row.restoreLabel': 'Restore {file}',
+  'replace.row.restored': 'Restored {file}.',
+  'replace.row.restoreFailed': 'Could not restore {file}: {error}',
+  'replace.row.kept': 'Kept {file}: could not replace ({reason})',
+  'replace.row.gone': '{file} was already gone',
+  'replace.row.interrupted': 'Kept {file}: the replace was interrupted by a restart',
+  'replace.row.notReplaced': 'Not replaced: the download did not complete; {file} was kept (Retry keeps the replace request)',
+  'replace.reason.new_file_not_verified': 'the new file could not be verified in the library',
+  'replace.reason.not_in_library': 'the old file is no longer in the library',
+  'replace.reason.not_a_regular_file': 'the old path is not a regular file',
+  'replace.reason.model_mismatch': 'the old file now belongs to another model',
+  'replace.reason.same_version': 'the old file is the same version',
+  'replace.reason.version_changed': 'the old file was relinked to another version',
+  'replace.reason.unsafe_path': 'the path is outside the library',
+  'replace.reason.scanner_unavailable': 'the library was not available',
+  'replace.reason.staging_failed': 'it could not be moved to the pending-delete folder',
+  'replace.reason.new_version_unknown': 'the new version is unknown',
+  'replace.reason.interrupted': 'interrupted by a restart',
+  'replace.reason.not_processed': 'not processed',
+  'replace.reason.other': 'see the server log',
+
+  // --- queue/add error codes -----------------------------------------------------------
+  'replace.code.replace_requires_version': 'Replacing needs a known version.',
+  'replace.code.replace_too_many': 'Too many files to replace at once.',
+  'replace.code.replace_path_invalid': 'The file to replace has an invalid path.',
+  'replace.code.replace_path_outside_roots': 'The file to replace is outside the library folders.',
+  'replace.code.replace_not_in_library': 'The file to replace is no longer in the library. Refresh and try again.',
+  'replace.code.replace_model_mismatch': 'Only another version of the same model can be replaced.',
+  'replace.code.replace_same_version': 'The file to replace is the version being downloaded.',
+  'replace.code.replace_target_queued': 'The version to replace is itself in the download queue.',
+  'replace.code.replace_target_pending': 'Another queued download already replaces this file.',
+
+  // --- Old versions view -----------------------------------------------------------------
+  'oldVersions.tab': 'Old versions',
+  'oldVersions.updatesTab': 'Updates',
+  'oldVersions.viewLabel': 'View',
+  'oldVersions.heading': 'Old versions',
+  'oldVersions.hint':
+    'Models where your library holds more than one version of the same model on the same base model. The newest version is kept; older ones can be deleted (moved to the pending-delete folder with a short undo).',
+  'oldVersions.empty': 'No older versions found',
+  'oldVersions.emptyHint': 'Every model line in this library holds a single version.',
+  'oldVersions.loadError': 'Could not load old versions',
+  'oldVersions.newest': 'Newest in your library',
+  'oldVersions.older': 'Older',
+  'oldVersions.files': '{count} {files}',
+  'oldVersions.deleteFile': 'Delete…',
+  'oldVersions.deleteFileLabel': 'Delete {version}: {file}',
+  'oldVersions.deleteAll': 'Delete all older…',
+  'oldVersions.deleteAllLabel': 'Delete all older versions of {name}',
+  'oldVersions.deleteAll.title': 'Delete {count} older {files} of {name}?',
+  'oldVersions.deleteAll.message':
+    '{count} {files}, {size} in total:\n{list}\n\nKept: {newest}.\n\nThe files and their sidecars are moved to the pending-delete folder next to them. You can undo this for {seconds} seconds; after that they are deleted for good.',
+  'oldVersions.deleteAll.confirm': 'Delete {count} {files}',
+  'oldVersions.deleteAll.done': 'Deleted {count} older {files} of {name}.',
+  'oldVersions.deleteAll.partial': 'Deleted {ok} of {total} files; {failed} failed: {error}',
+  'oldVersions.unknownVersion': 'Unknown version',
+  'oldVersions.unnamedModel': 'Model {id}',
+  'oldVersions.groupsCount': '{count} {models}',
+  'oldVersions.totals': '{versions} older {versionsWord}, {files} {filesWord}, {size}',
+  'oldVersions.version': 'version',
+  'oldVersions.versions': 'versions',
+} as const

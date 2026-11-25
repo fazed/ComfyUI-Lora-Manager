@@ -115,6 +115,60 @@ export interface ModelVersionInfo {
   fileName?: string | null
   /** Local file of an in-library version (from the scanner at read time). */
   filePath?: string | null
+  /**
+   * Every local file of this version, read from the scanner at request time
+   * (fork, version management). Absent on older backends; [] = not owned.
+   */
+  localFiles?: VersionLocalFile[]
+}
+
+export interface VersionLocalFile {
+  filePath: string
+  fileName: string
+  folder: string
+  baseModel?: string | null
+  sizeBytes?: number | null
+  /** File modification time (Unix seconds). */
+  modified?: number | null
+}
+
+// --- Old versions (GET /api/lm/{prefix}/updates/old-versions) --------------
+
+export interface OldVersionFile {
+  filePath: string
+  fileName: string
+  folder: string
+  sizeBytes: number | null
+  modified: number | null
+  previewUrl: string | null
+  previewNsfwLevel: number
+}
+
+export interface OldVersionEntry {
+  versionId: number
+  name: string | null
+  releasedAt: string | null
+  sizeBytes: number | null
+  files: OldVersionFile[]
+}
+
+export interface OldVersionGroup {
+  /** `<modelId>:<lowercased base>`. */
+  key: string
+  modelId: number
+  modelName: string | null
+  baseModel: string | null
+  /** Kept: the newest owned version of the line. */
+  newest: OldVersionEntry
+  /** Older owned versions, newest first. */
+  older: OldVersionEntry[]
+}
+
+export interface OldVersionsResponse {
+  success: boolean
+  modelType: string
+  totals: { groups: number; olderVersions: number; olderFiles: number; olderBytes: number }
+  groups: OldVersionGroup[]
 }
 
 export interface ModelUpdateRecord {
@@ -273,6 +327,14 @@ export interface QueueItem {
   completed_at?: number | null
   /** JSON `{model_root, relative_path, use_default_paths}`; null = default root + template. */
   destination?: string | null
+  /**
+   * JSON list of old files to replace after this download (fork, version
+   * management): `[{path, file_name, version_name, size, status, note, batch_id, undo_until}]`.
+   * Null = keep everything.
+   */
+  replace_targets?: string | null
+  /** pending / running / done / interrupted; null without a replace request. */
+  replace_status?: string | null
 }
 
 export interface QueueStats {

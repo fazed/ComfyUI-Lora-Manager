@@ -1026,3 +1026,134 @@ def build_updates_overview(
         "newestCheckedAt": _timestamp_to_iso(max(checked_stamps)) if checked_stamps else None,
         "groups": groups,
     }
+
+
+# --------------------------------------------------------------------------
+# Old versions (version management): lines with more than one owned version
+# --------------------------------------------------------------------------
+
+
+def build_old_versions(
+    *,
+    model_type: str,
+    local_items: Iterable[Mapping[str, Any]],
+    records: Optional[Mapping[int, Any]] = None,
+    preview_url_builder: Optional[Callable[[str], str]] = None,
+) -> Dict[str, Any]:
+    """Model lines where the library owns more than one version (pure).
+
+    A line is one Civitai model on one base model (the local file's base,
+    else the record's; case-insensitive), the same grouping as the updates
+    overview: different bases are different LoRAs in practice. Ownership is
+    read from the scanner items only. The newest owned version of a line is
+    decided by release date (persisted record first, then the local Civitai
+    data; the version id breaks ties and stands in when no date is known);
+    every older owned version is listed with all of its local files. Lines
+    with a single owned version (variants of one version included) are not
+    listed. Nothing is decided for deletion here.
+    """
+
+    remote: Dict[int, Dict[int, Any]] = {}
+    for model_id, record in (records or {}).items():
+        versions: Dict[int, Any] = {}
+        for version in getattr(record, "versions", None) or []:
+            version_id = _to_int(getattr(version, "version_id", None))
+            if version_id is not None:
+                versions[version_id] = version
+        remote[int(model_id)] = versions
+
+    lines: Dict[tuple, Dict[str, Any]] = {}
+    for item in local_items:
+        model_id, version_id = _item_ids(item)
+        if model_id is None or version_id is None:
+            continue
+        file_path = item.get("file_path")
+        if not isinstance(file_path, str) or not file_path:
+            continue
+        db_version = remote.get(model_id, {}).get(version_id)
+        local_released, local_name = _local_version_fields(item)
+        local_base = item.get("base_model") if isinstance(item.get("base_model"), str) else None
+        base_label = (local_base or "").strip() or (
+            getattr(db_version, "base_model", None) if db_version is not None else None
+        )
+        line_key = (model_id, _norm_base(base_label))
+        line = lines.setdefault(
+            line_key,
+            {"modelId": model_id, "modelName": None, "baseModel": None, "versions": {}},
+        )
+        if line["modelName"] is None:
+            line["modelName"] = _model_name(item)
+        if line["baseModel"] is None and base_label:
+            line["baseModel"] = base_label.strip()
+        version = line["versions"].setdefault(
+            version_id,
+            {
+                "versionId": version_id,
+                "name": (getattr(db_version, "name", None) if db_version is not None else None) or local_name,
+                "releasedAt": (
+                    getattr(db_version, "released_at", None) if db_version is not None else None
+                )
+                or local_released,
+                "files": [],
+            },
+        )
+        preview = item.get("preview_url") or ""
+        version["files"].append(
+            {
+                "filePath": file_path,
+                "fileName": item.get("file_name") or file_path.replace("\\", "/").rsplit("/", 1)[-1],
+                "folder": item.get("folder") or "",
+                "sizeBytes": _to_int(item.get("size")),
+                "modified": item.get("modified"),
+                "previewUrl": (
+                    preview_url_builder(preview) if (preview_url_builder and preview) else (preview or None)
+                ),
+                "previewNsfwLevel": _to_int(item.get("preview_nsfw_level")) or 0,
+            }
+        )
+
+    def version_key(entry: Mapping[str, Any]) -> tuple:
+        parsed = _parse_date(entry.get("releasedAt"))
+        return (1 if parsed else 0, parsed.timestamp() if parsed else 0.0, entry["versionId"])
+
+    groups: List[Dict[str, Any]] = []
+    older_versions = 0
+    older_files = 0
+    older_bytes = 0
+    for (model_id, base), line in lines.items():
+        versions = list(line["versions"].values())
+        if len(versions) < 2:
+            continue
+        for version in versions:
+            version["files"].sort(key=lambda entry: entry["filePath"])
+            version["sizeBytes"] = sum(entry["sizeBytes"] or 0 for entry in version["files"]) or None
+        # Dated versions rank above undated ones; inside each, newest date then id.
+        versions.sort(key=version_key, reverse=True)
+        newest, older = versions[0], versions[1:]
+        older_versions += len(older)
+        for version in older:
+            older_files += len(version["files"])
+            older_bytes += version["sizeBytes"] or 0
+        groups.append(
+            {
+                "key": f"{model_id}:{base or ''}",
+                "modelId": model_id,
+                "modelName": line["modelName"],
+                "baseModel": line["baseModel"],
+                "newest": newest,
+                "older": older,
+            }
+        )
+
+    groups.sort(key=lambda group: ((group.get("modelName") or "").lower(), group["key"]))
+    return {
+        "success": True,
+        "modelType": model_type,
+        "totals": {
+            "groups": len(groups),
+            "olderVersions": older_versions,
+            "olderFiles": older_files,
+            "olderBytes": older_bytes,
+        },
+        "groups": groups,
+    }

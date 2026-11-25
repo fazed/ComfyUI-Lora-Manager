@@ -4,6 +4,7 @@ import { useRoute } from 'vue-router'
 import TopBar from '@/components/TopBar.vue'
 import ToastHost from '@/components/ToastHost.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import ReplaceChoiceDialog from '@/components/ReplaceChoiceDialog.vue'
 import NodePickerDialog from '@/components/NodePickerDialog.vue'
 import { useTheme } from '@/composables/useTheme'
 import { useRefreshHost } from '@/composables/useRefresh'
@@ -56,5 +57,6 @@ watch(
   </div>
   <ToastHost />
   <ConfirmDialog />
+  <ReplaceChoiceDialog />
   <NodePickerDialog />
 </template>

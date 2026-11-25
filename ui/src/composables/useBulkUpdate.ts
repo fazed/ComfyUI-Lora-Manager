@@ -20,7 +20,11 @@ import { hardErrorOf, type BulkItem, type BulkResult } from '@/utils/updates'
 export interface BulkUpdateDeps {
   /** Rows that may be ticked right now, by row key (enabled Update action). */
   selectable: () => Map<string, BulkItem>
-  queueUpdate: (group: UpdateGroup, candidate: UpdateCandidate, options: { refreshQueue?: boolean }) => Promise<QueueOutcome>
+  queueUpdate: (
+    group: UpdateGroup,
+    candidate: UpdateCandidate,
+    options: { refreshQueue?: boolean; replacePaths?: string[] },
+  ) => Promise<QueueOutcome>
   /** Called once after the run (re-read the shared queue). */
   afterRun?: () => Promise<unknown> | void
 }
@@ -77,7 +81,7 @@ export function useBulkUpdate(deps: BulkUpdateDeps) {
     try {
       for (let index = 0; index < items.length; index += 1) {
         const item = items[index]
-        const answer = await deps.queueUpdate(item.group, item.candidate, { refreshQueue: false })
+        const answer = await deps.queueUpdate(item.group, item.candidate, { refreshQueue: false, replacePaths: item.replacePaths })
         if (answer.kind === 'queued') outcome.added.push(item)
         else if (answer.kind === 'duplicate') outcome.duplicates.push(item)
         else {

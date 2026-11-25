@@ -17,10 +17,13 @@
 import { computed, reactive, readonly, ref, shallowRef, watch, type Ref } from 'vue'
 import { useDocumentVisibility, useOnline, useTimeoutFn } from '@vueuse/core'
 import { ApiError } from '@/api/http'
-import { createModelApi, downloadsApi, updatesApi } from '@/api/endpoints'
+import { createModelApi, downloadsApi, undoDelete, updatesApi } from '@/api/endpoints'
 import type { ModelPrefix, QueueItem, UpdateCandidate, UpdateGroup, UpdatesOverview } from '@/api/types'
 import { useDownloadQueue } from './useDownloadQueue'
 import { currentCard, deriveDestination, queueStateFor, UPDATE_PREFIXES, type RowQueueState } from '@/utils/updates'
+import { queueErrorText, replaceInfoOf, replaceLines, type ReplaceTarget } from '@/utils/versionManagement'
+import { useToasts } from './useFeedback'
+import { t } from '@/i18n'
 
 // --- app-wide summary (top-bar badge, type buttons) ----------------------------
 
@@ -117,7 +120,8 @@ export type CheckOutcome = 'done' | 'rate_limited' | 'offline' | 'cooldown' | 'e
 
 /** How queueing an update ended. */
 export type QueueOutcome =
-  | { kind: 'queued' }
+  /** `replaceAttached`: the backend stored the replace request (only set when one was sent). */
+  | { kind: 'queued'; replaceAttached?: boolean }
   | { kind: 'duplicate' }
   /** `status`: HTTP status of the failure (0 = network), null when unknown. */
   | { kind: 'error'; message: string; status: number | null }
@@ -246,17 +250,37 @@ export function useUpdates(prefix: Ref<ModelPrefix>) {
 
   // --- queue -------------------------------------------------------------
   const queue = useDownloadQueue(UPDATES_QUEUE_INTERVAL_MS)
+  const toasts = useToasts()
   /** Versions queued from this page that left the queue: final state from the history. */
   const finished = reactive(new Map<number, RowQueueState>())
+  /** The history row of a finished version (its replace outcome). */
+  const finishedItems = reactive(new Map<number, QueueItem>())
   /** Versions queued from this page (to notice when they leave the queue). */
   const tracked = new Set<number>()
   const queuing = ref<number | null>(null)
+
+  /** The queue row of a version, else its history row once it finished (replace info). */
+  function rowItem(versionId: number): QueueItem | null {
+    const active = queue.queue.value.find((item) => Number(item.model_version_id) === versionId)
+    return active ?? finishedItems.get(versionId) ?? null
+  }
 
   function rowState(versionId: number): RowQueueState {
     return queueStateFor(versionId, queue.queue.value) ?? finished.get(versionId) ?? null
   }
 
-  async function settleFinished(ids: number[]): Promise<void> {
+  /**
+   * The replace runs right after the download moved to the history: a row
+   * that still says pending / running is read again a little later (bounded).
+   */
+  const REPLACE_SETTLE_RETRIES = 3
+  const REPLACE_SETTLE_DELAY_MS = 2000
+
+  function replaceStillRunning(item: QueueItem | undefined): boolean {
+    return !!item?.replace_targets && item.status === 'completed' && (item.replace_status === 'pending' || item.replace_status === 'running')
+  }
+
+  async function settleFinished(ids: number[], attempt = 0): Promise<void> {
     let items: QueueItem[] = []
     try {
       items = (await downloadsApi.history(50)).items ?? []
@@ -264,15 +288,55 @@ export function useUpdates(prefix: Ref<ModelPrefix>) {
       return
     }
     let completed = false
+    const again: number[] = []
     for (const id of ids) {
       const state = queueStateFor(id, items)
+      const item = items.find((entry) => Number(entry.model_version_id) === id)
+      if (item) finishedItems.set(id, item)
+      if (replaceStillRunning(item) && attempt < REPLACE_SETTLE_RETRIES) again.push(id)
+      else if (item) announceReplace(item)
       if (state) {
         finished.set(id, state)
         if (state.kind === 'done') completed = true
       }
     }
+    if (again.length) setTimeout(() => void settleFinished(again, attempt + 1), REPLACE_SETTLE_DELAY_MS)
     // A finished download is in the library now: re-read so the row moves on.
     if (completed) void load()
+  }
+
+  /** The row disappears once the update is owned: say what happened to the old file(s) in a toast. */
+  const announced = new Set<string>()
+  function announceReplace(item: QueueItem): void {
+    if (announced.has(item.download_id)) return
+    const lines = replaceLines(replaceInfoOf(item), item.status, Date.now() / 1000)
+    if (!lines.length) return
+    announced.add(item.download_id)
+    const warn = lines.some((line) => line.tone === 'warning')
+    const restorable = lines.map((line) => line.restore).filter((target): target is ReplaceTarget => !!target)
+    toasts.push(
+      lines.map((line) => line.text).join('\n'),
+      warn ? 'warning' : 'success',
+      restorable.length ? 30_000 : 10_000,
+      restorable.length
+        ? {
+            label: t('replace.row.restorable'),
+            run: () => void restoreReplaced(restorable),
+          }
+        : undefined,
+    )
+  }
+
+  async function restoreReplaced(targets: ReplaceTarget[]): Promise<void> {
+    for (const target of targets) {
+      try {
+        await undoDelete(target.batchId!)
+        toasts.success(t('replace.row.restored', { file: target.fileName }))
+      } catch (err) {
+        toasts.error(t('replace.row.restoreFailed', { file: target.fileName, error: (err as Error)?.message || '' }))
+      }
+    }
+    void load()
   }
 
   watch(
@@ -293,7 +357,7 @@ export function useUpdates(prefix: Ref<ModelPrefix>) {
   async function queueUpdate(
     group: UpdateGroup,
     candidate: UpdateCandidate,
-    options: { refreshQueue?: boolean } = {},
+    options: { refreshQueue?: boolean; replacePaths?: string[] } = {},
   ): Promise<QueueOutcome> {
     const destination = deriveDestination(currentCard(group), roots.value)
     queuing.value = candidate.versionId
@@ -305,13 +369,16 @@ export function useUpdates(prefix: Ref<ModelPrefix>) {
         versionName: candidate.name ?? undefined,
         thumbnailUrl: candidate.previewUrl ?? undefined,
         destination: destination.params,
+        replaceFilePaths: options.replacePaths?.length ? options.replacePaths : undefined,
       })
       finished.delete(candidate.versionId)
+      finishedItems.delete(candidate.versionId)
       tracked.add(candidate.versionId)
       if (options.refreshQueue !== false) await queue.refresh()
-      return result.duplicate ? { kind: 'duplicate' } : { kind: 'queued' }
+      if (result.duplicate) return { kind: 'duplicate' }
+      return options.replacePaths?.length ? { kind: 'queued', replaceAttached: result.replace_attached === true } : { kind: 'queued' }
     } catch (err) {
-      return { kind: 'error', message: (err as Error)?.message || 'Error', status: err instanceof ApiError ? err.status : null }
+      return { kind: 'error', message: queueErrorText(err), status: err instanceof ApiError ? err.status : null }
     } finally {
       queuing.value = null
     }
@@ -333,6 +400,7 @@ export function useUpdates(prefix: Ref<ModelPrefix>) {
     stopCheck,
     queuing,
     rowState,
+    rowItem,
     queueUpdate,
     /** Re-read the shared download queue (after a bulk update). */
     refreshQueue: () => queue.refresh(),
