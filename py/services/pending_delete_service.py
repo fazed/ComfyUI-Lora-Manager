@@ -20,6 +20,7 @@ import errno
 import json
 import logging
 import os
+import re
 import shutil
 import tempfile
 import time
@@ -38,6 +39,7 @@ from typing import (
 )
 
 from ..utils.constants import PREVIEW_EXTENSIONS
+from ..utils.safe_paths import UnsafePathError, require_within_any
 from ..utils.sidecar_paths import get_metadata_path, get_preview_path, get_sidecar_dir
 from ..utils.workflow_extraction import get_workflow_document_path
 from ..utils import settings_paths
@@ -439,6 +441,16 @@ class PendingDeleteService:
 
             entries = manifest.get("entries") or []
 
+            # The manifest is a file on disk, so its paths are untrusted: a
+            # planted manifest must not make undo write outside the library
+            # or pull an arbitrary file in. Check every pending entry as a
+            # string before any filesystem call, and refuse the whole batch.
+            allowed_roots = await self._undo_allowed_roots()
+            for entry in entries:
+                if entry.get("restored"):
+                    continue
+                self._require_safe_undo_entry(entry, allowed_roots)
+
             # Pre-check ALL target paths (except already-restored entries) so
             # an occupied original path protects the new file and leaves the
             # whole batch intact.
@@ -778,6 +790,54 @@ class PendingDeleteService:
                     }
                 )
         return staged_pairs
+
+    async def _undo_allowed_roots(self) -> List[str]:
+        """Where an undo may restore to: model roots, recipes, sidecar root."""
+        roots: List[str] = list(await self._get_all_model_roots())
+        try:
+            from ..utils.library_roots import configured_download_roots
+
+            roots.extend(configured_download_roots())
+        except Exception as exc:  # pragma: no cover - config unavailable
+            logger.debug("configured_download_roots failed: %s", exc)
+        try:
+            from ..utils.recipes_paths import get_effective_recipes_dir
+
+            roots.append(get_effective_recipes_dir())
+        except Exception as exc:  # pragma: no cover - settings unavailable
+            logger.debug("recipes dir unavailable for undo: %s", exc)
+        try:
+            from ..utils.sidecar_paths import get_configured_sidecar_root
+
+            roots.append(get_configured_sidecar_root())
+        except Exception as exc:  # pragma: no cover - settings unavailable
+            logger.debug("sidecar root unavailable for undo: %s", exc)
+        return [root for root in roots if isinstance(root, str) and root]
+
+    @staticmethod
+    def _require_safe_undo_entry(entry: Dict[str, Any], allowed_roots: Sequence[str]) -> None:
+        """Raise ``ValueError`` unless a manifest entry is safe to restore.
+
+        ``original`` must lie inside a library root (fail closed without
+        roots); ``staged`` must lie inside a ``.lm-pending-delete`` staging
+        folder. Pure string checks: nothing is touched on rejection.
+        """
+        staged_path = entry.get("staged")
+        original_path = entry.get("original")
+        if not staged_path or not original_path:
+            return  # skipped (marked restored) by undo, nothing is moved
+        if not isinstance(original_path, str) or not isinstance(staged_path, str):
+            raise ValueError("Invalid undo manifest entry")
+        try:
+            require_within_any(original_path, allowed_roots, label="Undo target")
+        except UnsafePathError as exc:
+            raise ValueError(str(exc)) from exc
+        segments = [
+            os.path.normcase(part)
+            for part in re.split(r"[\\/]+", os.path.abspath(staged_path))
+        ]
+        if os.path.normcase(PENDING_DELETE_DIR_NAME) not in segments[:-1]:
+            raise ValueError("Undo source is not a staged pending-delete file")
 
     def _restore_file(self, staged_path: str, original_path: str) -> None:
         """Move a file between staging and library paths, tolerating EXDEV.

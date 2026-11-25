@@ -89,6 +89,13 @@ def _stub_scanner_registry(monkeypatch) -> None:
     monkeypatch.setattr(ServiceRegistry, "get_embedding_scanner", _none)
 
 
+def _use_tmp_as_recipes_dir(monkeypatch, root) -> None:
+    """Undo only restores into library roots; these recipes live in tmp_path."""
+    monkeypatch.setattr(
+        "py.utils.recipes_paths.get_effective_recipes_dir", lambda: str(root)
+    )
+
+
 async def _register_model_root(
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -1157,7 +1164,10 @@ async def test_u_lock_no_deadlock_with_concurrent_purge(tmp_path: Path, monkeypa
 # ---------------------------------------------------------------------------
 # Extra: recipe staging happy path + missing-image skip + undo
 # ---------------------------------------------------------------------------
-async def test_recipe_stage_copies_json_and_image_then_undo_restores(tmp_path: Path) -> None:
+async def test_recipe_stage_copies_json_and_image_then_undo_restores(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _use_tmp_as_recipes_dir(monkeypatch, tmp_path)
     settings_dir = Path(settings_paths.get_settings_dir())
     recipe_json = tmp_path / "my_recipe.recipe.json"
     recipe_json.write_text('{"id": "r1"}')
@@ -1311,6 +1321,7 @@ async def test_exdev1_recipe_undo_falls_back_to_copy_across_devices(
     can live on a DIFFERENT filesystem than the recipes dir. undo() must NOT
     die with EXDEV: fall back to copy2+remove so bytes are restored and the
     staged copies are gone (no data loss)."""
+    _use_tmp_as_recipes_dir(monkeypatch, tmp_path)
     settings_dir = Path(settings_paths.get_settings_dir())
     recipe_json = tmp_path / "exdev_recipe.recipe.json"
     recipe_json.write_text('{"id": "exdev"}')
@@ -1360,6 +1371,7 @@ async def test_exdev2_partial_exdev_completes_within_one_undo(
     rename, the second via the copy fallback, and the whole batch finishes in a
     single undo call (no retry needed): both originals byte-identical, staged
     copies gone, batch dir removed."""
+    _use_tmp_as_recipes_dir(monkeypatch, tmp_path)
     settings_dir = Path(settings_paths.get_settings_dir())
     recipe_json = tmp_path / "exdev2_recipe.recipe.json"
     recipe_json.write_text('{"id": "exdev2"}')

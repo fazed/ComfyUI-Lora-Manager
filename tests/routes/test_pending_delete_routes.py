@@ -207,6 +207,13 @@ async def _register_scanners(
     monkeypatch.setattr(ServiceRegistry, "get_recipe_scanner", _make(recipe))
 
 
+def _use_tmp_as_recipes_dir(monkeypatch, root) -> None:
+    """Undo only restores into library roots; these recipes live in tmp_path."""
+    monkeypatch.setattr(
+        "py.utils.recipes_paths.get_effective_recipes_dir", lambda: str(root)
+    )
+
+
 def _make_undo_request(**json_data: Any) -> FakeRequest:
     return FakeRequest(json_data=json_data)
 
@@ -389,6 +396,7 @@ async def test_b_undo_checkpoint_batch_updates_checkpoint_cache_only(
 async def test_c_undo_recipe_batch_restores_files_and_calls_add_recipe(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    _use_tmp_as_recipes_dir(monkeypatch, tmp_path)
     recipe_json = tmp_path / "my_recipe.recipe.json"
     recipe_data = {"id": "r1", "name": "Recipe One", "file_path": str(recipe_json)}
     recipe_json.write_text(json.dumps(recipe_data), encoding="utf-8")
@@ -771,6 +779,7 @@ async def test_g_rescan_stale_cache_entry_replaced_by_snapshot(
 async def test_h_recipe_redo_delete_after_undo_and_refresh_succeeds(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    _use_tmp_as_recipes_dir(monkeypatch, tmp_path)
     recipe_json = tmp_path / "my_recipe.recipe.json"
     recipe_data = {"id": "r1", "name": "Recipe One", "file_path": str(recipe_json)}
     recipe_json.write_text(json.dumps(recipe_data), encoding="utf-8")
@@ -818,6 +827,7 @@ async def test_h_recipe_redo_delete_after_undo_and_refresh_succeeds(
 async def test_i_recipe_undo_without_refresh_still_restores_files(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    _use_tmp_as_recipes_dir(monkeypatch, tmp_path)
     recipe_json = tmp_path / "no_refresh.recipe.json"
     recipe_data = {"id": "r2", "name": "No Refresh"}
     recipe_json.write_text(json.dumps(recipe_data), encoding="utf-8")
