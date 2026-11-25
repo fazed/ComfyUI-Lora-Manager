@@ -37,6 +37,8 @@ import type {
   QueueResponse,
   SettingsMap,
   TagEntry,
+  UpdatesOverview,
+  UpdatesRefreshResponse,
   WorkflowRegistry,
 } from './types'
 import type { UpdateLoraCodeBody } from '@/utils/workflow'
@@ -343,6 +345,24 @@ export const downloadsApi = {
         thumbnail_url: target.thumbnailUrl || undefined,
       },
     }),
+}
+
+export const updatesApi = {
+  /**
+   * Classified update candidates of one model type. Read-only on the backend:
+   * persisted update records + scanner cache + download history, no Civitai
+   * request and no write (py/services/update_classifier.py).
+   */
+  overview: (prefix: ModelPrefix, signal?: AbortSignal) =>
+    request<UpdatesOverview>(`${prefix}/updates/overview`, { signal }),
+  /**
+   * "Check now": asks Civitai for new versions of every model of the type
+   * whose record is older than the backend TTL (24 h). A mutation with
+   * Civitai requests (may take minutes, 429 when rate limited); only called
+   * after a confirm. Never forced.
+   */
+  refresh: (prefix: ModelPrefix) =>
+    request<UpdatesRefreshResponse>(`${prefix}/updates/refresh`, { method: 'POST', body: { force: false } }),
 }
 
 export const settingsApi = {

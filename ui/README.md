@@ -54,7 +54,8 @@ ui/
                           useFolderPanel, useDismiss (overlay stack: Escape and
                           outside/backdrop clicks close only the topmost overlay;
                           a backdrop click needs pointerdown + click on the backdrop),
-                          useRefresh (page refresh registry, see "Refresh")
+                          useRefresh (page refresh registry, see "Refresh"),
+                          useUpdates (Updates page + top-bar badge count)
     components/           TopBar, AppMenu/ThemeOptions, SearchCombobox, VirtualGrid,
                           ModelCard, ModelRow (list view), ModelDrawer, ExampleLightbox,
                           BaseModelQuickFilter, NodePickerDialog, FolderTree,
@@ -63,7 +64,7 @@ ui/
                           drawer, reconnect form, import / batch import /
                           move / duplicates dialogs), ...
     pages/                LibraryPage (generic, per model type), RecipesPage,
-                          SearchPage, DownloadsPage, SettingsPage (schema-driven),
+                          SearchPage, DownloadsPage, UpdatesPage, SettingsPage (schema-driven),
                           StatsPage, DoctorPage, NotFoundPage
     components/charts/    dependency-free SVG/CSS charts (series tokens)
     components/settings/  SettingsField (one field row), SettingsTabList (ARIA tab list)
@@ -476,7 +477,8 @@ There is no sidebar: the content area uses the full width.
   tabs LoRAs / Checkpoints / Embeddings / Recipes (`<nav aria-label="Libraries">`
   with links; the active one is highlighted and has `aria-current="page"`;
   `isNavActive` in `config/navigation.ts` also matches sub-paths), the global
-  search, and on the right the Downloads indicator (live `active/total`
+  search, and on the right the **Updates** link (badge = likely model
+  updates, see "Updates (phase 1)"), the Downloads indicator (live `active/total`
   badge, links to the Downloads page), Settings, and a **More options** menu
   (`components/AppMenu.vue`) with the theme and density pickers and the
   **Statistics** / **Diagnostics** links and the **Classic UI** link.
@@ -504,7 +506,7 @@ Every routed page declares a **layout kind** in its route meta
 (`meta.layout`, `LAYOUT_KINDS` in `router.ts`; `<main>` carries it as
 `data-layout`):
 
-* `content` (Downloads, Stats, Diagnostics, Settings, Search, Not found):
+* `content` (Downloads, Updates, Stats, Diagnostics, Settings, Search, Not found):
   renders inside `components/PageShell.vue`. The shell owns the page scroller
   (`scrollbar-gutter: stable`, so pages with and without a vertical scrollbar
   keep identical edges), one container centered with `mx-auto` and
@@ -780,7 +782,7 @@ outside LoRA Manager, ...).
   3. The light re-read. When the scan answered counts and something changed,
      one toast summarises it: "Library scan: 2 new, 1 removed". No changes, or
      no counts (recipes), means no toast.
-* **Other pages** (Downloads, Statistics, Search, Settings, Diagnostics) only
+* **Other pages** (Downloads, Updates, Statistics, Search, Settings, Diagnostics) only
   re-read (no scan).
 * **Where the button is.** Library pages and Recipes: an icon button directly
   before **Tools** in the toolbar (always visible from 901px up; hidden in
@@ -823,6 +825,7 @@ What each page refreshes (the page keeps its UI state):
 | LoRAs / Checkpoints / Embeddings | the quick library scan of that type (above), then the loaded range of the list with the same filters, sort, search and folder (`useInfiniteList.refresh`: pages 1..n again, at most `RESTORE_MAX_ITEMS` = 600 items, i.e. 10 pages of 60, stopping at the server's last page; the result replaces the items at once, so the grid never empties), the folder tree, base-model chips and tag filters; selection mode and the selected keys stay; the open drawer gets the refreshed copy of its model and re-reads its metadata (examples, trigger words, description) and, once loaded, the versions, without placeholders, keeping its tab and scroll; new notes / tags from the server are shown unless the notes hold an unsaved draft |
 | Recipes | the recipe scan, then the same for the recipe list (plus "missing only"), folder tree, base models and tags; the open recipe drawer re-reads `GET /api/lm/recipe/<id>` (the "opened" POST is sent only when a drawer opens, not on refresh) |
 | Downloads | the queue (also polled every 1.5 s while open) and the history |
+| Updates | the read-only overview of the active type (no scan, no Civitai request; Check now is separate) |
 | Statistics | the six stats endpoints and the opened "most used" lists (the rows already shown, one request each); the charts stay on screen while loading |
 | Search | the four library searches of the current query; the results stay until the new ones arrive |
 | Settings | the stored settings (`form.reloadKeeping`: unsaved edits are kept on top) and the root lists; a failure shows the existing load-error banner |
@@ -1567,6 +1570,168 @@ unchanged.
   load-error banner with Retry, Sunset, and the shared inputs on the
   library toolbar, Downloads page and download dialog.
 
+## Updates (phase 1)
+
+`/updates` (`pages/UpdatesPage.vue`, rows in `components/UpdateRow.vue`,
+state in `composables/useUpdates.ts`, pure helpers in `utils/updates.ts`,
+strings in `i18n/updatesMessages.ts`) lists the model lines that have a
+**real** newer version on Civitai, one row per (Civitai model, base model) of
+the files you own - not one flag per card as in the classic UI.
+
+### Endpoint (fork-only, read-only)
+
+`GET /api/lm/{loras,checkpoints,embeddings}/updates/overview`, registered next
+to the other `updates/*` routes in `py/routes/model_route_registrar.py`
+(handler `ModelUpdateHandler.get_updates_overview`, logic in the pure module
+`py/services/update_classifier.py`). It reads the persisted update records in
+bulk (`get_records_bulk`, SQLite SELECTs only), the scanner cache and the
+download history (`get_downloaded_version_ids_bulk`). It never calls Civitai,
+never writes and never changes the behaviour of the existing endpoints; stale
+or missing records are reported, not refreshed. Answer:
+
+```
+{ success, modelType,
+  settings: { hideEarlyAccessUpdates, hidePaidUpdates },
+  totals: { likely, possible, hidden, groups, upToDate },     // lines
+  models: { local, tracked, checked, untracked, neverChecked },
+  unchecked,                       // untracked + neverChecked: never "up to date"
+  oldestCheckedAt, newestCheckedAt, // ISO
+  groups: [{ key, modelId, modelName, baseModel, tier: likely|possible|hidden,
+             isIgnored, lastCheckedAt, ownedVersionIds, newestOwned{versionId,name,releasedAt,sizeBytes},
+             previewNsfwLevel,
+             localCards: [{ filePath, fileName, folder, baseModel, versionId, versionName,
+                            releasedAt, sizeBytes, previewUrl, previewNsfwLevel }],
+             candidates: [{ versionId, name, baseModel, releasedAt, sizeBytes, fileCount,
+                            usageControl, isEarlyAccess, earlyAccessEndsAt, isPaid, previewUrl,
+                            hasBeenDownloaded, isIgnored,
+                            confidence: likely|possible|variant, reason, hiddenBecause: [] }] }] }
+```
+
+### Classification
+
+Ownership is read **at request time** from the scanner (every local file
+with a Civitai model + version id), not from the persisted `is_in_library`
+flag, which is only refreshed on refresh / download / delete and was stale
+for 19 items in the audited library (a checkpoint whose v2.0 is on disk was
+still offered v2.0). A candidate is a remote version of the same model that
+you do not own, on the **same base model** as the line (case-insensitive),
+and released **after** the newest owned version of that line by release date
+(the version id only breaks ties; ten versions in the audited database had a
+lower id but a newer date). Each candidate then gets:
+
+| Confidence | Reason code | When |
+| --- | --- | --- |
+| likely | `next_version_same_base` | nothing below applies |
+| variant | `looks_like_format_variant` | same name and number as an owned version except for format / precision / flavour words (remap(ped), int8, nvfp4, fp8, fp16, bf16, gguf / q4_k_m, convrot, lora / extracted, plus / bonus, high / low (noise), alt / special / default / cute / matte, ...), or released within 24 h of an owned version with such a word added; also a format sibling (fp8 / gguf) of another candidate of the same release |
+| variant | `same_release_variant` | released within 24 h of an owned version at a size within 3 %, without a higher version number |
+| possible | `sibling_variant` | another flavour of a newer release (e.g. low noise when you own high noise) |
+| possible | `same_day_as_owned` | released within 24 h of your version, other size |
+| possible | `parallel_line` | the name's words neither contain nor are contained in your version's (style A vs style B) |
+| possible | `lower_version_number` / `same_version_number` | released later but numbered lower / the same |
+| possible | `variant_tokens` | newer, but the name carries format words your file does not have |
+| possible | `unknown_release_date` | no dates: newer only by id |
+| possible | `unknown_base` | your file has no base model |
+| possible | `other_base` | newer, on a base model you do not own for this model (shown once per model, always hidden) |
+
+Version names are parsed by `name_signature` (version number, variant words,
+the remaining words; base-model words and parameter counts like "2.9B" are
+ignored). Independent of the confidence, `hiddenBecause` lists the gates:
+`ignored` (version or model), `not_downloadable` (`usage_control` other than
+Download), `no_files` (`file_count == 0`), `early_access` / `paid` (only when
+the existing settings `hide_early_access_updates` / `hide_paid_updates` are
+on; the badge shows either way), `already_downloaded` (in the download history
+but not on disk) and `other_base`. A line's `tier` is the best visible
+candidate (likely > possible), else `hidden`.
+
+**Why variants are hidden**: in the audited library most "updates" of the
+classic flag were other files of a release the user already had (fp8 / gguf /
+remapped uploads of the same checkpoint, the low-noise half of a Wan pair,
+extracted LoRAs). They are still listed under **All** with the reason.
+
+Dry run against a read-only copy of the real databases (no endpoint called):
+LoRAs 3 likely / 11 possible / 56 hidden lines (915 up to date, 304 models
+not checked yet); checkpoints 1 / 3 / 4 (84 up to date, 33 not checked);
+embeddings: all 47 never checked.
+
+### Page
+
+* **Header**: "Checked 12 days ago" (the oldest check of the type; "Never
+  checked" when nothing was), the note that results are not refreshed
+  automatically, **Check now** and the shell Refresh button.
+* **Type switch** LoRAs / Checkpoints / Embeddings (every type with
+  `supportsUpdates`), remembered in `localStorage` (`lm-ui.updates.type`).
+  **Filter** Likely (default) / Possible / All with counts; Likely and Possible
+  are disjoint, All shows every line with its hiding reason. A footer "N
+  hidden - Show all" switches to All.
+* **Notices**: "N models not checked yet" whenever `unchecked > 0` (they are
+  never shown as up to date); offline (`useOnline`); rate limit after Check
+  now. An empty type that was never checked says "Not checked yet", not "No
+  updates found".
+* **Row**: the new version's thumbnail (Civitai preview, else the local one;
+  blurred like the library when the local preview is mature and
+  `blur_mature_content` is on), model name, base-model badge, a text
+  confidence badge, Early access / Paid / Ignored badges, "Your version" and
+  "New version" with release dates and `formatBytes` sizes, the reason
+  sentence (`reasonText`: "Newer version on the same base model
+  (Illustrious), released 3 days after yours."), the hiding reason in All,
+  where the update is saved, and "+N more newer versions under All".
+* **Update** queues the shown version with `GET downloads/queue/add` into the
+  **same root and folder as the current file**: `deriveDestination` picks the
+  longest root from `GET /{prefix}/roots` that contains the file (Windows
+  paths case-insensitively, backslashes normalised, a sibling folder sharing a
+  prefix never matches) and sends `model_root`, `relative_path`,
+  `use_default_paths=false`. When no root matches it sends no destination
+  (default root + path template) and the row says so. `duplicate` /
+  `already_queued` is a toast, errors are an error toast. The row follows the
+  shared download queue (polled every 2 s while the page is open): Queued /
+  Downloading N% / Paused disable Update; when a version queued from this page
+  leaves the queue its state is read from the history (`In library`, or
+  `Download failed` with the error, which allows a retry) and a completed one
+  reloads the overview. **Open on Civitai** (new tab, `civitaiModelUrl` with
+  the version) and **Open in library** (`/<type>?open=<file_path>`) are icon
+  links whose names include the model name.
+* **Check now** = `POST /api/lm/{prefix}/updates/refresh {force: false}` for
+  the active type, only after a confirm that says it contacts Civitai, may take
+  minutes and downloads nothing. While it runs the button is disabled with a
+  turning icon (`motion-reduce:animate-none`); a 429 shows the rate-limit
+  notice and rests the button for 60 s; 503 / network errors show the
+  connection notice; other errors are an error toast. Afterwards the overview
+  is re-read. Without `force` the backend only re-checks records older than
+  its 24 h TTL.
+* **Refresh** (`r` / the header button) re-reads the overview only: no scan
+  and no Civitai request.
+* **Top bar**: an Updates link left of Downloads with a badge of likely
+  updates over all types. The counts are fetched once, 1.5 s after the shell
+  mounted, from the same read-only endpoint (one GET per type, sequentially,
+  failures silent so an older backend without the endpoint shows no badge);
+  the page updates its type's count after each load. No polling.
+* **States and a11y**: skeleton rows while loading, `StateBlock` error with
+  Retry (a 404 says the backend needs a restart), empty state with Check now;
+  `h1` + an `h2` per list + `h3` per row, a native `ul`, text labels on
+  badges, `aria-pressed` segmented buttons, a polite live region for queue and
+  check results, 44px controls and a stacked row on phones.
+
+Tests: `tests/services/test_update_classifier.py` (52 fixture cases: name
+parsing, every reason, read-time ownership vs a stale flag, cards of one
+line, base lines, other base, unchecked counts, gates, payload shape),
+`tests/routes/test_updates_overview_route.py` (route table, per-prefix
+routing, bulk reads only - the fakes fail on any other call, no metadata
+provider, history failure tolerated) and `ui/tests/updates.test.ts` (API
+client, helpers including destinations, every backend code has a message,
+the row, the page against a mocked backend: tiers, type switch, Update with
+the right params and fallback, duplicates and errors, queue states and
+completion, Check now confirm / cancel / 429 / 503 / error, refresh
+registry, empty / never-checked / error states, the top-bar badge).
+Checked in a browser against a local mock backend (never the live one) at
+1440, 1100 and 375 px in Dark, Midnight and Light.
+
+### Phase 2 (not built yet)
+
+Bulk select and "update all", ignore version / model from the page, changelog
+and file-format choice per row, the same counts on the library toolbar's
+update filter, the drawer Versions tab using the classification, and an
+optional background re-check.
+
 ## Roadmap: still in the classic UI
 
 Everything of the classic settings modal, statistics page, doctor and
@@ -1578,8 +1743,10 @@ example-image showcase is now in the new UI, except:
   takes the skip list as text), the "Apply to library now" button next to
   the filename templates (use the library's Tools > Filename template), the
   directory browser next to path fields (type the path).
-* **Updates and banners**: installing updates, switching release/nightly,
-  update notifications, the promo / bulk-fetch / cache-health banners.
+* **App updates and banners**: installing LoRA Manager updates, switching
+  release/nightly, update notifications, the promo / bulk-fetch / cache-health
+  banners. (Model updates have their own page, see "Updates (phase 1)"; its
+  phase 2 items are listed there.)
 * **Example images**: the folder cleanup (`cleanup-example-image-folders`),
   the automatic periodic check of the classic page (the server-side download
   after each model download still works), live WebSocket progress (the new UI

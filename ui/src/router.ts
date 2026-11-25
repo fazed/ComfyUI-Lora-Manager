@@ -59,6 +59,12 @@ export const routes: RouteRecordRaw[] = [
     meta: { title: 'nav.downloads', layout: 'content' },
   },
   {
+    path: '/updates',
+    name: 'updates',
+    component: () => import('@/pages/UpdatesPage.vue'),
+    meta: { title: 'nav.updates', layout: 'content' },
+  },
+  {
     path: '/settings/:tab?',
     name: 'settings',
     component: () => import('@/pages/SettingsPage.vue'),

@@ -9,11 +9,12 @@
  */
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useEventListener } from '@vueuse/core'
+import { useEventListener, useTimeoutFn } from '@vueuse/core'
 import AppIcon from './AppIcon.vue'
 import AppMenu from './AppMenu.vue'
 import SearchCombobox from './SearchCombobox.vue'
 import { useDownloadQueue } from '@/composables/useDownloadQueue'
+import { useUpdatesSummary } from '@/composables/useUpdates'
 import { stashItem } from '@/composables/useSearch'
 import { GLOBAL_PER_GROUP, MAX_TAGS, GLOBAL_TAG_SCOPE } from '@/api/suggestSource'
 import {
@@ -28,6 +29,9 @@ import {
 import type { SuggestOption } from '@/utils/suggest'
 import { t } from '@/i18n'
 
+/** Delay before the top bar asks for the update counts (keeps the first paint free). */
+const UPDATES_BADGE_DELAY_MS = 1500
+
 const route = useRoute()
 const router = useRouter()
 const { active, waiting, paused, worker } = useDownloadQueue(5000)
@@ -41,6 +45,21 @@ const queueLabel = computed(() =>
     : t('topbar.queue', { active: active.value.length, queued: waiting.value.length }),
 )
 const onDownloads = computed(() => isNavActive('/downloads', route.path))
+const onUpdates = computed(() => isNavActive('/updates', route.path))
+
+// Likely-update count for the badge: read once, after the shell is up (read-only
+// overview endpoint, no polling, never a Civitai request). The page keeps it current.
+const updatesSummary = useUpdatesSummary()
+const likelyUpdates = updatesSummary.total
+const updatesLabel = computed(() =>
+  likelyUpdates.value
+    ? t('topbar.updatesCount', {
+        count: likelyUpdates.value,
+        updates: likelyUpdates.value === 1 ? t('updates.update') : t('updates.updatesWord'),
+      })
+    : t('topbar.updates'),
+)
+useTimeoutFn(() => void updatesSummary.loadOnce(), UPDATES_BADGE_DELAY_MS)
 const onSettings = computed(() => isNavActive('/settings', route.path))
 
 // The results page owns the text while it is open; leaving it empties the box.
@@ -153,6 +172,17 @@ const iconButton = 'lm-btn lm-btn--ghost relative px-2'
     </div>
 
     <div class="order-4 ml-auto flex flex-none items-center gap-1 phone:order-3 phone:ml-0">
+      <RouterLink
+        to="/updates"
+        :class="[iconButton, onUpdates ? 'bg-accent-soft text-accent' : 'text-muted hover:text-fg']"
+        :aria-label="updatesLabel"
+        :title="updatesLabel"
+        :aria-current="onUpdates ? 'page' : undefined"
+        data-testid="topbar-updates"
+      >
+        <AppIcon name="update" />
+        <span v-if="likelyUpdates" class="lm-badge lm-badge--accent tabular-nums" aria-hidden="true">{{ likelyUpdates }}</span>
+      </RouterLink>
       <RouterLink
         to="/downloads"
         :class="[iconButton, onDownloads ? 'bg-accent-soft text-accent' : paused ? 'text-warning' : busy ? 'text-accent' : 'text-muted hover:text-fg']"

@@ -104,8 +104,17 @@ export interface ModelVersionInfo {
   hasBeenDownloaded?: boolean
   shouldIgnore?: boolean
   isEarlyAccess?: boolean
+  earlyAccessEndsAt?: string | null
   isPaid?: boolean
+  /** Civitai paidAccess DTO (`{permanent, endsAt}`), null when not gated. */
+  paidAccess?: { permanent?: boolean; endsAt?: string | null } | null
+  /** "Download", "Generation", "InternalGeneration"; null when unknown. */
+  usageControl?: string | null
+  /** Number of downloadable weight files (null when unknown). */
+  fileCount?: number | null
   fileName?: string | null
+  /** Local file of an in-library version (from the scanner at read time). */
+  filePath?: string | null
 }
 
 export interface ModelUpdateRecord {
@@ -114,6 +123,108 @@ export interface ModelUpdateRecord {
   shouldIgnore?: boolean
   lastCheckedAt?: number
   versions: ModelVersionInfo[]
+}
+
+// --- Updates overview (GET /api/lm/{prefix}/updates/overview) --------------
+
+/** How sure the classifier is that a candidate is a real successor. */
+export type UpdateConfidence = 'likely' | 'possible' | 'variant'
+/** Which filter a model line appears under (its best visible candidate). */
+export type UpdateTier = 'likely' | 'possible' | 'hidden'
+/** Classification reason codes (py/services/update_classifier.py REASON_CODES). */
+export type UpdateReason =
+  | 'next_version_same_base'
+  | 'looks_like_format_variant'
+  | 'same_release_variant'
+  | 'sibling_variant'
+  | 'same_day_as_owned'
+  | 'parallel_line'
+  | 'lower_version_number'
+  | 'same_version_number'
+  | 'variant_tokens'
+  | 'unknown_release_date'
+  | 'unknown_base'
+  | 'other_base'
+/** Gates that keep a candidate out of the default view (HIDDEN_CODES). */
+export type UpdateHiddenReason =
+  | 'ignored'
+  | 'other_base'
+  | 'not_downloadable'
+  | 'no_files'
+  | 'early_access'
+  | 'paid'
+  | 'already_downloaded'
+
+export interface UpdateCandidate {
+  versionId: number
+  name: string | null
+  baseModel: string | null
+  releasedAt: string | null
+  sizeBytes: number | null
+  fileCount: number | null
+  usageControl: string | null
+  isEarlyAccess: boolean
+  earlyAccessEndsAt: string | null
+  isPaid: boolean
+  previewUrl: string | null
+  hasBeenDownloaded: boolean
+  isIgnored: boolean
+  confidence: UpdateConfidence
+  reason: UpdateReason
+  hiddenBecause: UpdateHiddenReason[]
+}
+
+export interface UpdateLocalCard {
+  filePath: string
+  fileName: string | null
+  folder: string
+  baseModel: string | null
+  versionId: number
+  versionName: string | null
+  releasedAt: string | null
+  sizeBytes: number | null
+  previewUrl: string | null
+  previewNsfwLevel: number
+}
+
+export interface UpdateGroup {
+  /** `<modelId>:<lowercased base>` - stable row key. */
+  key: string
+  modelId: number
+  modelName: string | null
+  baseModel: string | null
+  tier: UpdateTier
+  isIgnored: boolean
+  /** ISO time of the last Civitai check of this model, null = never. */
+  lastCheckedAt: string | null
+  /** Versions of this line owned right now (scanner, not the persisted flag). */
+  ownedVersionIds: number[]
+  newestOwned: { versionId: number; name: string | null; releasedAt: string | null; sizeBytes: number | null }
+  previewNsfwLevel: number
+  localCards: UpdateLocalCard[]
+  /** Best first: visible before hidden, likely before possible before variant, newest first. */
+  candidates: UpdateCandidate[]
+}
+
+export interface UpdatesOverview {
+  success: boolean
+  modelType: string
+  settings: { hideEarlyAccessUpdates: boolean; hidePaidUpdates: boolean }
+  totals: { likely: number; possible: number; hidden: number; groups: number; upToDate: number }
+  models: { local: number; tracked: number; checked: number; untracked: number; neverChecked: number }
+  /** Local models with a Civitai id that were never checked (no record, or never refreshed). */
+  unchecked: number
+  oldestCheckedAt: string | null
+  newestCheckedAt: string | null
+  groups: UpdateGroup[]
+}
+
+/** `POST /api/lm/{prefix}/updates/refresh` answer (only the parts the UI reads). */
+export interface UpdatesRefreshResponse {
+  success: boolean
+  records?: unknown[]
+  status?: string
+  message?: string
 }
 
 export type QueueStatus = 'queued' | 'downloading' | 'paused' | 'completed' | 'failed' | 'canceled' | string

@@ -118,6 +118,10 @@ COMMON_ROUTE_DEFINITIONS: tuple[RouteDefinition, ...] = (
     RouteDefinition(
         "GET", "/api/lm/{prefix}/updates/versions/{model_id}", "get_model_versions"
     ),
+    # Read-only overview for the modern UI's Updates page (no Civitai calls).
+    RouteDefinition(
+        "GET", "/api/lm/{prefix}/updates/overview", "get_updates_overview"
+    ),
     RouteDefinition("POST", "/api/lm/download-model", "download_model"),
     RouteDefinition("GET", "/api/lm/download-model-get", "download_model_get"),
     RouteDefinition("GET", "/api/lm/cancel-download-get", "cancel_download_get"),
