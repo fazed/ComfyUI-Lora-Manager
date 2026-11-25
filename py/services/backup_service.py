@@ -20,6 +20,12 @@ from pathlib import Path
 from typing import Any, Iterable, Optional
 
 from ..utils.cache_paths import CacheType, get_cache_base_dir, get_cache_file_path
+from ..utils.safe_paths import (
+    UnsafePathError,
+    safe_join,
+    validate_path_segment,
+    validate_relative_path,
+)
 from ..utils.settings_paths import get_settings_dir
 from .settings_manager import get_settings_manager
 
@@ -310,16 +316,26 @@ class BackupService:
                         archive_member = item.get("archive_path")
                         if not isinstance(archive_member, str) or not archive_member:
                             continue
-                        archive_member_path = Path(archive_member)
-                        if archive_member_path.is_absolute() or ".." in archive_member_path.parts:
-                            raise ValueError(f"Invalid archive member path: {archive_member}")
+                        # Path.is_absolute() is False on Windows for rooted
+                        # ("/x", "\\x") and drive-relative ("D:x") names, and
+                        # temp_dir / such a name escapes the sandbox. Accept
+                        # only strictly relative member names and verify the
+                        # joined path stays inside temp_dir.
+                        try:
+                            safe_member = validate_relative_path(archive_member)
+                            extracted_path = Path(
+                                safe_join(str(temp_dir), safe_member)
+                            )
+                        except UnsafePathError as exc:
+                            raise ValueError(
+                                f"Invalid archive member path: {archive_member}"
+                            ) from exc
 
                         kind = item.get("kind")
-                        target_path = self._resolve_restore_target(kind, archive_member)
+                        target_path = self._resolve_restore_target(kind, safe_member)
                         if target_path is None:
                             continue
 
-                        extracted_path = temp_dir / archive_member_path
                         extracted_path.parent.mkdir(parents=True, exist_ok=True)
                         with zf.open(archive_member) as source, open(
                             extracted_path, "wb"
@@ -356,7 +372,11 @@ class BackupService:
         if kind == "symlink_map":
             return get_cache_file_path(CacheType.SYMLINK, create_dir=True)
         if kind == "model_update":
-            filename = os.path.basename(archive_member)
+            # The member name was validated as a relative path; its last
+            # segment becomes a file name in the model-update cache directory.
+            filename = validate_path_segment(archive_member.replace("\\", "/").rsplit("/", 1)[-1])
+            if not filename.lower().endswith(".sqlite"):
+                raise ValueError(f"Invalid model update archive member: {archive_member}")
             return str(Path(get_cache_file_path(CacheType.MODEL_UPDATE, create_dir=True)).parent / filename)
         if kind == "usage_stats":
             return os.path.join(get_settings_dir(create=True), "stats", "lora_manager_stats.json")

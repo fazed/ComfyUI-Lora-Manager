@@ -48,12 +48,37 @@ class TestRequirePathInLibraryRoots:
         with pytest.raises(ValueError, match="outside configured library"):
             _require_path_in_library_roots(str(outside), scanner)
 
-    def test_passes_when_no_roots_configured(self, tmp_path):
+    def test_fails_closed_when_no_roots_configured(self, tmp_path):
+        # Used to pass silently, which let every guarded handler act on any
+        # path while no root was configured (or the feature was disabled).
         f = tmp_path / "model.safetensors"
         f.write_text("")
 
         scanner = ScannerWithRoots([])
-        _require_path_in_library_roots(str(f), scanner)
+        with pytest.raises(ValueError, match="no library directories"):
+            _require_path_in_library_roots(str(f), scanner)
+
+    def test_fails_closed_when_roots_not_implemented(self, tmp_path):
+        class _Base:
+            def get_model_roots(self):
+                raise NotImplementedError
+
+        with pytest.raises(ValueError):
+            _require_path_in_library_roots(str(tmp_path / "m.safetensors"), _Base())
+
+    def test_rejects_prefix_sibling(self, tmp_path):
+        root = tmp_path / "loras"
+        scanner = ScannerWithRoots([str(root)])
+        with pytest.raises(ValueError, match="outside configured library"):
+            _require_path_in_library_roots(
+                str(tmp_path / "loras_evil" / "m.safetensors"), scanner
+            )
+
+    @pytest.mark.skipif(os.name != "nt", reason="case-insensitive paths")
+    def test_accepts_case_and_separator_differences_on_windows(self, tmp_path):
+        root = tmp_path / "Loras"
+        scanner = ScannerWithRoots([str(root).replace("\\", "/")])
+        _require_path_in_library_roots(str(root).upper() + "\\Sub\\m.safetensors", scanner)
 
     def test_accepts_path_matching_root_exactly(self, tmp_path):
         root = tmp_path / "loras"

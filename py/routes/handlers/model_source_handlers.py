@@ -37,7 +37,14 @@ from ...services.model_sources import (
 from ...services.settings_manager import get_settings_manager
 from ...services.service_registry import ServiceRegistry
 from ...services.websocket_manager import ws_manager
+from ...utils.library_roots import match_configured_root
 from ...utils.metadata_manager import MetadataManager
+from ...utils.safe_paths import (
+    UnsafePathError,
+    is_within,
+    validate_path_segment,
+    validate_relative_path,
+)
 from ...utils.models import (
     LoraMetadata,
     CheckpointMetadata,
@@ -497,45 +504,48 @@ class ModelSourceHandler:
         if ".." in filename:
             return web.json_response({"error": "Invalid filename"}, status=400)
 
-        # Validate relative_path — must not be absolute or escape base directory
+        # Validate relative_path — must be strictly relative (isabs alone
+        # misses "/x" and "C:x" on Windows with Python 3.13+, and os.path.join
+        # would let either replace base_dir and escape model_root).
         if relative_path:
-            # isabs alone misses "/x" (rooted, no drive) and "C:x" (drive-
-            # relative) on Windows with Python 3.13+; os.path.join would let
-            # either replace base_dir and escape model_root.
-            if (
-                os.path.isabs(relative_path)
-                or relative_path.startswith("/")
-                or os.path.splitdrive(relative_path)[0]
-            ):
-                return web.json_response({"error": "relative_path must not be absolute"}, status=400)
-            if ".." in relative_path.split("/") or "\\" in relative_path:
+            try:
+                relative_path = validate_relative_path(relative_path)
+            except UnsafePathError:
                 return web.json_response({"error": "Invalid relative_path"}, status=400)
 
-        # Use model_root directly as the base directory — same approach as
-        # CivitAI's download path (download_manager.py).  No realpath, no
-        # allowed-roots validation, no path-traversal check; those are
-        # unnecessary when the frontend sends the path from its own dropdown
-        # (populated from scanner roots).  Using the "business path" directly
-        # keeps dest_path consistent with scanner roots so that later folder
-        # derivation (in _save_source_metadata) works correctly.
-        if os.path.isabs(model_root):
-            base_dir = os.path.normpath(model_root)
-        else:
-            base_dir = os.path.normpath(os.path.join(os.getcwd(), "models", model_root))
+        # model_root must be one of the configured library roots: any HTTP
+        # client can call this endpoint, so a client-chosen directory is never
+        # trusted. The frontend sends the raw value from its roots dropdown;
+        # the comparison folds case (Windows) and separators, and the
+        # configured spelling is kept so dest_path stays consistent with the
+        # scanner roots for the later folder derivation.
+        try:
+            base_dir = os.path.normpath(match_configured_root(model_root))
+        except UnsafePathError as exc:
+            return web.json_response({"error": str(exc)}, status=400)
 
         if use_default_paths:
             target_dir = os.path.join(base_dir, *source.default_subdir_parts(repo))
         elif relative_path:
-            target_dir = os.path.join(base_dir, relative_path)
+            target_dir = os.path.join(base_dir, *relative_path.split("/"))
         else:
             target_dir = base_dir
 
         # Strip the repository sub-directory — "diffusion_models/xxx.safetensors"
         # is a repository convention, not meaningful for local storage.
-        file_base = os.path.basename(filename)
+        file_base = filename.replace("\\", "/").rsplit("/", 1)[-1]
+        try:
+            validate_path_segment(file_base)
+        except UnsafePathError:
+            return web.json_response({"error": "Invalid filename"}, status=400)
+
+        dest_path = os.path.join(target_dir, file_base)
+        if not is_within(base_dir, target_dir) or not is_within(base_dir, dest_path):
+            return web.json_response(
+                {"error": "Download path is outside the model root"}, status=400
+            )
 
         os.makedirs(target_dir, exist_ok=True)
-        dest_path = os.path.join(target_dir, file_base)
 
         # Built per request: sites that redirect to a CDN hand out a
         # time-limited token in the redirect, so the URL must never be cached.

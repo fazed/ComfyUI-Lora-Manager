@@ -609,11 +609,64 @@ def test_fetch_civitai_failure_returns_refreshed_entry(
     asyncio.run(scenario())
 
 
+def _register_download_root(monkeypatch, root: Path) -> None:
+    """model_root must be a configured library root; register *root*."""
+    from py.utils import library_roots
+
+    monkeypatch.setattr(
+        library_roots, "configured_download_roots", lambda config_obj=None: [str(root)]
+    )
+
+
+def test_download_model_rejects_unconfigured_model_root(
+    mock_service,
+    download_manager_stub,
+    tmp_path: Path,
+    monkeypatch,
+):
+    _register_download_root(monkeypatch, tmp_path / "loras")
+
+    async def scenario():
+        client = await create_test_client(mock_service)
+        try:
+            for root in (
+                str(tmp_path / "elsewhere"),
+                str(tmp_path / "loras_evil"),
+                str(tmp_path / "loras" / "sub"),
+                "loras",
+            ):
+                response = await client.post(
+                    "/api/lm/download-model",
+                    json={"model_id": 1, "model_root": root},
+                )
+                payload = await response.json()
+                assert response.status == 400, root
+                assert payload["success"] is False
+                assert "not a configured library root" in payload["error"]
+            response = await client.post(
+                "/api/lm/download-model",
+                json={
+                    "model_id": 1,
+                    "model_root": str(tmp_path / "loras"),
+                    "relative_path": "\\Users\\Public",
+                },
+            )
+            assert response.status == 400
+            assert download_manager_stub.calls == []
+        finally:
+            await client.close()
+
+    asyncio.run(scenario())
+
+
 def test_download_model_invokes_download_manager(
     mock_service,
     download_manager_stub,
     tmp_path: Path,
+    monkeypatch,
 ):
+    _register_download_root(monkeypatch, tmp_path)
+
     async def scenario():
         client = await create_test_client(mock_service)
         try:

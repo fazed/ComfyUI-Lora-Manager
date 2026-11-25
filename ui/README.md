@@ -296,6 +296,29 @@ upstream's `[TODO: Translate]` prefix. If upstream reorganises the
 | `tests/routes/test_misc_routes.py` | `downloadedVersionIds` from history for missing models; `download_queue_max_concurrent` validation. |
 | `tests/utils/test_civitai_utils_rewrite.py` | `build_civitai_thumbnail_url` / `build_civitai_video_still_url`. |
 
+**Path-safety hardening, phase A (11, in addition to the 32 above)**
+
+See [Path safety](#path-safety). Keep every guard when re-applying.
+
+| File | Change / behaviour to preserve |
+| --- | --- |
+| `py/routes/handlers/misc_handlers.py` | `get_example_workflow`: `validate_path_segment` + `.json` + `is_within` before any filesystem access. `get_trained_words` / `get_model_example_files`: `require_within_any(path, configured_download_roots())` before any filesystem access. |
+| `py/routes/handlers/model_handlers.py` | `ModelManagementHandler._require_in_library` guards `replace_preview`, `set_preview_from_url` (before the download), `save_metadata`, `add_tags`, `relink_civitai`, `verify_duplicates` (400). `ModelQueryHandler._require_known_model_path` (roots or cache entry) guards `get_model_metadata` / `get_model_description`. |
+| `py/routes/handlers/model_source_handlers.py` | `download_model_source`: `model_root` via `match_configured_root` (no more `cwd/models/<root>`), `relative_path` via `validate_relative_path`, file name via `validate_path_segment`, `is_within` on the target. |
+| `py/services/backup_service.py` | `restore_snapshot`: members via `validate_relative_path` + `safe_join(temp_dir, ...)`; a `model_update` member must be one safe `*.sqlite` name. |
+| `py/services/download_coordinator.py` | `schedule_download` calls `_validate_destination` (`model_root` must be a configured root, configured spelling passed on; `relative_path` validated, dropped when `use_default_paths`). Covers `/download-model`, the GET variant and the queue worker. |
+| `py/services/download_manager.py` | Joined `relative_path` (client or template) validated + `is_within`; remote file name decoded, reduced to its last component and checked with `validate_path_segment` (else "Unsafe file name from the model source"); `is_within` on `save_path` and in `_resolve_download_target_path`. |
+| `py/services/model_lifecycle_service.py` | `_require_path_in_library_roots` is a thin wrapper over `require_within_any` (normcase, fail closed on empty roots; objects without `get_model_roots` are not checked). |
+| `tests/services/test_model_lifecycle_service.py` | No-roots case now expects a rejection; prefix-sibling and Windows case tests. |
+| `tests/services/test_download_manager_basic.py` | Unsafe client/template `relative_path`, remote file-name payloads. |
+| `tests/routes/test_model_source_handlers.py` | Autouse fixture registers `tmp_path` as a download root; unconfigured-root and spelling-variant tests; updated error strings. |
+| `tests/routes/test_base_model_routes_smoke.py` | `_register_download_root`; unconfigured `model_root` rejected. |
+
+Fork-only files of this hardening: `py/utils/safe_paths.py`,
+`py/utils/library_roots.py`, `tests/utils/test_safe_paths.py`,
+`tests/routes/test_{example_workflows,model_handlers}_path_safety.py`,
+`tests/services/test_{backup_restore,download_destination}_path_safety.py`.
+
 No upstream docs were changed. A "Modern UI" link inside the classic UI
 pages would require more template edits, so it was left out; use `/lm-ui/`
 directly (the new UI links back to the classic one).
@@ -356,6 +379,33 @@ directly (the new UI links back to the classic one).
      `vitest run`).
 5. Re-derive the lists in this section and update the "Last synced upstream"
    line.
+
+## Path safety
+
+`py/utils/safe_paths.py` is the shared helper for request-supplied paths.
+It is a pure string check (no filesystem access unless `resolve=True`) and
+applies Windows and POSIX rules on every OS:
+
+* `validate_relative_path(value, allow_empty=False)`: `\` and `/` alike;
+  rejects a leading separator, any drive (`C:`, `\\srv\share`, `\\?\`,
+  `\\.\`), any `:` (drive-relative paths, NTFS streams), NUL/control
+  characters, `<>"|?*`, and segments that are empty, `.`/`..`, end in a space
+  or dot, or are reserved device names (`CON`, `NUL`, `COM1`-`9`, `LPT¹` ...).
+  Returns `"a/b"`.
+* `validate_path_segment(name)`: the same rules for one component.
+* `is_within(root, path)`, `safe_join(root, rel)`,
+  `require_within_any(path, roots)`: `abspath` + `normcase` + `commonpath`
+  (prefix siblings, case, other drives); fail closed without roots.
+* `reject_unc_or_device(path)`: for GET handlers whose path cannot be
+  checked against library roots. The current GET guards use
+  `require_within_any` instead, because a library root may itself be a UNC
+  share.
+
+`py/utils/library_roots.py` lists every configured library root
+(`configured_download_roots`) and matches a client `model_root` against it
+(`match_configured_root`). Why: Python 3.13 made `os.path.isabs('/x')` False
+on Windows, `os.path.join(base, '/x')` lands on the drive root, and plain
+cross-site GETs reach the API without an `Origin` header.
 
 ## Theming
 
