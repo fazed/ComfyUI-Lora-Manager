@@ -18,7 +18,7 @@ from .constants import (
     PATH_BUDGET_SUFFIX_ALLOWANCE,
 )
 from .sidecar_paths import get_sidecar_dir
-from .safe_paths import is_within
+from .safe_paths import UnsafePathError, is_absolute_like, is_within, validate_path_segment
 import asyncio
 
 logger = logging.getLogger(__name__)
@@ -128,8 +128,10 @@ def get_lora_info_absolute(lora_name):
         cache = await scanner.get_cached_data()
 
         # Stack producers can resolve an exact business path. Preserve it even
-        # when several indexed LoRAs share the same basename.
-        if os.path.isabs(lora_name):
+        # when several indexed LoRAs share the same basename. Python 3.13
+        # made os.path.isabs("/x") False on Windows; is_absolute_like keeps
+        # rooted and UNC business paths absolute on every version.
+        if is_absolute_like(lora_name):
             for item in cache.raw_data:
                 file_path = item.get("file_path")
                 if file_path and os.path.abspath(file_path) == os.path.abspath(lora_name):
@@ -730,6 +732,44 @@ def normalize_prompt_for_dedup(prompt) -> str:
     return re.sub(r"\s+", " ", prompt).strip().casefold()
 
 
+def _sanitize_template_segment(value: str) -> str:
+    """One folder segment: :func:`sanitize_folder_name` plus a device-name guard.
+
+    ``sanitize_folder_name`` replaces separators and ``:`` (so ``C:evil``
+    cannot become a drive); a reserved device name (``CON``, ``NUL.x``) gets
+    a trailing ``_`` so Windows creates a folder instead of opening a device.
+    """
+
+    cleaned = sanitize_folder_name(value, max_length=MAX_FOLDER_NAME_LENGTH)
+    if not cleaned:
+        return ""
+    try:
+        validate_path_segment(cleaned)
+    except UnsafePathError:
+        cleaned = f"{cleaned}_"
+    return cleaned
+
+
+def sanitize_template_path_value(value: Any) -> str:
+    """Sanitize a placeholder value that may span several folder levels.
+
+    Splits on ``/`` and ``\\``, drops empty, ``.`` and ``..`` segments and
+    sanitizes each remaining segment (see :func:`_sanitize_template_segment`).
+    A user mapping such as ``"XL/base"`` keeps its nesting.
+    """
+
+    if not isinstance(value, str) or not value:
+        return ""
+    segments = []
+    for raw in re.split(r"[\\/]+", value):
+        if raw.strip(" .") == "":
+            continue
+        cleaned = _sanitize_template_segment(raw)
+        if cleaned:
+            segments.append(cleaned)
+    return "/".join(segments)
+
+
 def calculate_relative_path_for_model(
     model_data: Dict[str, Any], model_type: str = "lora"
 ) -> str:
@@ -769,6 +809,12 @@ def calculate_relative_path_for_model(
     # Apply mapping if available
     base_model_mappings = settings_manager.get("base_model_path_mappings", {})
     mapped_base_model = base_model_mappings.get(base_model, base_model)
+
+    # base_model and author come from model metadata (CivitAI or a sidecar),
+    # so they must not inject separators, drives or "..". A user mapping may
+    # deliberately contain "/" for nested folders: sanitize per segment.
+    mapped_base_model = sanitize_template_path_value(mapped_base_model)
+    author = _sanitize_template_segment(str(author or ""))
 
     # Convert all tags to lowercase to avoid case sensitivity issues on Windows
     lowercase_tags = [tag.lower() for tag in model_tags if isinstance(tag, str)]

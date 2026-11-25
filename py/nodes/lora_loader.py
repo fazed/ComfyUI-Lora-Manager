@@ -11,6 +11,7 @@ from ..utils.lora_block_weight import (
 )
 from ..utils.lora_compat import LoraCompatibilityError, prepare_lora
 from ..utils.utils import get_lora_info_absolute
+from ..utils.safe_paths import is_absolute_like
 from .utils import (
     FlexibleOptionalInputType,
     any_type,
@@ -45,7 +46,7 @@ def _collect_stack_entries(lora_stack):
     for lora_path, model_strength, clip_strength in lora_stack:
         lora_name = extract_lora_name(lora_path)
         absolute_lora_path, trigger_words = get_lora_info_absolute(
-            lora_path if os.path.isabs(lora_path) else lora_name
+            lora_path if is_absolute_like(lora_path) else lora_name
         )
         entries.append({
             "name": lora_name,

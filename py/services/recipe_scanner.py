@@ -20,6 +20,7 @@ from ..utils.file_utils import calculate_autov3
 from ..utils.gc_utils import schedule_refreeze_after_rebuild
 from ..utils.recipe_open_stats import RecipeOpenStats
 from ..utils.recipes_paths import is_inside_recipes_dir
+from ..utils.safe_paths import is_absolute_like
 from .model_scanner import WEIGHT_FILE_EXTENSIONS
 from .recipe_cache import RecipeCache
 from .recipes.errors import (
@@ -3505,7 +3506,7 @@ class RecipeScanner:
         if normalized.startswith("/api/lm/previews?path="):
             return normalized
 
-        if os.path.isabs(normalized):
+        if is_absolute_like(normalized):
             return config.get_preview_static_url(normalized)
 
         return normalized

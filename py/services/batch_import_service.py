@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -12,6 +13,8 @@ from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Set
 
 from aiohttp import web
+
+from ..utils.safe_paths import is_absolute_like, is_unc_or_device, is_within
 
 from .recipes import (
     RecipeAnalysisService,
@@ -246,15 +249,53 @@ class BatchImportService:
         return url_pattern.match(url) is not None
 
     def _validate_local_path(self, path: str) -> bool:
-        try:
-            normalized = os.path.normpath(path)
-            if not os.path.isabs(normalized):
-                return False
-            if ".." in normalized:
-                return False
-            return True
-        except Exception:
+        """Accept an absolute local path; pure string check, no filesystem.
+
+        Absolute by design (the user picks any folder on disk), detected with
+        :func:`is_absolute_like` so rooted ``/x`` paths keep working on
+        Windows with Python 3.13. ``..`` is refused as a path *segment* (a
+        file named ``a..b.png`` is fine). UNC/device paths are refused unless
+        they lie inside a configured library root, the recipes folder or the
+        example-images folder: resolving an arbitrary ``//host/share``
+        would make Windows authenticate to that host.
+        """
+        if not isinstance(path, str) or not path.strip():
             return False
+        if any(ord(char) < 32 for char in path):
+            return False
+        if not is_absolute_like(path):
+            return False
+        if ".." in re.split(r"[\\/]+", path):
+            return False
+        if is_unc_or_device(path) and not self._unc_path_allowed(path):
+            return False
+        return True
+
+    @staticmethod
+    def _unc_path_allowed(path: str) -> bool:
+        roots: List[str] = []
+        try:
+            from ..utils.library_roots import configured_download_roots
+
+            roots.extend(configured_download_roots())
+        except Exception:  # pragma: no cover - config unavailable
+            pass
+        try:
+            from ..utils.recipes_paths import get_effective_recipes_dir
+
+            roots.append(get_effective_recipes_dir() or "")
+        except Exception:  # pragma: no cover - settings unavailable
+            pass
+        try:
+            from .settings_manager import get_settings_manager
+
+            roots.append(get_settings_manager().get("example_images_path") or "")
+        except Exception:  # pragma: no cover - settings unavailable
+            pass
+        return any(
+            isinstance(root, str) and is_unc_or_device(root) and is_within(root, path)
+            for root in roots
+        )
 
     def _is_duplicate_source(
         self,
@@ -370,6 +411,9 @@ class BatchImportService:
         directory: str,
         recursive: bool = True,
     ) -> List[str]:
+        # Same string rules as single files, before any filesystem access.
+        if not self._validate_local_path(directory):
+            raise RecipeValidationError(f"Invalid or unsafe directory: {directory}")
         if not os.path.isdir(directory):
             raise RecipeValidationError(f"Directory not found: {directory}")
 
