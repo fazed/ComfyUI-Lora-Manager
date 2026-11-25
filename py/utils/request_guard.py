@@ -182,6 +182,7 @@ READ_ONLY_GET_ROUTES: Mapping[str, str] = {
     "/api/lm/{prefix}/updates/status/{model_id}": "reads an update record; refresh=1 only re-fetches Civitai data into the cache",
     "/api/lm/{prefix}/updates/versions/{model_id}": "reads an update record; refresh=1 only re-fetches Civitai data into the cache",
     "/api/lm/{prefix}/updates/overview": "reads the updates overview",
+    "/api/lm/{prefix}/updates/old-versions": "reads owned older versions per model line (scanner cache + records)",
     "/api/lm/{prefix}/info/{name}": "reads model info",
     "/api/lm/wildcards/content": "reads wildcard file content",
     "/api/lm/wildcards/entries": "reads wildcard entries",

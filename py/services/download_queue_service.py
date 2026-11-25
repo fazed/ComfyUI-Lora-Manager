@@ -32,6 +32,22 @@ def _file_id_expr(table_prefix: str = "") -> str:
 _FILE_ID_SQL = _file_id_expr()
 
 
+def _retry_replace_fields(row: sqlite3.Row) -> tuple[Optional[str], Optional[str]]:
+    """Replace-after-download fields carried by a retry from history.
+
+    A failed / canceled download never ran its replace, so its targets are
+    still pending and go back to the queue unchanged (the completion
+    re-verifies everything anyway). Nothing else is carried: no targets, or
+    a replace that was already processed or interrupted.
+    """
+    keys = set(row.keys())
+    targets = row["replace_targets"] if "replace_targets" in keys else None
+    status = row["replace_status"] if "replace_status" in keys else None
+    if targets and status == "pending":
+        return targets, "pending"
+    return None, None
+
+
 def _resolve_database_path() -> str:
     base_dir = get_cache_base_dir(create=True)
     history_dir = os.path.join(base_dir, "download_history")
@@ -167,6 +183,15 @@ class DownloadQueueService:
                 }
                 if "destination" not in columns:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN destination TEXT")
+                # Replace-after-download (modern UI "Replace it"): JSON list of
+                # the old files to stage for deletion once this download has
+                # completed and been verified, each with its own outcome, plus
+                # the overall state (pending / running / done / interrupted).
+                # NULL = keep everything (the original behaviour).
+                if "replace_targets" not in columns:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN replace_targets TEXT")
+                if "replace_status" not in columns:
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN replace_status TEXT")
 
             # Creating the unique index on download_history.download_id can
             # fail if pre-existing rows have duplicate values (e.g. from a
@@ -234,6 +259,7 @@ class DownloadQueueService:
         file_params: Optional[dict[str, Any]] = None,
         deduplicate: bool = True,
         destination: Optional[dict[str, Any]] = None,
+        replace_targets: Optional[list[dict[str, Any]]] = None,
     ) -> dict[str, Any]:
         """Insert a new download into the queue.
 
@@ -245,6 +271,8 @@ class DownloadQueueService:
         now = time.time()
         file_params_json = json.dumps(file_params) if file_params is not None else None
         destination_json = json.dumps(destination) if destination else None
+        replace_json = json.dumps(replace_targets) if replace_targets else None
+        replace_status = "pending" if replace_targets else None
 
         async with self._lock:
             conn = self._get_conn()
@@ -296,8 +324,9 @@ class DownloadQueueService:
                 INSERT OR IGNORE INTO download_queue (
                     download_id, model_id, model_version_id, model_name,
                     version_name, thumbnail_url, source, file_params,
-                    destination, status, priority, added_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?)
+                    destination, replace_targets, replace_status,
+                    status, priority, added_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?)
                 """,
                 (
                     download_id,
@@ -309,6 +338,8 @@ class DownloadQueueService:
                     source,
                     file_params_json,
                     destination_json,
+                    replace_json,
+                    replace_status,
                     now,
                 ),
             )
@@ -513,6 +544,12 @@ class DownloadQueueService:
             destination_json = (
                 row["destination"] if "destination" in queue_columns else None
             )
+            replace_json = (
+                row["replace_targets"] if "replace_targets" in queue_columns else None
+            )
+            replace_status = (
+                row["replace_status"] if "replace_status" in queue_columns else None
+            )
             conn.execute(
                 "DELETE FROM download_queue WHERE download_id = ?",
                 (download_id,),
@@ -522,9 +559,10 @@ class DownloadQueueService:
                 INSERT OR IGNORE INTO download_history (
                     download_id, model_id, model_version_id, model_name,
                     version_name, thumbnail_url, file_params, destination,
+                    replace_targets, replace_status,
                     status, error, file_path, bytes_downloaded, total_bytes,
                     completed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     row["download_id"],
@@ -535,6 +573,8 @@ class DownloadQueueService:
                     row["thumbnail_url"],
                     file_params_json,
                     destination_json,
+                    replace_json,
+                    replace_status,
                     status,
                     error,
                     file_path,
@@ -754,8 +794,9 @@ class DownloadQueueService:
                 INSERT INTO download_queue (
                     download_id, model_id, model_version_id, model_name,
                     version_name, thumbnail_url, source, file_params,
-                    destination, status, priority, added_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?)
+                    destination, replace_targets, replace_status,
+                    status, priority, added_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?)
                 """,
                 (
                     new_id,
@@ -767,6 +808,7 @@ class DownloadQueueService:
                     "retry",
                     row["file_params"],
                     row["destination"],
+                    *_retry_replace_fields(row),
                     now,
                 ),
             )
@@ -809,8 +851,9 @@ class DownloadQueueService:
                     INSERT INTO download_queue (
                         download_id, model_id, model_version_id, model_name,
                         version_name, thumbnail_url, source, file_params,
-                        destination, status, priority, added_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?)
+                        destination, replace_targets, replace_status,
+                        status, priority, added_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued', 0, ?)
                     """,
                     (
                         new_id,
@@ -822,6 +865,7 @@ class DownloadQueueService:
                         "retry",
                         row["file_params"],
                         row["destination"],
+                        *_retry_replace_fields(row),
                         now,
                     ),
                 )
@@ -833,6 +877,87 @@ class DownloadQueueService:
             conn.commit()
 
         return count
+
+    # ------------------------------------------------------------------
+    # Replace-after-download bookkeeping (see version_replace.py)
+    # ------------------------------------------------------------------
+
+    async def claim_replace(self, download_id: str) -> Optional[dict[str, Any]]:
+        """Claim the pending replace of a completed download exactly once.
+
+        Atomically moves ``replace_status`` from ``pending`` to ``running``
+        for a history row whose download ``completed``; returns that row, or
+        ``None`` when there is nothing to do (no targets, not completed,
+        already claimed, processed or interrupted). This compare-and-set is
+        what makes a second completion hook, a retry or a restart unable to
+        run the same replace twice.
+        """
+        async with self._lock:
+            conn = self._get_conn()
+            cursor = conn.execute(
+                "UPDATE download_history SET replace_status = 'running' "
+                "WHERE download_id = ? AND status = 'completed' "
+                "AND replace_status = 'pending' AND replace_targets IS NOT NULL",
+                (download_id,),
+            )
+            conn.commit()
+            if cursor.rowcount <= 0:
+                return None
+            row = conn.execute(
+                "SELECT * FROM download_history WHERE download_id = ?",
+                (download_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    async def finish_replace(
+        self,
+        download_id: str,
+        targets: list[dict[str, Any]],
+        status: str = "done",
+    ) -> bool:
+        """Record the per-target outcome of a claimed replace."""
+        async with self._lock:
+            conn = self._get_conn()
+            cursor = conn.execute(
+                "UPDATE download_history SET replace_targets = ?, replace_status = ? "
+                "WHERE download_id = ? AND replace_status = 'running'",
+                (json.dumps(targets), status, download_id),
+            )
+            conn.commit()
+        return cursor.rowcount > 0
+
+    async def interrupt_stale_replaces(self, note: str = "interrupted") -> int:
+        """Startup sweep: never resume a replace after a restart.
+
+        A completed download whose replace was still ``pending`` (the process
+        stopped between the download and the replace) or ``running`` (stopped
+        during it) is marked ``interrupted`` and every unprocessed target is
+        recorded as kept. Nothing is deleted later behind the user's back.
+        """
+        async with self._lock:
+            conn = self._get_conn()
+            rows = conn.execute(
+                "SELECT download_id, replace_targets FROM download_history "
+                "WHERE status = 'completed' AND replace_status IN ('pending', 'running')"
+            ).fetchall()
+            for row in rows:
+                try:
+                    targets = json.loads(row["replace_targets"] or "[]")
+                except (TypeError, json.JSONDecodeError):
+                    targets = []
+                if not isinstance(targets, list):
+                    targets = []
+                for target in targets:
+                    if isinstance(target, dict) and not target.get("status"):
+                        target["status"] = "kept"
+                        target["note"] = note
+                conn.execute(
+                    "UPDATE download_history SET replace_targets = ?, "
+                    "replace_status = 'interrupted' WHERE download_id = ?",
+                    (json.dumps(targets), row["download_id"]),
+                )
+            conn.commit()
+        return len(rows)
 
     # ------------------------------------------------------------------
     # Persistent queue state (e.g. the queue worker's global pause flag)

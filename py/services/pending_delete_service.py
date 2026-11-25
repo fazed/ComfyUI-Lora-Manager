@@ -141,8 +141,13 @@ class PendingDeleteService:
         main_extension: Optional[str],
         original_file_path: str,
         cached_entry: Optional[Dict[str, Any]],
+        ttl_seconds: Optional[int] = None,
     ) -> Optional[str]:
         """Rename a model's artifacts into a sibling-of-model staging batch.
+
+        ``ttl_seconds`` overrides the undo window for this batch (default
+        ``PENDING_DELETE_TTL_SECONDS``); the fork's background replace after
+        a download uses a longer one so the user can still undo it.
 
         The batch dir is created inside the model file's OWN directory
         (``target_dir``), so staging/undo renames stay within one real
@@ -201,7 +206,12 @@ class PendingDeleteService:
                     batch_id=batch_id,
                     kind="model",
                     model_type=self._resolve_model_type(scanner),
-                    expires_at=int(time.time()) + PENDING_DELETE_TTL_SECONDS,
+                    expires_at=int(time.time())
+                    + (
+                        int(ttl_seconds)
+                        if ttl_seconds is not None and int(ttl_seconds) > 0
+                        else PENDING_DELETE_TTL_SECONDS
+                    ),
                     entries=staged_pairs,
                     model_snapshot=cached_entry,
                 )

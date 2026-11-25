@@ -182,8 +182,12 @@ class DownloadQueueWorker:
         clock: Callable[[], float] = time.time,
         safety_poll_seconds: float = DEFAULT_SAFETY_POLL_SECONDS,
         startup_delay_seconds: float = DEFAULT_STARTUP_DELAY_SECONDS,
+        replace_runner: Optional[Callable[[str, DownloadQueueService], Awaitable[Any]]] = None,
     ) -> None:
         self._download_runner = download_runner
+        # Replace-after-download (version_replace.run_replace_for_download);
+        # injectable so tests use fake scanners / lifecycle services.
+        self._replace_runner = replace_runner
         # Resolved at call time so tests can swap the singleton.
         self._queue_service_factory = queue_service_factory or (
             lambda: DownloadQueueService.get_instance()
@@ -420,6 +424,12 @@ class DownloadQueueWorker:
         if not isinstance(result, dict):
             return result
         if result.get("success", False):
+            if not (
+                result.get("skipped")
+                or result.get("cancelled")
+                or result.get("status") == "skipped"
+            ):
+                await self._run_replace(download_id)
             return result
         if result.get("reason") == "rate_limited":
             # The download manager already put the row back to 'queued'
@@ -430,6 +440,29 @@ class DownloadQueueWorker:
             download_id, str(result.get("error") or "Download failed")
         )
         return result
+
+    async def _run_replace(self, download_id: str) -> None:
+        """Stage the old version(s) the user chose to replace (never raises).
+
+        Only a download whose history row says ``completed`` and whose replace
+        is still ``pending`` is processed (``claim_replace``); everything is
+        re-verified in ``version_replace``. A failure here never changes the
+        download's own result.
+        """
+        try:
+            service = await self._queue_service_factory()
+            if self._replace_runner is not None:
+                await self._replace_runner(download_id, service)
+                return
+            from .version_replace import run_replace_for_download
+
+            await run_replace_for_download(download_id, queue_service=service)
+        except Exception:
+            logger.warning(
+                "Replace after download %s failed; the old file was kept",
+                download_id,
+                exc_info=True,
+            )
 
     async def _close_failed_row(self, download_id: str, error: str) -> None:
         """Move a row that is still waiting in the queue to history as failed.
@@ -528,6 +561,20 @@ class DownloadQueueWorker:
                 "Download queue worker: re-queued %d interrupted download(s)",
                 len(recovered),
             )
+        # A replace that did not finish before the restart is never resumed
+        # later: it is marked interrupted and the old files are kept.
+        sweep = getattr(service, "interrupt_stale_replaces", None)
+        if callable(sweep):
+            try:
+                interrupted = await sweep()
+                if interrupted:
+                    logger.info(
+                        "Download queue worker: %d unfinished replace(s) marked "
+                        "interrupted; the old files were kept",
+                        interrupted,
+                    )
+            except Exception:
+                logger.warning("Could not sweep unfinished replaces", exc_info=True)
         return recovered
 
 
