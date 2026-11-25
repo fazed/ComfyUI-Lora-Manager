@@ -90,6 +90,7 @@ from ...utils.example_images_paths import (
     is_valid_example_images_root,
 )
 from ...utils.lora_metadata import extract_trained_words
+from ...utils.safe_paths import UnsafePathError, is_within, validate_path_segment
 from ...utils.session_logging import get_standalone_session_log_snapshot
 from ...utils.sidecar_paths import (
     describe_sidecar_root,
@@ -1804,10 +1805,29 @@ class ExampleWorkflowsHandler:
                     }
                 )
 
-            workflows_dir = self._get_workflows_dir()
-            filepath = os.path.join(workflows_dir, filename)
+            # The name is a URL segment (aiohttp decodes %2F and %5C in
+            # match_info), so it must be one plain .json file name inside the
+            # examples directory. Validate before any filesystem access: a UNC
+            # name would otherwise open an SMB connection on Windows.
+            try:
+                safe_name = validate_path_segment(filename)
+            except UnsafePathError:
+                return web.json_response(
+                    {"success": False, "error": "Invalid workflow name"}, status=400
+                )
+            if not safe_name.lower().endswith(".json"):
+                return web.json_response(
+                    {"success": False, "error": "Invalid workflow name"}, status=400
+                )
 
-            if not os.path.exists(filepath):
+            workflows_dir = self._get_workflows_dir()
+            filepath = os.path.join(workflows_dir, safe_name)
+            if not is_within(workflows_dir, filepath):
+                return web.json_response(
+                    {"success": False, "error": "Invalid workflow name"}, status=400
+                )
+
+            if not os.path.isfile(filepath):
                 return web.json_response(
                     {"success": False, "error": f"Workflow not found: {filename}"},
                     status=404,
