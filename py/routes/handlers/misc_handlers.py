@@ -3333,6 +3333,19 @@ class ModelLibraryHandler:
             if downloaded:
                 model_id = data.get("modelId")
                 file_path = data.get("filePath")
+                # The stored path is shown and acted on later: only accept a
+                # path inside the configured library roots (pure string check).
+                if isinstance(file_path, str) and file_path:
+                    try:
+                        require_within_any(
+                            file_path,
+                            library_roots.configured_download_roots(),
+                            label="filePath",
+                        )
+                    except UnsafePathError as exc:
+                        return web.json_response(
+                            {"success": False, "error": str(exc)}, status=400
+                        )
                 await history_service.mark_downloaded(
                     model_type,
                     model_version_id,

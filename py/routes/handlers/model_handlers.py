@@ -2718,6 +2718,21 @@ class ModelDownloadHandler:
             status = request.query.get("status", "completed")
             error = request.query.get("error")
             file_path = request.query.get("file_path")
+            if file_path:
+                # History rows are shown and acted on later (open location,
+                # retry): only record a path inside the library roots. Local
+                # import keeps this fork change self-contained.
+                from ...utils.library_roots import configured_download_roots
+                from ...utils.safe_paths import UnsafePathError, require_within_any
+
+                try:
+                    require_within_any(
+                        file_path, configured_download_roots(), label="file_path"
+                    )
+                except UnsafePathError as exc:
+                    return web.json_response(
+                        {"success": False, "error": str(exc)}, status=400
+                    )
             try:
                 bytes_downloaded = int(request.query.get("bytes_downloaded", "0"))
             except (TypeError, ValueError):

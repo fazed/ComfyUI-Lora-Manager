@@ -40,6 +40,7 @@ from .services.websocket_manager import ws_manager
 from .services.example_images_cleanup_service import ExampleImagesCleanupService
 from .middleware.csp_middleware import relax_csp_for_remote_media
 from .middleware.error_middleware import api_json_error
+from .utils.request_guard import install_request_guard
 from .utils.gc_utils import freeze_long_lived_objects
 
 logger = logging.getLogger(__name__)
@@ -88,6 +89,11 @@ class LoraManager:
         # middleware so it catches errors from all other middlewares.
         if api_json_error not in app.middlewares:
             app.middlewares.insert(0, api_json_error)
+
+        # Fork: reject cross-site requests to state-changing GET routes
+        # (CSRF guard, see py/utils/request_guard.py). Runs right after the
+        # JSON error middleware, before any handler.
+        install_request_guard(app)
 
         if relax_csp_for_remote_media not in app.middlewares:
             # Ensure CSP relaxer executes after ComfyUI's block_external_middleware so it can

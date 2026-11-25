@@ -8,6 +8,7 @@ from typing import Any, cast
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from py.middleware.cache_middleware import cache_control
 from py.middleware.error_middleware import api_json_error
+from py.utils.request_guard import request_guard
 from py.utils.settings_paths import SETTINGS_DIR_ENV, ensure_settings_file
 
 # Set environment variable to indicate standalone mode
@@ -193,7 +194,9 @@ class StandaloneServer:
     client_id: Any = None
 
     def __init__(self):
-        middlewares: list[Any] = [api_json_error, cache_control]
+        # request_guard: fork CSRF guard for state-changing GET routes
+        # (py/utils/request_guard.py); keep it right after api_json_error.
+        middlewares: list[Any] = [api_json_error, request_guard, cache_control]
         self.app = web.Application(
             logger=logger,
             middlewares=middlewares,
