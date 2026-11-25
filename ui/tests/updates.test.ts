@@ -509,7 +509,7 @@ describe('UpdatesPage', () => {
   it('remembers the model type and reloads that type', async () => {
     const { calls } = backend()
     ;({ wrapper } = await mountPage())
-    const typeButton = wrapper.findAll('[role="group"] button').find((b) => b.text() === 'Checkpoints')!
+    const typeButton = wrapper.findAll('[role="group"] button').find((b) => b.text().startsWith('Checkpoints'))!
     await typeButton.trigger('click')
     await flushPromises()
     expect(localStorage.getItem('lm-ui.updates.type')).toBe('checkpoints')
@@ -727,32 +727,66 @@ describe('UpdatesPage', () => {
   })
 })
 
-// --- top bar -------------------------------------------------------------------
+// --- top bar and likely counts ------------------------------------------------
+
+/** A backend whose overview per type reports the given likely count. */
+function countsBackend(likely: Partial<Record<'loras' | 'checkpoints' | 'embeddings', number>>) {
+  const overrides: Record<string, () => Response> = {}
+  for (const [prefix, count] of Object.entries(likely)) {
+    overrides[`GET /api/lm/${prefix}/updates/overview`] = () =>
+      jsonResponse({ ...overviewFixture(), totals: { ...overviewFixture().totals, likely: count } })
+  }
+  return backend(overrides)
+}
+
+const overviewCalls = (calls: Call[]) => calls.filter((call) => call.url.endsWith('/updates/overview'))
+
+async function mountTopBar(path = '/loras') {
+  const router = createRouter({ history: createMemoryHistory(), routes })
+  await router.push(path)
+  return mount(TopBar, { global: { plugins: [router] } })
+}
+
+function setVisibility(state: 'visible' | 'hidden') {
+  Object.defineProperty(document, 'visibilityState', { value: state, configurable: true })
+  document.dispatchEvent(new Event('visibilitychange'))
+}
 
 describe('top bar Updates link', () => {
-  it('links to /updates and shows the likely count once loaded (GET only, lazily)', async () => {
+  afterEach(() => {
+    vi.useRealTimers()
+    setVisibility('visible')
+  })
+
+  it('links to /updates; the badge sums the types and names the split (GET only, lazily)', async () => {
     vi.useFakeTimers()
-    const { calls } = backend()
-    const router = createRouter({ history: createMemoryHistory(), routes })
-    await router.push('/loras')
-    const bar = mount(TopBar, { global: { plugins: [router] } })
+    const { calls } = countsBackend({ loras: 3, checkpoints: 1, embeddings: 0 })
+    const bar = await mountTopBar()
     await flushPromises()
-    expect(calls.some((call) => call.url.includes('updates/overview'))).toBe(false)
+    expect(overviewCalls(calls)).toEqual([])
     await vi.advanceTimersByTimeAsync(1600)
     await flushPromises()
-    vi.useRealTimers()
-    await flushPromises()
-    const overviews = calls.filter((call) => call.url.endsWith('/updates/overview'))
-    expect(overviews.map((call) => call.url)).toEqual([
+    expect(overviewCalls(calls).map((call) => call.url)).toEqual([
       '/api/lm/loras/updates/overview',
       '/api/lm/checkpoints/updates/overview',
       '/api/lm/embeddings/updates/overview',
     ])
-    expect(overviews.every((call) => call.method === 'GET')).toBe(true)
+    expect(calls.every((call) => call.method === 'GET')).toBe(true)
     const link = bar.get('[data-testid="topbar-updates"]')
     expect(link.attributes('href')).toBe('/updates')
-    expect(link.attributes('aria-label')).toBe('Updates: 3 likely updates')
-    expect(link.text()).toContain('3')
+    expect(link.attributes('aria-label')).toBe('Updates: 4 likely updates (LoRAs 3, Checkpoints 1)')
+    expect(link.attributes('title')).toBe(link.attributes('aria-label'))
+    expect(link.text()).toContain('4')
+    bar.unmount()
+  })
+
+  it('uses the singular for one update', async () => {
+    countsBackend({ loras: 0, checkpoints: 1, embeddings: 0 })
+    await useUpdatesSummary().refreshLikelyCounts()
+    const bar = await mountTopBar()
+    expect(bar.get('[data-testid="topbar-updates"]').attributes('aria-label')).toBe(
+      'Updates: 1 likely update (Checkpoints 1)',
+    )
     bar.unmount()
   })
 
@@ -762,8 +796,137 @@ describe('top bar Updates link', () => {
       'GET /api/lm/checkpoints/updates/overview': () => new Response('Not Found', { status: 404 }),
       'GET /api/lm/embeddings/updates/overview': () => new Response('Not Found', { status: 404 }),
     })
-    await useUpdatesSummary().loadOnce()
+    await useUpdatesSummary().refreshLikelyCounts()
     expect(useUpdatesSummary().total.value).toBe(0)
     expect(useToasts().toasts.value).toEqual([])
+    const bar = await mountTopBar()
+    expect(bar.get('[data-testid="topbar-updates"]').attributes('aria-label')).toBe('Updates')
+    bar.unmount()
+  })
+
+  it('never reads twice while a read is running, and skips fresh counts', async () => {
+    const { calls } = countsBackend({ loras: 2 })
+    const summary = useUpdatesSummary()
+    const first = summary.refreshLikelyCounts()
+    const second = summary.refreshLikelyCounts()
+    expect(second).toBe(first)
+    await first
+    expect(overviewCalls(calls)).toHaveLength(3)
+    await summary.refreshLikelyCounts()
+    expect(overviewCalls(calls)).toHaveLength(3)
+    await summary.refreshLikelyCounts({ force: true })
+    expect(overviewCalls(calls)).toHaveLength(6)
+  })
+
+  it('re-reads stale counts after a minute', async () => {
+    vi.useFakeTimers()
+    const { calls } = countsBackend({ loras: 2 })
+    const summary = useUpdatesSummary()
+    await summary.refreshLikelyCounts()
+    vi.advanceTimersByTime(30_000)
+    await summary.refreshLikelyCounts()
+    expect(overviewCalls(calls)).toHaveLength(3)
+    vi.advanceTimersByTime(31_000)
+    await summary.refreshLikelyCounts()
+    expect(overviewCalls(calls)).toHaveLength(6)
+  })
+
+  it('re-reads when the tab becomes visible again, at most every 5 minutes', async () => {
+    vi.useFakeTimers()
+    const { calls } = countsBackend({ loras: 1 })
+    const bar = await mountTopBar()
+    await vi.advanceTimersByTimeAsync(1600)
+    await flushPromises()
+    expect(overviewCalls(calls)).toHaveLength(3)
+    // Back after a minute: within the throttle, nothing.
+    setVisibility('hidden')
+    await vi.advanceTimersByTimeAsync(60_000)
+    setVisibility('visible')
+    await flushPromises()
+    expect(overviewCalls(calls)).toHaveLength(3)
+    // Back after more than 5 minutes: one re-read of every type.
+    setVisibility('hidden')
+    await vi.advanceTimersByTimeAsync(5 * 60_000)
+    setVisibility('visible')
+    await flushPromises()
+    expect(overviewCalls(calls)).toHaveLength(6)
+    expect(calls.every((call) => call.method === 'GET')).toBe(true)
+    bar.unmount()
+  })
+})
+
+describe('likely counts on the Updates page', () => {
+  let wrapper: VueWrapper | null = null
+  afterEach(() => {
+    wrapper?.unmount()
+    wrapper = null
+    vi.useRealTimers()
+  })
+
+  const typeButton = (prefix: string) => wrapper!.get(`[data-testid="updates-type-${prefix}"]`)
+
+  it("the type buttons show each type's likely count once known", async () => {
+    const { calls } = countsBackend({ loras: 3, checkpoints: 1, embeddings: 0 })
+    ;({ wrapper } = await mountPage())
+    await flushPromises()
+    expect(typeButton('loras').text()).toBe('LoRAs 3, 3 likely updates')
+    expect(typeButton('loras').attributes('title')).toBe('3 likely updates')
+    expect(typeButton('checkpoints').text()).toBe('Checkpoints 1, 1 likely update')
+    expect(typeButton('embeddings').text()).toBe('Embeddings 0, 0 likely updates')
+    // The page read its own type; the summary only added the others.
+    expect(overviewCalls(calls).map((call) => call.url)).toEqual([
+      '/api/lm/loras/updates/overview',
+      '/api/lm/checkpoints/updates/overview',
+      '/api/lm/embeddings/updates/overview',
+    ])
+    expect(useUpdatesSummary().total.value).toBe(4)
+  })
+
+  it('an unknown count shows no number', async () => {
+    backend({
+      'GET /api/lm/checkpoints/updates/overview': () => new Response('Not Found', { status: 404 }),
+    })
+    ;({ wrapper } = await mountPage())
+    await flushPromises()
+    expect(typeButton('checkpoints').text()).toBe('Checkpoints')
+    expect(typeButton('checkpoints').attributes('title')).toBeUndefined()
+  })
+
+  it('Check now updates the count of the checked type and re-reads stale types', async () => {
+    vi.useFakeTimers()
+    const { calls, state } = countsBackend({ checkpoints: 1, embeddings: 0 })
+    ;({ wrapper } = await mountPage())
+    await flushPromises()
+    expect(useUpdatesSummary().total.value).toBe(2)
+    vi.advanceTimersByTime(61_000)
+    state.overview = { ...overviewFixture(), totals: { ...overviewFixture().totals, likely: 5 } }
+    const before = overviewCalls(calls).length
+    await wrapper.findAll('button').find((b) => b.text() === 'Check now')!.trigger('click')
+    await answerConfirm(true)
+    await flushPromises()
+    expect(useUpdatesSummary().total.value).toBe(6)
+    expect(overviewCalls(calls).slice(before).map((call) => call.url)).toEqual([
+      '/api/lm/loras/updates/overview',
+      '/api/lm/checkpoints/updates/overview',
+      '/api/lm/embeddings/updates/overview',
+    ])
+  })
+
+  it('a finished queued update refreshes the counts', async () => {
+    const { state } = backend()
+    ;({ wrapper } = await mountPage())
+    await flushPromises()
+    expect(useUpdatesSummary().byPrefix.loras).toBe(1)
+    state.setQueue([{ download_id: 'q1', model_version_id: 11, status: 'queued' }] as QueueItem[])
+    await wrapper.get('button[aria-label="Update Ink Style to v2.0"]').trigger('click')
+    await flushPromises()
+    state.setQueue([])
+    state.setHistory([{ download_id: 'q1', model_version_id: 11, status: 'completed' }] as QueueItem[])
+    state.overview = { ...overviewFixture(), totals: { ...overviewFixture().totals, likely: 0 } }
+    const { useDownloadQueue } = await import('@/composables/useDownloadQueue')
+    await useDownloadQueue().refresh()
+    await flushPromises()
+    expect(useUpdatesSummary().byPrefix.loras).toBe(0)
+    expect(typeButton('loras').text()).toBe('LoRAs 0, 0 likely updates')
   })
 })

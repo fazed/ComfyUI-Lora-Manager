@@ -1829,10 +1829,21 @@ candidates stay likely (39 become `new_label`, 22 `same_version_number`).
 * **Refresh** (`r` / the header button) re-reads the overview only: no scan
   and no Civitai request.
 * **Top bar**: an Updates link left of Downloads with a badge of likely
-  updates over all types. The counts are fetched once, 1.5 s after the shell
-  mounted, from the same read-only endpoint (one GET per type, sequentially,
-  failures silent so an older backend without the endpoint shows no badge);
-  the page updates its type's count after each load. No polling.
+  updates over **all** types (LoRAs + checkpoints + embeddings), so it can be
+  higher than the page's Likely chip, which counts the active type only. The
+  link's name and tooltip list the split ("Updates: 4 likely updates (LoRAs
+  3, Checkpoints 1)", only types with updates). The counts live in
+  `useUpdatesSummary` and are read by `refreshLikelyCounts()` from the same
+  read-only endpoint (one GET per type, sequentially, failures silent so an
+  older backend without the endpoint shows no badge; a call while a read
+  runs joins it; a type read less than 60 s ago is skipped unless forced).
+  Triggers: 1.5 s after the shell mounted; every overview load of the page
+  (page load, type switch, Refresh / `r`, after Check now, after a queued
+  update finished), which sets its own type and re-reads the stale others;
+  and the tab becoming visible again (`useDocumentVisibility`, forced, at
+  most every 5 minutes). No polling, no scan, never a Civitai request.
+* **Type buttons** show each type's likely count once it is known (screen
+  readers hear "LoRAs, 3 likely updates").
 * **States and a11y**: skeleton rows while loading, `StateBlock` error with
   Retry (a 404 says the backend needs a restart), empty state with Check now;
   `h1` + an `h2` per list + `h3` per row, a native `ul`, text labels on

@@ -32,6 +32,18 @@ export function isUpdatePrefix(value: unknown): value is ModelPrefix {
   return typeof value === 'string' && (UPDATE_PREFIXES as string[]).includes(value)
 }
 
+/** "LoRAs 3, Checkpoints 1": the likely counts per type, only types with updates. */
+export function likelySplitText(byPrefix: Readonly<Partial<Record<ModelPrefix, number>>>): string {
+  return UPDATE_PREFIXES.filter((prefix) => (byPrefix[prefix] ?? 0) > 0)
+    .map((prefix) => t('topbar.updatesSplitItem', { type: t(LIBRARIES[prefix].title), count: byPrefix[prefix]! }))
+    .join(', ')
+}
+
+/** "3 likely updates" (title / screen-reader text of a type button). */
+export function typeLikelyText(count: number): string {
+  return t('updates.typeLikely', { count, updates: count === 1 ? t('updates.update') : t('updates.updatesWord') })
+}
+
 export function isVisible(candidate: UpdateCandidate): boolean {
   return candidate.hiddenBecause.length === 0
 }

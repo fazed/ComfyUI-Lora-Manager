@@ -17,7 +17,7 @@ import type { ModelPrefix, UpdateCandidate, UpdateGroup } from '@/api/types'
 import { useAppSettings } from '@/composables/useAppSettings'
 import { useConfirm, useToasts } from '@/composables/useFeedback'
 import { useRefreshHandler } from '@/composables/useRefresh'
-import { useUpdates } from '@/composables/useUpdates'
+import { useUpdates, useUpdatesSummary } from '@/composables/useUpdates'
 import { LIBRARIES } from '@/config/libraries'
 import {
   checkedAgoText,
@@ -27,6 +27,7 @@ import {
   groupsForFilter,
   isUpdatePrefix,
   primaryCandidate,
+  typeLikelyText,
   UPDATE_PREFIXES,
   UPDATES_FILTERS,
   type UpdatesFilter,
@@ -45,6 +46,8 @@ const prefix = computed<ModelPrefix>({
 const filter = ref<UpdatesFilter>('likely')
 
 const updates = useUpdates(prefix)
+/** Likely count per type (shared with the top-bar badge); missing until read. */
+const likelyByType = useUpdatesSummary().byPrefix
 const { overview, loading, error, errorStatus } = updates
 
 const blurMature = computed(() => settings.value?.blur_mature_content !== false)
@@ -168,9 +171,15 @@ const segmentGroup = 'inline-flex flex-none rounded-md hairline border-field-bor
           type="button"
           :class="segment"
           :aria-pressed="prefix === value"
+          :title="likelyByType[value] !== undefined ? typeLikelyText(likelyByType[value]!) : undefined"
+          :data-testid="`updates-type-${value}`"
           @click="prefix = value"
         >
           {{ typeLabel(value) }}
+          <template v-if="likelyByType[value] !== undefined">
+            <span class="tabular-nums" :class="prefix === value ? 'text-accent' : 'text-muted'" aria-hidden="true">{{ likelyByType[value] }}</span>
+            <span class="sr-only">, {{ typeLikelyText(likelyByType[value]!) }}</span>
+          </template>
         </button>
       </div>
       <div :class="segmentGroup" role="group" :aria-label="t('updates.filterLabel')">

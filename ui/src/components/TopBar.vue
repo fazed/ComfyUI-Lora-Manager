@@ -9,12 +9,13 @@
  */
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useEventListener, useTimeoutFn } from '@vueuse/core'
+import { useEventListener } from '@vueuse/core'
 import AppIcon from './AppIcon.vue'
 import AppMenu from './AppMenu.vue'
 import SearchCombobox from './SearchCombobox.vue'
 import { useDownloadQueue } from '@/composables/useDownloadQueue'
-import { useUpdatesSummary } from '@/composables/useUpdates'
+import { useLikelyCountsTriggers, useUpdatesSummary } from '@/composables/useUpdates'
+import { likelySplitText } from '@/utils/updates'
 import { stashItem } from '@/composables/useSearch'
 import { GLOBAL_PER_GROUP, MAX_TAGS, GLOBAL_TAG_SCOPE } from '@/api/suggestSource'
 import {
@@ -28,9 +29,6 @@ import {
 } from '@/config/navigation'
 import type { SuggestOption } from '@/utils/suggest'
 import { t } from '@/i18n'
-
-/** Delay before the top bar asks for the update counts (keeps the first paint free). */
-const UPDATES_BADGE_DELAY_MS = 1500
 
 const route = useRoute()
 const router = useRouter()
@@ -47,8 +45,10 @@ const queueLabel = computed(() =>
 const onDownloads = computed(() => isNavActive('/downloads', route.path))
 const onUpdates = computed(() => isNavActive('/updates', route.path))
 
-// Likely-update count for the badge: read once, after the shell is up (read-only
-// overview endpoint, no polling, never a Civitai request). The page keeps it current.
+// Likely-update count for the badge, with the split per type in its name and
+// tooltip. Read-only overview endpoint, never a scan or a Civitai request:
+// after the shell is up, after each Updates page load and when the tab
+// becomes visible again (throttled). No polling.
 const updatesSummary = useUpdatesSummary()
 const likelyUpdates = updatesSummary.total
 const updatesLabel = computed(() =>
@@ -56,10 +56,11 @@ const updatesLabel = computed(() =>
     ? t('topbar.updatesCount', {
         count: likelyUpdates.value,
         updates: likelyUpdates.value === 1 ? t('updates.update') : t('updates.updatesWord'),
+        split: likelySplitText(updatesSummary.byPrefix),
       })
     : t('topbar.updates'),
 )
-useTimeoutFn(() => void updatesSummary.loadOnce(), UPDATES_BADGE_DELAY_MS)
+useLikelyCountsTriggers()
 const onSettings = computed(() => isNavActive('/settings', route.path))
 
 // The results page owns the text while it is open; leaving it empties the box.

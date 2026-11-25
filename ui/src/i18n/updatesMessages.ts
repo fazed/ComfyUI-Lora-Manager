@@ -7,7 +7,9 @@
 export const updatesMessages = {
   'nav.updates': 'Updates',
   'topbar.updates': 'Updates',
-  'topbar.updatesCount': 'Updates: {count} likely {updates}',
+  'topbar.updatesCount': 'Updates: {count} likely {updates} ({split})',
+  'topbar.updatesSplitItem': '{type} {count}',
+  'updates.typeLikely': '{count} likely {updates}',
   'updates.title': 'Updates',
   'updates.typeLabel': 'Model type',
   'updates.filterLabel': 'Show',
