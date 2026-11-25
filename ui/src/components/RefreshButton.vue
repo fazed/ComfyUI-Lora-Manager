@@ -6,7 +6,9 @@
  * - `icon` (default): a 36px icon button with the "Refresh" accessible name.
  * - `row`: a full-width labelled 44px row (the phone filter sheet).
  *
- * While a refresh runs the icon turns (transform only; no rotation for
+ * While a refresh runs the label and tooltip say what it does ("Scanning
+ * library..." during the rescan of the browse pages, then "Refreshing..."),
+ * the icon turns (transform only; no rotation for
  * prefers-reduced-motion), the button is `aria-busy` and `aria-disabled`
  * (not `disabled`, so keyboard focus stays on it) and ignores clicks.
  */
@@ -19,7 +21,8 @@ const props = withDefaults(defineProps<{ variant?: 'icon' | 'row'; hint?: string
 
 const refresh = useRefresh()
 const busy = computed(() => refresh.busy.value)
-const tooltip = computed(() => props.hint || t('refresh.tooltip'))
+const busyLabel = computed(() => (refresh.phase.value === 'scanning' ? t('refresh.scanning') : t('refresh.busy')))
+const tooltip = computed(() => (busy.value ? busyLabel.value : props.hint || t('refresh.tooltip')))
 
 function onClick(): void {
   if (!busy.value) void refresh.run()
@@ -31,7 +34,7 @@ function onClick(): void {
     v-if="refresh.showButton.value"
     type="button"
     :class="variant === 'row' ? 'lm-btn min-h-touch justify-start' : 'lm-btn lm-btn--icon flex-none phone:size-touch'"
-    :aria-label="variant === 'icon' ? t('refresh.label') : undefined"
+    :aria-label="variant === 'icon' ? (busy ? busyLabel : t('refresh.label')) : undefined"
     :aria-busy="busy || undefined"
     :aria-disabled="busy || undefined"
     aria-keyshortcuts="R"
@@ -40,6 +43,6 @@ function onClick(): void {
     @click="onClick"
   >
     <AppIcon name="reload" :size="16" :class="busy ? 'animate-spinner motion-reduce:animate-none' : undefined" />
-    <span v-if="variant === 'row'">{{ busy ? t('refresh.busy') : t('refresh.label') }}</span>
+    <span v-if="variant === 'row'">{{ busy ? busyLabel : t('refresh.label') }}</span>
   </button>
 </template>

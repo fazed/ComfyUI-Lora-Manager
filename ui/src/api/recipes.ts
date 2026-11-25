@@ -126,6 +126,8 @@ export interface RematchResponse {
 }
 
 export const recipesApi = {
+  /** Recipe rescan (the classic UI's Refresh): re-reads every recipe file; answers no counts. */
+  scan: () => request<{ success?: boolean; message?: string; status?: string }>('recipes/scan'),
   list: (query: RecipeListQuery, signal?: AbortSignal) =>
     request<PagedResponse<RecipeItem>>('recipes', { query: recipeListParams(query), signal }),
   detail: (id: string, signal?: AbortSignal) => request<RecipeItem>(recipePath(id), { signal }),

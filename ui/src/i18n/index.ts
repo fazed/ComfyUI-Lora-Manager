@@ -757,8 +757,14 @@ export const messages = {
   'refresh.label': 'Refresh',
   'refresh.busy': 'Refreshing...',
   'refresh.tooltip': 'Refresh (R)',
-  'refresh.rescanHint':
-    'Refresh (R): reloads what this page shows. Files added outside LoRA Manager appear after a library rescan (Refresh menu of the classic UI).',
+  'refresh.scanTooltip': 'Refresh (R): scan the library folders for added or removed files, then reload',
+  'refresh.scanning': 'Scanning library...',
+  'refresh.added': '{count} new',
+  'refresh.removed': '{count} removed',
+  'refresh.scanChanges': 'Library scan: {changes}',
+  'refresh.scanBusy': 'A library scan is already running; showing the current data.',
+  'refresh.scanNotReady': 'The library is not ready to scan yet; showing the current data.',
+  'refresh.scanFailed': 'Library scan failed: {message}',
   'refresh.failed': 'Could not refresh: {message}',
   'doctor.rerunShortcut': 'Run the checks again (R)',
 } as const

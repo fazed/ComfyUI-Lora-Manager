@@ -746,7 +746,8 @@ pages only supply data, tool entries and bulk actions through props and slots.
 ## Refresh
 
 Every page can re-read its data without a browser reload (new downloads
-finished, edits made in ComfyUI or the classic UI, ...).
+finished, edits made in ComfyUI or the classic UI, files added or removed
+outside LoRA Manager, ...).
 
 * **Registry** (`composables/useRefresh.ts`): the routed page registers one
   handler while it is mounted (`useRefreshHandler`, `onMounted` /
@@ -754,7 +755,30 @@ finished, edits made in ComfyUI or the classic UI, ...).
   page's handler). The shell runs the current one: `RefreshButton`
   (`components/RefreshButton.vue`) and the `r` shortcut (`useRefreshHost`,
   installed once in `App.vue`). One run at a time: a click or `r` while a
-  refresh runs is ignored.
+  refresh runs (scan included) is ignored. The handler gets
+  `{ silent, setPhase }`; `setPhase('scanning' | 'loading')` drives the
+  button's busy text.
+* **Library pages and Recipes: scan, then reload.** A manual refresh (button,
+  sheet row, `r`) first runs the **library rescan** the classic UI's Refresh
+  menu uses, waits for it, then re-reads the page as below
+  (`composables/useLibraryScan.ts`, flow in `utils/libraryScan.ts`):
+  1. `GET /api/lm/init-status?page=<loras|checkpoints|embeddings|recipes>`
+     (read-only). The backend has no lock around a quick scan, so when that
+     scanner is busy (`initializing`: a scan from another tab, the classic UI
+     or the startup scan is running) the page does not start a second one; it
+     only reloads and says "A library scan is already running; showing the
+     current data." A library that is not ready (`awaiting_first_scan`, the
+     first-run scan the user has not confirmed yet, or `error`) is not scanned
+     either ("The library is not ready to scan yet; ...").
+  2. `GET /api/lm/<prefix>/scan` with **no parameters** (quick reconcile;
+     never `full_rebuild`), or `GET /api/lm/recipes/scan` on Recipes. A 409
+     answer counts as "already running"; another failure shows "Library scan
+     failed: <message>" and the page still reloads.
+  3. The light re-read. When the scan answered counts and something changed,
+     one toast summarises it: "Library scan: 2 new, 1 removed". No changes, or
+     no counts (recipes), means no toast.
+* **Other pages** (Downloads, Statistics, Search, Settings, Diagnostics) only
+  re-read (no scan).
 * **Where the button is.** Library pages and Recipes: an icon button directly
   before **Tools** in the toolbar (always visible from 901px up; hidden in
   selection mode with the rest of the toolbar row, `r` still works) and a
@@ -766,32 +790,35 @@ finished, edits made in ComfyUI or the classic UI, ...).
   the checks, the button's tooltip says so). Not found has no refresh.
 * **Look and state.** New `reload` icon (two arrows; the single-arrow
   `refresh` icon stays for "Refresh from Civitai"). Tooltip "Refresh (R)"
-  (`aria-keyshortcuts="R"`), on the browse pages extended with the rescan
-  note below. While running: the icon turns (`animate-spinner`, transform
-  only, `motion-reduce:animate-none`), the button is `aria-busy` and
-  `aria-disabled` (not `disabled`, so keyboard focus stays) and the sheet row
-  reads "Refreshing...". No success toast (the existing toasts report
-  actions, not reloads); a failure is an error toast "Could not refresh:
-  <message>" (the usual `ApiError` text, e.g. the backend-not-reachable
-  message) and the page keeps what it showed.
+  (`aria-keyshortcuts="R"`); on the browse pages "Refresh (R): scan the
+  library folders for added or removed files, then reload". While running:
+  the icon turns (`animate-spinner`, transform only,
+  `motion-reduce:animate-none`), the button is `aria-busy` and
+  `aria-disabled` (not `disabled`, so keyboard focus stays), and its tooltip,
+  accessible name and sheet-row label read "Scanning library..." during the
+  scan, then "Refreshing...". No success toast for a plain reload; a failure
+  is an error toast "Could not refresh: <message>" (the usual `ApiError`
+  text, e.g. the backend-not-reachable message) and the page keeps what it
+  showed.
 * **Shortcut `r`**: bare key only (no Ctrl/Meta/Alt/Shift), ignored while
   typing in a field, inside a dialog, menu or listbox, while a modal
   `<dialog>` or menu is open (`shouldHandleShortcut`), and for key repeats.
   No clash with `f`, `s`, `j`, `k`, `/`. With a drawer open focus is inside
   it, so `r` does nothing there; close the drawer, or rely on the tab-return
   refresh, which also updates the open drawer.
-* **Tab return.** Library pages and Recipes (`onVisible: true`) refresh
-  silently (no toast) when the tab becomes visible after being hidden for at
-  least 60 s (`AUTO_REFRESH_AFTER_MS`). The other pages do not (Downloads
-  already polls, visibility-aware; Diagnostics would call Civitai; Statistics
-  and Settings are refreshed by hand).
+* **Tab return.** Library pages and Recipes (`onVisible: true`) re-read
+  silently (no toast, **no scan**, no scanner-state request) when the tab
+  becomes visible after being hidden for at least 60 s
+  (`AUTO_REFRESH_AFTER_MS`). The other pages do not (Downloads already polls,
+  visibility-aware; Diagnostics would call Civitai; Statistics and Settings
+  are refreshed by hand).
 
-What each page re-reads (GET only; the page keeps its UI state):
+What each page refreshes (the page keeps its UI state):
 
 | Page | Refresh |
 | --- | --- |
-| LoRAs / Checkpoints / Embeddings | the loaded range of the list with the same filters, sort, search and folder (`useInfiniteList.refresh`: pages 1..n again, at most `RESTORE_MAX_ITEMS` = 600 items, i.e. 10 pages of 60, stopping at the server's last page; the result replaces the items at once, so the grid never empties), the folder tree, base-model chips and tag filters; selection mode and the selected keys stay; the open drawer gets the refreshed copy of its model and re-reads its metadata (examples, trigger words, description) and, once loaded, the versions, without placeholders, keeping its tab and scroll; new notes / tags from the server are shown unless the notes hold an unsaved draft |
-| Recipes | the same for the recipe list (plus "missing only"), folder tree, base models and tags; the open recipe drawer re-reads `GET /api/lm/recipe/<id>` (the "opened" POST is sent only when a drawer opens, not on refresh) |
+| LoRAs / Checkpoints / Embeddings | the quick library scan of that type (above), then the loaded range of the list with the same filters, sort, search and folder (`useInfiniteList.refresh`: pages 1..n again, at most `RESTORE_MAX_ITEMS` = 600 items, i.e. 10 pages of 60, stopping at the server's last page; the result replaces the items at once, so the grid never empties), the folder tree, base-model chips and tag filters; selection mode and the selected keys stay; the open drawer gets the refreshed copy of its model and re-reads its metadata (examples, trigger words, description) and, once loaded, the versions, without placeholders, keeping its tab and scroll; new notes / tags from the server are shown unless the notes hold an unsaved draft |
+| Recipes | the recipe scan, then the same for the recipe list (plus "missing only"), folder tree, base models and tags; the open recipe drawer re-reads `GET /api/lm/recipe/<id>` (the "opened" POST is sent only when a drawer opens, not on refresh) |
 | Downloads | the queue (also polled every 1.5 s while open) and the history |
 | Statistics | the six stats endpoints and the opened "most used" lists (the rows already shown, one request each); the charts stay on screen while loading |
 | Search | the four library searches of the current query; the results stay until the new ones arrive |
@@ -808,40 +835,73 @@ asked for during a refresh runs after it; a filter change (reset) during a
 refresh wins. Beyond 600 loaded items only the first 600 are re-read;
 scrolling further loads the rest again.
 
-**Light refresh versus rescan.** The backend keeps the library in an
-in-memory cache; the list, tree and count endpoints read that cache. Changes
-made through LoRA Manager itself (downloads, rename / move / delete, metadata
-edits from the classic UI or the ComfyUI widgets) update the cache, so the
-light refresh shows them. Files added, removed or renamed **outside** LoRA
-Manager (another tool, the file manager) are only picked up by a **rescan**:
-`GET /api/lm/{prefix}/scan` (quick reconcile, or `full_rebuild=true`) and
-`GET /api/lm/recipes/scan`, which the classic UI's Refresh menu calls, and the
-full rebuild `POST /api/lm/doctor/repair-cache` behind Diagnostics >
-**Rebuild cache...** (offered only when the cache check reports a problem).
-The scan routes are **GET requests that change server state**; the modern UI
-never calls them. It has no general "rescan library" action: the refresh
-tooltip on the browse pages points to the classic UI's Refresh menu for that.
-`ModelVersionsStatusCache` (`GET /api/lm/model-versions-status?refresh=1`) is
-not used by the modern UI.
+**What the scans do on the backend** (read from the handlers, not run
+against a real library):
 
-Tests: `tests/refresh.test.ts` (written first): registry (register /
-unregister, route changes through a real router, no double run, busy state,
-error toast, silent runs), the `r` shortcut (modifiers, fields, dialogs,
-menus, no clash with f/s/j/k), the tab-return refresh (60 s threshold,
-opt-in), `useInfiniteList.refresh` (in-place swap, page cap, early stop,
-duplicates, failure keeps the items, reset wins, deferred loadMore),
-`refreshInPlace` / `anchorAt`, `RefreshButton` (visibility, aria-busy, no
-`disabled`, reduced-motion class), its places in the toolbar and `PageShell`,
-and `LibraryPage` against a mocked backend (same filters in the re-fetch,
-selection mode kept, open drawer kept and re-read, an unsaved notes draft
-kept, GET requests only and no scan / repair URL). Checked in the browser
-against the live backend (read-only): LoRAs filtered by a base model,
-scrolled and in selection mode with one card selected, then `r` and the
-button: same scroll offset, same first visible card, selection kept, only
-GET requests (list pages 1-2, tree, base models, tags); `r` on Checkpoints,
-Recipes, Search, Settings, Statistics, Downloads and Diagnostics (GET only);
+* `GET /api/lm/{prefix}/scan` (`ModelQueryHandler.scan_models` ->
+  `ModelScanner._reconcile_cache`), quick mode: admits roots that became
+  readable again (append-only), walks the configured roots (in parallel per
+  device; unreachable roots and paths are skipped and their cached models
+  kept), then
+  * **new files** (on disk, not in the cache): read their `.metadata.json`;
+    without one, build it from a `.civitai.info` when present, else create a
+    default sidecar and compute the SHA256 locally (checkpoints and other
+    large types defer the hash); the new sidecar is written to disk. No
+    Civitai request. Empty files and staged deletes are skipped;
+  * **missing files** (in the cache, not on disk): their cache rows are
+    dropped. Nothing is deleted on disk;
+  * **repairs**: cache rows whose `file_name` / `folder` drifted from the
+    file are fixed; loading a sidecar may rewrite only its path fields
+    (`file_name`, `file_path`, `preview_url`), atomically, keeping every
+    other field (unknown fields included);
+  * persists the cache (SQLite) when something changed and broadcasts
+    `models_changed`; the answer is `{status, message, added, removed,
+    repaired, folder_repaired, scanned_roots, skipped_roots, ...}`
+    (`status: "cancelled"` when cancelled). Without a built cache it performs
+    the full initialisation instead (the UI does not scan then: init-status
+    reports `initializing`). A no-change reconcile of the ~1,150-LoRA library
+    took about 0.1 s in the server log (0.6 s with 10 new / 5 removed files);
+    new files cost their SHA256 read.
+  * `full_rebuild=true` (never sent by this UI) rebuilds the whole cache.
+* `GET /api/lm/recipes/scan`: always a full recipe re-read (the
+  `full_rebuild` parameter is ignored), serialised by the scanner's lock: it
+  clears the recipe SQLite cache, re-reads every `*.recipe.json` in a worker
+  thread, then starts the same background enrichment as startup (missing LoRA
+  hashes looked up in the LoRA cache or on Civitai and written back into the
+  recipe file). Recipe files are not deleted; the answer has no counts.
+* `POST /api/lm/doctor/repair-cache` (Diagnostics > Rebuild cache..., only
+  offered when the cache check reports a problem) is the full rebuild of
+  every model cache; the Refresh button does not use it.
+* `ModelVersionsStatusCache` (`GET /api/lm/model-versions-status?refresh=1`)
+  is not used by the modern UI.
+
+Tests: `tests/refresh.test.ts`: registry (register / unregister, route
+changes through a real router, no double run, busy state and phase, error
+toast, silent runs), the `r` shortcut (modifiers, fields, dialogs, menus, no
+clash with f/s/j/k), the tab-return refresh (60 s threshold, opt-in),
+`useInfiniteList.refresh` (in-place swap, page cap, early stop, duplicates,
+failure keeps the items, reset wins, deferred loadMore), `refreshInPlace` /
+`anchorAt`, `runLibraryScan` / `scanNotice` (busy, not ready, 409, failure,
+counts, cancelled, toast text), `RefreshButton` (visibility, aria-busy, no
+`disabled`, reduced-motion class, "Scanning library..."), its places in the
+toolbar and `PageShell`, and the pages against a mocked backend: LoRAs
+(init-status, then exactly `GET /api/lm/loras/scan` without parameters, then
+the re-fetch with the same filters; selection mode kept; the "2 new, 1
+removed" toast), Checkpoints and Embeddings (their own scan URL, no toast
+without changes), Recipes (`GET /api/lm/recipes/scan` before the re-read),
+tab return (no scan, no init-status), a second trigger during the scan
+(ignored, one scan), a busy server (no scan, reload, note), the open drawer
+(kept and re-read, an unsaved notes draft kept), all requests GET.
+
+Browser check of the first version (light reload only, against the live
+backend, read-only): LoRAs filtered by a base model, scrolled and in
+selection mode with one card selected, then `r` and the button: same scroll
+offset, same first visible card, selection kept, only GET requests; `r` on
+Checkpoints, Recipes, Search, Settings, Statistics, Downloads and Diagnostics;
 the toolbar button at 1100px in Dark, Midnight and Light; the sheet row and
-the header buttons (44px) at 375px.
+the header buttons (44px) at 375px. The scan step was **not** run against the
+real library: it is verified by the mocked tests and by reading the backend
+code only.
 
 ## Library quick filter, detail drawer and "Send to ComfyUI"
 

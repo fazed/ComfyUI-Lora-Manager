@@ -4,9 +4,10 @@
  * buttons (`RefreshButton`, in the library toolbar and the PageShell header)
  * and the `r` shortcut call the current one (`useRefresh` / `useRefreshHost`).
  *
- * A refresh is the LIGHT one: the page re-reads what it shows through the
- * normal GET endpoints and keeps its UI state. It never asks the server to
- * rescan the library (that is a separate, deliberate action).
+ * The page re-reads what it shows through the normal GET endpoints and keeps
+ * its UI state. On the browse pages a manual refresh first runs the library
+ * rescan (composables/useLibraryScan.ts) and reports the `scanning` phase;
+ * the silent tab-return refresh never scans.
  *
  * - One run at a time: a second request while one is running is ignored.
  * - Errors become an error toast (silent runs stay quiet).
@@ -20,9 +21,14 @@ import { useToasts } from './useFeedback'
 import { shouldHandleShortcut } from '@/utils/browse'
 import { t } from '@/i18n'
 
+/** What a running refresh is doing (button label / tooltip). */
+export type RefreshPhase = 'scanning' | 'loading'
+
 export interface RefreshContext {
-  /** Automatic refresh (tab visible again): no error toast. */
+  /** Automatic refresh (tab visible again): no error toast, and no library scan. */
   silent: boolean
+  /** Report the current phase (starts as `loading`). */
+  setPhase: (phase: RefreshPhase) => void
 }
 
 export interface RefreshHandler {
@@ -44,6 +50,7 @@ export const AUTO_REFRESH_AFTER_MS = 60_000
 
 const current = shallowRef<{ id: number; handler: RefreshHandler } | null>(null)
 const busy = ref(false)
+const phase = ref<RefreshPhase | null>(null)
 let nextId = 1
 
 /** Make `handler` the current one; the returned function removes it again (only if it is still current). */
@@ -76,14 +83,16 @@ export async function runRefresh(options: { silent?: boolean } = {}): Promise<bo
   if (!entry || busy.value) return false
   const silent = options.silent ?? false
   busy.value = true
+  phase.value = 'loading'
   try {
-    await entry.handler.run({ silent })
+    await entry.handler.run({ silent, setPhase: (next) => (phase.value = next) })
     return true
   } catch (error) {
     if (!silent) useToasts().error(t('refresh.failed', { message: (error as Error)?.message || t('common.error') }))
     return false
   } finally {
     busy.value = false
+    phase.value = null
   }
 }
 
@@ -93,6 +102,8 @@ export function useRefresh() {
     available: computed(() => current.value !== null),
     showButton: computed(() => current.value !== null && current.value.handler.button !== false),
     busy: readonly(busy),
+    /** `scanning` / `loading` while busy, null otherwise. */
+    phase: readonly(phase),
     run: () => runRefresh(),
   }
 }

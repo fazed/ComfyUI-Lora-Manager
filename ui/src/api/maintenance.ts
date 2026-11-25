@@ -105,6 +105,12 @@ export const archiveApi = {
 }
 
 export const systemApi = {
+  /**
+   * Scanner state of one page (`loras`, `checkpoints`, `embeddings`, `recipes`):
+   * `complete`, `initializing` (a scan is running or the cache is not built),
+   * `awaiting_first_scan` or `error`. Read-only.
+   */
+  initStatus: (page: string) => request<{ status?: string; details?: string }>('init-status', { query: { page } }),
   versionInfo: () => request<{ version: string; has_git: boolean }>('version-info'),
   /** Network: GitHub API. Errors come back as success:false with HTTP 200. */
   checkUpdates: (nightly: boolean) =>

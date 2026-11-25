@@ -36,7 +36,9 @@ import { useDismissLayer } from '@/composables/useDismiss'
 import { useToasts } from '@/composables/useFeedback'
 import { useFolderPanel } from '@/composables/useFolderPanel'
 import { useInfiniteList } from '@/composables/useInfiniteList'
-import { useRefreshHandler } from '@/composables/useRefresh'
+import { useRefreshHandler, type RefreshContext } from '@/composables/useRefresh'
+import { scanBeforeRefresh } from '@/composables/useLibraryScan'
+import { systemApi } from '@/api/maintenance'
 import { refreshInPlace } from '@/utils/refreshList'
 import { useLibraryFilters } from '@/composables/useLibraryFilters'
 import { recipeTitle, useRecipeActions } from '@/composables/useRecipeActions'
@@ -196,10 +198,12 @@ onMounted(() => {
 })
 
 // --- Refresh (toolbar button, `r`, tab visible again): re-read in place, keep filters, sort, folder,
-// "missing only", selection, scroll and the open drawer. Only GET requests; no recipe rescan.
+// "missing only", selection, scroll and the open drawer. A manual refresh first runs the recipe
+// rescan (GET /api/lm/recipes/scan); the silent tab-return refresh only re-reads.
 const REFRESH_MAX_PAGES = Math.ceil(RESTORE_MAX_ITEMS / PAGE_SIZE)
 
-async function refreshPage(): Promise<void> {
+async function refreshPage(context: RefreshContext): Promise<void> {
+  await scanBeforeRefresh(context, { initStatus: () => systemApi.initStatus('recipes'), scan: () => recipesApi.scan() })
   const meta = refreshMeta()
   await refreshInPlace(list, grid.value, (item) => item.id, REFRESH_MAX_PAGES)
   const open = openItem.value

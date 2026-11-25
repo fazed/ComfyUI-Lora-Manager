@@ -20,6 +20,8 @@ import {
 import { useToasts } from '@/composables/useFeedback'
 import { useInfiniteList } from '@/composables/useInfiniteList'
 import { refreshInPlace, type AnchorGrid } from '@/utils/refreshList'
+import { runLibraryScan, scanNotice, type ScanOutcome } from '@/utils/libraryScan'
+import { ApiError } from '@/api/http'
 import { anchorAt } from '@/utils/gridLayout'
 import RefreshButton from '@/components/RefreshButton.vue'
 import PageShell from '@/components/PageShell.vue'
@@ -74,7 +76,7 @@ describe('refresh registry', () => {
     expect(api.available.value).toBe(true)
     expect(api.showButton.value).toBe(true)
     await api.run()
-    expect(run).toHaveBeenCalledWith({ silent: false })
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ silent: false }))
     page.unmount()
     expect(api.available.value).toBe(false)
     expect(await runRefresh()).toBe(false)
@@ -247,7 +249,7 @@ describe('refresh host: r shortcut and tab visibility', () => {
     vi.advanceTimersByTime(AUTO_REFRESH_AFTER_MS + 1000)
     await flip('visible')
     expect(run).toHaveBeenCalledTimes(1)
-    expect(run).toHaveBeenCalledWith({ silent: true })
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ silent: true }))
     page.unmount()
 
     // A page that did not opt in is left alone.
@@ -454,7 +456,7 @@ describe('RefreshButton and the page header', () => {
     page.unmount()
   })
 
-  it('sits in the library toolbar before Tools, with the rescan hint', () => {
+  it('sits in the library toolbar before Tools, with the scan tooltip', () => {
     const page = mount(Page, { props: { handler: { run: vi.fn(async () => undefined) } } })
     const toolbar = mount(LibraryToolbar, {
       props: {
@@ -482,11 +484,47 @@ describe('RefreshButton and the page header', () => {
     })
     const buttons = toolbar.findAll('[role="toolbar"] > button, [role="toolbar"] > div > button')
     const refresh = toolbar.get('[role="toolbar"] button[aria-label="Refresh"]')
-    expect(refresh.attributes('title')).toContain('rescan')
+    expect(refresh.attributes('title')).toBe('Refresh (R): scan the library folders for added or removed files, then reload')
+    expect(refresh.attributes('title')).not.toContain('classic')
     // Directly before the Tools menu button.
     const order = buttons.map((button) => button.attributes('aria-label') ?? button.text())
     expect(order.indexOf('Refresh')).toBe(order.indexOf('Tools') - 1)
     toolbar.unmount()
+    page.unmount()
+  })
+
+  it('says "Scanning library..." while the page reports the scanning phase', async () => {
+    const scanning = deferred()
+    const loading = deferred()
+    const page = mount(Page, {
+      props: {
+        handler: {
+          run: async ({ setPhase }) => {
+            setPhase('scanning')
+            await scanning.promise
+            setPhase('loading')
+            await loading.promise
+          },
+        },
+      },
+    })
+    const icon = mount(RefreshButton)
+    const row = mount(RefreshButton, { props: { variant: 'row' } })
+    const pending = runRefresh()
+    await nextTick()
+    expect(icon.get('button').attributes('title')).toBe('Scanning library...')
+    expect(icon.get('button').attributes('aria-label')).toBe('Scanning library...')
+    expect(row.get('button').text()).toBe('Scanning library...')
+    scanning.resolve()
+    await flushPromises()
+    expect(row.get('button').text()).toBe('Refreshing...')
+    loading.resolve()
+    await pending
+    await nextTick()
+    expect(icon.get('button').attributes('title')).toBe('Refresh (R)')
+    expect(icon.get('button').attributes('aria-label')).toBe('Refresh')
+    icon.unmount()
+    row.unmount()
     page.unmount()
   })
 
@@ -502,7 +540,61 @@ describe('RefreshButton and the page header', () => {
   })
 })
 
-// --- Library page against a mocked backend ---------------------------------------
+describe('runLibraryScan', () => {
+  const ok = (status = 'complete') => async () => ({ status })
+
+  it('scans only when the scanner is idle and reads the counts', async () => {
+    const scan = vi.fn(async () => ({ status: 'success', added: 2, removed: 1 }))
+    expect(await runLibraryScan({ initStatus: ok(), scan })).toEqual({ kind: 'scanned', added: 2, removed: 1 })
+    expect(scan).toHaveBeenCalledTimes(1)
+  })
+
+  it('leaves a running scan alone (busy) and does not scan an unready library', async () => {
+    const scan = vi.fn(async () => ({}))
+    expect(await runLibraryScan({ initStatus: ok('initializing'), scan })).toEqual({ kind: 'busy' })
+    expect(await runLibraryScan({ initStatus: ok('awaiting_first_scan'), scan })).toEqual({ kind: 'not-ready' })
+    expect(await runLibraryScan({ initStatus: ok('error'), scan })).toEqual({ kind: 'not-ready' })
+    expect(scan).not.toHaveBeenCalled()
+  })
+
+  it('treats a 409 as busy, other failures as failed, and missing counts as unknown', async () => {
+    const conflict = async () => {
+      throw new ApiError('Scan already running', 409)
+    }
+    expect(await runLibraryScan({ initStatus: ok(), scan: conflict })).toEqual({ kind: 'busy' })
+    const broken = async () => {
+      throw new ApiError('boom', 500)
+    }
+    expect(await runLibraryScan({ initStatus: ok(), scan: broken })).toEqual({ kind: 'failed', message: 'boom' })
+    expect(await runLibraryScan({ initStatus: ok(), scan: async () => ({}) })).toEqual({ kind: 'scanned', added: null, removed: null })
+    expect(await runLibraryScan({ initStatus: ok(), scan: async () => ({ status: 'cancelled' }) })).toEqual({
+      kind: 'scanned',
+      added: null,
+      removed: null,
+    })
+  })
+
+  it('rejects when the scanner state cannot be read (backend unreachable)', async () => {
+    const down = async (): Promise<{ status?: string }> => {
+      throw new ApiError('Network error', 0)
+    }
+    await expect(runLibraryScan({ initStatus: down, scan: vi.fn() })).rejects.toThrow('Network error')
+  })
+
+  it('builds a toast only for changes, a skipped scan or a failure', () => {
+    const parts = { added: (n: number) => `${n} new`, removed: (n: number) => `${n} removed` }
+    const notice = (outcome: ScanOutcome) => scanNotice(outcome, parts)
+    expect(notice({ kind: 'scanned', added: 2, removed: 1 })).toEqual({ kind: 'info', key: 'refresh.scanChanges', params: { changes: '2 new, 1 removed' } })
+    expect(notice({ kind: 'scanned', added: 0, removed: 3 })?.params).toEqual({ changes: '3 removed' })
+    expect(notice({ kind: 'scanned', added: 0, removed: 0 })).toBeNull()
+    expect(notice({ kind: 'scanned', added: null, removed: null })).toBeNull()
+    expect(notice({ kind: 'busy' })?.key).toBe('refresh.scanBusy')
+    expect(notice({ kind: 'not-ready' })?.key).toBe('refresh.scanNotReady')
+    expect(notice({ kind: 'failed', message: 'x' })).toEqual({ kind: 'error', key: 'refresh.scanFailed', params: { message: 'x' } })
+  })
+})
+
+// --- Library pages against a mocked backend ---------------------------------------
 
 interface Call {
   url: string
@@ -520,15 +612,33 @@ const ITEM = (name: string, extra: Record<string, unknown> = {}) => ({
   ...extra,
 })
 
-function installBackend(state: { version: number }) {
+interface BackendState {
+  version: number
+  /** `init-status` answer. */
+  scanner?: string
+  scanResult?: Record<string, unknown>
+  /** Holds the scan request open until resolved. */
+  scanGate?: Promise<void>
+}
+
+function installBackend(state: BackendState) {
   const calls: Call[] = []
   setFetch(async (input, init) => {
     const url = String(input)
     calls.push({ url, method: init?.method ?? 'GET' })
     const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
-    if (url.includes('/loras/list')) {
+    if (url.includes('/init-status')) return json({ status: state.scanner ?? 'complete' })
+    if (/\/(loras|checkpoints|embeddings|recipes)\/scan/.test(url)) {
+      await state.scanGate
+      return json(state.scanResult ?? { status: 'success', message: 'scan completed', added: 0, removed: 0 })
+    }
+    if (/\/(loras|checkpoints|embeddings)\/list/.test(url)) {
       const items = [ITEM('alpha', { notes: `v${state.version}` }), ITEM('beta')]
       return json({ items, total: items.length, page: 1, total_pages: 1 })
+    }
+    if (/\/api\/lm\/recipes\?/.test(url)) {
+      const items = [{ id: 'r1', title: `Recipe v${state.version}`, loras: [], tags: [] }]
+      return json({ items, total: 1, page: 1, total_pages: 1 })
     }
     if (url.includes('unified-folder-tree')) return json({ tree: state.version > 1 ? { fresh: {} } : { old: {} } })
     if (url.includes('base-models')) return json({ base_models: [{ name: 'SDXL', count: 2 }] })
@@ -538,6 +648,9 @@ function installBackend(state: { version: number }) {
   })
   return calls
 }
+
+const pathOf = (url: string) => new URL(url, 'http://x').pathname
+const indexOf = (calls: Call[], test: (path: string) => boolean) => calls.findIndex((call) => test(pathOf(call.url)))
 
 /** Stand-in for VirtualGrid with its exposed API (scroll anchor at the top). */
 const GridStub = defineComponent({
@@ -554,31 +667,36 @@ const GridStub = defineComponent({
   },
 })
 
+async function mountRoute(name: 'loras' | 'checkpoints' | 'embeddings' | 'recipes', path: string) {
+  const component =
+    name === 'recipes' ? (await import('@/pages/RecipesPage.vue')).default : (await import('@/pages/LibraryPage.vue')).default
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [{ path: `/${name}`, name, component, props: name === 'recipes' ? {} : { prefix: name } }],
+  })
+  await router.push(path)
+  // jsdom has no layout: the virtual grid is stubbed (its maths has its own tests).
+  const wrapper = mount(RouterView, {
+    global: { plugins: [router], stubs: { VirtualGrid: GridStub } },
+    attachTo: document.body,
+  })
+  await flushPromises()
+  return { wrapper, router }
+}
+
 describe('library page refresh', () => {
+  beforeEach(() => {
+    useToasts().toasts.value = []
+  })
   afterEach(() => {
     setFetch(null)
     clearBrowseView()
+    useToasts().toasts.value = []
     document.body.innerHTML = ''
   })
 
-  async function mountLibrary(path: string) {
-    const LibraryPage = (await import('@/pages/LibraryPage.vue')).default
-    const router = createRouter({
-      history: createMemoryHistory(),
-      routes: [{ path: '/loras', name: 'loras', component: LibraryPage, props: { prefix: 'loras' } }],
-    })
-    await router.push(path)
-    // jsdom has no layout: the virtual grid is stubbed (its maths has its own tests).
-    const wrapper = mount(RouterView, {
-      global: { plugins: [router], stubs: { VirtualGrid: GridStub } },
-      attachTo: document.body,
-    })
-    await flushPromises()
-    return { wrapper, router }
-  }
-
-  it('re-fetches with the same filters, keeps selection mode and sends only GET requests', async () => {
-    const backend = { version: 1 }
+  it('scans first (quick mode), then re-fetches with the same filters and keeps selection mode', async () => {
+    const backend: BackendState = { version: 1, scanResult: { status: 'success', added: 2, removed: 1 } }
     const calls = installBackend(backend)
     saveBrowseView('loras', {
       search: '',
@@ -592,7 +710,9 @@ describe('library page refresh', () => {
       loadedCount: 0,
       knownTotal: null,
     })
-    const { wrapper } = await mountLibrary('/loras')
+    const { wrapper } = await mountRoute('loras', '/loras')
+    // Mounting never scans.
+    expect(calls.some((call) => pathOf(call.url).endsWith('/scan'))).toBe(false)
     // Selection mode on (bare s).
     document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 's', bubbles: true }))
     await flushPromises()
@@ -603,29 +723,111 @@ describe('library page refresh', () => {
     expect(await runRefresh()).toBe(true)
     await flushPromises()
 
-    expect(calls.length).toBeGreaterThan(0)
     expect(calls.every((call) => call.method === 'GET')).toBe(true)
-    expect(calls.some((call) => /\/scan\b|repair|first-scan/.test(call.url))).toBe(false)
-    const listCall = calls.find((call) => call.url.includes('/loras/list'))!
-    const query = new URL(listCall.url, 'http://x').searchParams
+    // Exactly one quick scan of this library: the bare URL, no full rebuild, no other mutating route.
+    const scans = calls.filter((call) => pathOf(call.url).endsWith('/scan'))
+    expect(scans.map((call) => call.url)).toEqual(['/api/lm/loras/scan'])
+    expect(calls.some((call) => /full_rebuild|repair|first-scan/.test(call.url))).toBe(false)
+    // Order: scanner state, then the scan, then the re-fetch.
+    const status = calls.findIndex((call) => call.url === '/api/lm/init-status?page=loras')
+    const scan = indexOf(calls, (path) => path === '/api/lm/loras/scan')
+    const list = indexOf(calls, (path) => path === '/api/lm/loras/list')
+    expect(status).toBeGreaterThanOrEqual(0)
+    expect(status).toBeLessThan(scan)
+    expect(scan).toBeLessThan(list)
+    expect(scan).toBeLessThan(indexOf(calls, (path) => path.endsWith('unified-folder-tree')))
+
+    const query = new URL(calls[list].url, 'http://x').searchParams
     expect(query.get('folder')).toBe('characters')
     expect(query.getAll('base_model')).toEqual(['SDXL'])
     expect(query.getAll('tag_include')).toEqual(['anime'])
     expect(query.get('favorites_only')).toBe('true')
     expect(query.get('page')).toBe('1')
-    // Secondary data of the page is refreshed too.
-    expect(calls.some((call) => call.url.includes('unified-folder-tree'))).toBe(true)
     expect(calls.some((call) => call.url.includes('base-models'))).toBe(true)
     expect(calls.some((call) => call.url.includes('top-tags'))).toBe(true)
-    // Still in selection mode, filters still shown as chips.
+    // The scan found changes: one short summary toast.
+    expect(useToasts().toasts.value.map((toast) => toast.message)).toEqual(['Library scan: 2 new, 1 removed'])
+    // Still in selection mode.
     expect(wrapper.text()).toContain('selected')
     wrapper.unmount()
   })
 
-  it('keeps the open drawer on the same model and re-reads its metadata', async () => {
-    const backend = { version: 1 }
+  it.each(['checkpoints', 'embeddings'] as const)('scans /api/lm/%s/scan on that library', async (prefix) => {
+    const calls = installBackend({ version: 1 })
+    const { wrapper } = await mountRoute(prefix, `/${prefix}`)
+    calls.length = 0
+    expect(await runRefresh()).toBe(true)
+    await flushPromises()
+    expect(calls.filter((call) => pathOf(call.url).endsWith('/scan')).map((call) => call.url)).toEqual([`/api/lm/${prefix}/scan`])
+    expect(calls.some((call) => call.url === `/api/lm/init-status?page=${prefix}`)).toBe(true)
+    // No changes found: no toast.
+    expect(useToasts().toasts.value).toEqual([])
+    wrapper.unmount()
+  })
+
+  it('scans recipes with GET /api/lm/recipes/scan before re-reading them', async () => {
+    const calls = installBackend({ version: 1, scanResult: { success: true, message: 'Recipe cache refreshed successfully' } })
+    const { wrapper } = await mountRoute('recipes', '/recipes')
+    calls.length = 0
+    expect(await runRefresh()).toBe(true)
+    await flushPromises()
+    expect(calls.every((call) => call.method === 'GET')).toBe(true)
+    expect(calls.filter((call) => pathOf(call.url).endsWith('/scan')).map((call) => call.url)).toEqual(['/api/lm/recipes/scan'])
+    const scan = indexOf(calls, (path) => path === '/api/lm/recipes/scan')
+    const list = indexOf(calls, (path) => path === '/api/lm/recipes')
+    expect(scan).toBeGreaterThanOrEqual(0)
+    expect(scan).toBeLessThan(list)
+    expect(calls.findIndex((call) => call.url === '/api/lm/init-status?page=recipes')).toBeLessThan(scan)
+    // Recipes answer no counts: no toast.
+    expect(useToasts().toasts.value).toEqual([])
+    wrapper.unmount()
+  })
+
+  it('keeps the tab-return refresh light: no scan, no scanner state request', async () => {
+    const calls = installBackend({ version: 1 })
+    const { wrapper } = await mountRoute('loras', '/loras')
+    calls.length = 0
+    expect(await runRefresh({ silent: true })).toBe(true)
+    await flushPromises()
+    expect(calls.some((call) => /\/scan|init-status/.test(call.url))).toBe(false)
+    expect(calls.some((call) => pathOf(call.url) === '/api/lm/loras/list')).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('ignores a second trigger while the scan runs', async () => {
+    let release!: () => void
+    const backend: BackendState = { version: 1, scanGate: new Promise<void>((resolve) => (release = resolve)) }
     const calls = installBackend(backend)
-    const { wrapper, router } = await mountLibrary(`/loras?open=${encodeURIComponent('/root/alpha.safetensors')}`)
+    const { wrapper } = await mountRoute('loras', '/loras')
+    calls.length = 0
+    const first = runRefresh()
+    await flushPromises()
+    expect(await runRefresh()).toBe(false)
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'r', bubbles: true }))
+    await flushPromises()
+    release()
+    expect(await first).toBe(true)
+    await flushPromises()
+    expect(calls.filter((call) => pathOf(call.url).endsWith('/scan'))).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('does not start a scan while the server is already scanning, but still reloads', async () => {
+    const calls = installBackend({ version: 1, scanner: 'initializing' })
+    const { wrapper } = await mountRoute('loras', '/loras')
+    calls.length = 0
+    expect(await runRefresh()).toBe(true)
+    await flushPromises()
+    expect(calls.some((call) => pathOf(call.url).endsWith('/scan'))).toBe(false)
+    expect(calls.some((call) => pathOf(call.url) === '/api/lm/loras/list')).toBe(true)
+    expect(useToasts().toasts.value.map((toast) => toast.message)).toEqual(['A library scan is already running; showing the current data.'])
+    wrapper.unmount()
+  })
+
+  it('keeps the open drawer on the same model and re-reads its metadata', async () => {
+    const backend: BackendState = { version: 1 }
+    const calls = installBackend(backend)
+    const { wrapper, router } = await mountRoute('loras', `/loras?open=${encodeURIComponent('/root/alpha.safetensors')}`)
     const drawer = () => document.body.querySelector('[role="dialog"][aria-modal="true"]')
     expect(drawer()).not.toBeNull()
     const before = drawer()

@@ -38,7 +38,9 @@ import { copyText, useToasts } from '@/composables/useFeedback'
 import { useFolderPanel } from '@/composables/useFolderPanel'
 import { useInfiniteList } from '@/composables/useInfiniteList'
 import { useLibraryFilters } from '@/composables/useLibraryFilters'
-import { useRefreshHandler } from '@/composables/useRefresh'
+import { useRefreshHandler, type RefreshContext } from '@/composables/useRefresh'
+import { scanBeforeRefresh } from '@/composables/useLibraryScan'
+import { systemApi } from '@/api/maintenance'
 import { takeStashedItem } from '@/composables/useSearch'
 import { queryParam } from '@/config/navigation'
 import type { SuggestOption } from '@/utils/suggest'
@@ -215,10 +217,13 @@ onMounted(() => {
 })
 
 // --- Refresh (toolbar button, `r`, tab visible again): re-read in place, keep filters, sort, folder,
-// selection, scroll and the open drawer. Only GET requests; no library rescan.
+// selection, scroll and the open drawer. A manual refresh first runs the quick library rescan
+// (GET /api/lm/<prefix>/scan) so files added or removed outside LoRA Manager show up; the silent
+// tab-return refresh only re-reads.
 const REFRESH_MAX_PAGES = Math.ceil(RESTORE_MAX_ITEMS / PAGE_SIZE)
 
-async function refreshPage(): Promise<void> {
+async function refreshPage(context: RefreshContext): Promise<void> {
+  await scanBeforeRefresh(context, { initStatus: () => systemApi.initStatus(props.prefix), scan: () => api.scan() })
   const secondary = loadSecondary()
   await refreshInPlace(list, grid.value, (item) => item.file_path, REFRESH_MAX_PAGES)
   // The open drawer shows the refreshed copy of its model (when it is among the loaded items) and re-reads its metadata.

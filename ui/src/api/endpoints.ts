@@ -69,6 +69,14 @@ export function modelListParams(query: ModelListQuery) {
   }
 }
 
+/** `GET /api/lm/{prefix}/scan` answer: counts for a quick reconcile (absent after a full rebuild). */
+export interface LibraryScanResponse {
+  status?: string
+  message?: string
+  added?: number
+  removed?: number
+}
+
 export function createModelApi(prefix: ModelPrefix) {
   return {
     prefix,
@@ -82,6 +90,13 @@ export function createModelApi(prefix: ModelPrefix) {
     searchTags: (q: string, limit = 8, signal?: AbortSignal) =>
       request<{ tags: TagEntry[] }>(`${prefix}/search-tags`, { query: { q, limit }, signal }).then((r) => r.tags ?? []),
     roots: () => request<{ roots: string[] }>(`${prefix}/roots`).then((r) => r.roots ?? []),
+    /**
+     * Quick library rescan (the classic UI's Refresh): reconciles the cache with
+     * the files on disk (new files get a sidecar and a hash, missing ones leave
+     * the cache; nothing is deleted on disk). A GET that changes server state;
+     * never sent with `full_rebuild`. Answers the reconcile counts.
+     */
+    scan: () => request<LibraryScanResponse>(`${prefix}/scan`),
     folderTree: () =>
       // Empty folders included: a folder created in the panel must be visible to rename or delete it.
       request<{ tree: FolderTree }>(`${prefix}/unified-folder-tree`, { query: { include_empty: 'true' } }).then(

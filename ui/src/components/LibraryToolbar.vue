@@ -258,7 +258,7 @@ defineExpose({ foldersToggle })
     >
       <AppIcon name="checkSquare" :size="16" /><span class="max-[1279px]:sr-only">{{ t('library.select') }}</span>
     </button>
-    <RefreshButton :hint="t('refresh.rescanHint')" />
+    <RefreshButton :hint="t('refresh.scanTooltip')" />
     <MenuButton :label="t('library.toolsMenu')" icon="wrench" align="right" :items="toolItems" @select="emit('tool', $event)" />
   </div>
 
@@ -329,7 +329,7 @@ defineExpose({ foldersToggle })
         </button>
       </div>
       <!-- Stays open while refreshing, so the busy state is visible. -->
-      <RefreshButton variant="row" :hint="t('refresh.rescanHint')" />
+      <RefreshButton variant="row" :hint="t('refresh.scanTooltip')" />
       <div v-if="toolItems.length" class="grid gap-1" role="group" :aria-label="t('library.tools')">
         <button
           v-for="entry in toolItems"
