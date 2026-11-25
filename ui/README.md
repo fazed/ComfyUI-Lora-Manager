@@ -763,17 +763,20 @@ outside LoRA Manager, ...).
   menu uses, waits for it, then re-reads the page as below
   (`composables/useLibraryScan.ts`, flow in `utils/libraryScan.ts`):
   1. `GET /api/lm/init-status?page=<loras|checkpoints|embeddings|recipes>`
-     (read-only). The backend has no lock around a quick scan, so when that
-     scanner is busy (`initializing`: a scan from another tab, the classic UI
-     or the startup scan is running) the page does not start a second one; it
-     only reloads and says "A library scan is already running; showing the
-     current data." A library that is not ready (`awaiting_first_scan`, the
+     (read-only). When that scanner is busy (`initializing`: a scan from
+     another tab, the classic UI or the startup scan is running) the page
+     does not queue a second one behind it; it only reloads and says "A
+     library scan is already running; showing the current data." A library
+     that is not ready (`awaiting_first_scan`, the
      first-run scan the user has not confirmed yet, or `error`) is not scanned
      either ("The library is not ready to scan yet; ...").
   2. `GET /api/lm/<prefix>/scan` with **no parameters** (quick reconcile;
-     never `full_rebuild`), or `GET /api/lm/recipes/scan` on Recipes. A 409
-     answer counts as "already running"; another failure shows "Library scan
-     failed: <message>" and the page still reloads.
+     never `full_rebuild`), or `GET /api/lm/recipes/scan` on Recipes. If a
+     scan started between the check and this request, the backend's scan
+     guard (below) makes it join that scan: the answer is the same summary
+     with `joined: true`, counted like our own. A 409 answer (not sent by
+     the current backend) counts as "already running"; another failure
+     shows "Library scan failed: <message>" and the page still reloads.
   3. The light re-read. When the scan answered counts and something changed,
      one toast summarises it: "Library scan: 2 new, 1 removed". No changes, or
      no counts (recipes), means no toast.
@@ -863,6 +866,19 @@ against a real library):
     took about 0.1 s in the server log (0.6 s with 10 new / 5 removed files);
     new files cost their SHA256 read.
   * `full_rebuild=true` (never sent by this UI) rebuilds the whole cache.
+  * **Scan guard** (`ModelScanner.scan_library`): one scan per model type
+    at a time, behind a per-scanner `asyncio.Lock`. A request identical to
+    a scan in flight (same kind and scope, running or queued) joins it and
+    answers the same summary plus `joined: true` (HTTP 200, so the classic
+    UI, which treats every non-2xx as "refresh failed", keeps working). A
+    different request (a full rebuild while a quick scan runs, another
+    scope, `doctor/repair-cache`) waits for the running scan, then runs.
+    The startup initialization holds the same lock. The scan runs as its own
+    task: a caller that goes away does not abort it for the others, and an
+    error reaches every waiting caller and releases the lock. Other model
+    types are never blocked, and plain list requests never wait. While a
+    scan runs, `init-status` for that page reports `initializing` (the
+    scanner's existing flag, set by the reconcile and the rebuild).
 * `GET /api/lm/recipes/scan`: always a full recipe re-read (the
   `full_rebuild` parameter is ignored), serialised by the scanner's lock: it
   clears the recipe SQLite cache, re-reads every `*.recipe.json` in a worker
@@ -882,7 +898,7 @@ clash with f/s/j/k), the tab-return refresh (60 s threshold, opt-in),
 `useInfiniteList.refresh` (in-place swap, page cap, early stop, duplicates,
 failure keeps the items, reset wins, deferred loadMore), `refreshInPlace` /
 `anchorAt`, `runLibraryScan` / `scanNotice` (busy, not ready, 409, failure,
-counts, cancelled, toast text), `RefreshButton` (visibility, aria-busy, no
+counts, joined scan, cancelled, toast text), `RefreshButton` (visibility, aria-busy, no
 `disabled`, reduced-motion class, "Scanning library..."), its places in the
 toolbar and `PageShell`, and the pages against a mocked backend: LoRAs
 (init-status, then exactly `GET /api/lm/loras/scan` without parameters, then

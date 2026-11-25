@@ -3,18 +3,22 @@
  * (LoRAs, Checkpoints, Embeddings, Recipes). Pure flow with injected calls,
  * so it is tested without a backend.
  *
- * 1. Ask the scanner state first (`GET /api/lm/init-status?page=`): the
- *    backend has no lock around a quick scan, so a scan that is already
- *    running (or a library that was never scanned / is still loading) is left
- *    alone and the page only reloads.
+ * 1. Ask the scanner state first (`GET /api/lm/init-status?page=`): a scan
+ *    that is already running (`initializing`; another tab, the classic UI or
+ *    the startup scan) or a library that was never scanned is left alone and
+ *    the page only reloads, without waiting for that scan.
  * 2. Run the quick scan and read its counts (models only; recipes answer none).
+ *    The backend guards scans per model type: a request that overlaps an
+ *    identical scan joins it and answers the same counts (`joined: true`),
+ *    which count like a scan of our own. A 409 (not sent by the current
+ *    backend) still means "already running".
  */
 
 import { ApiError } from '@/api/http'
 
 export interface ScanDeps {
   initStatus: () => Promise<{ status?: string }>
-  scan: () => Promise<{ status?: string; added?: number; removed?: number }>
+  scan: () => Promise<{ status?: string; added?: number; removed?: number; joined?: boolean }>
 }
 
 export type ScanOutcome =

@@ -549,6 +549,19 @@ describe('runLibraryScan', () => {
     expect(scan).toHaveBeenCalledTimes(1)
   })
 
+  it('counts a scan that joined one already in flight like its own scan', async () => {
+    // The backend coalesces overlapping identical scans: the later request
+    // waits for the running one and gets its summary with `joined: true`.
+    const scan = vi.fn(async () => ({ status: 'success', added: 3, removed: 0, joined: true }))
+    const outcome = await runLibraryScan({ initStatus: ok(), scan })
+    expect(outcome).toEqual({ kind: 'scanned', added: 3, removed: 0 })
+    expect(scanNotice(outcome, { added: (n) => `${n} new`, removed: (n) => `${n} removed` })).toEqual({
+      kind: 'info',
+      key: 'refresh.scanChanges',
+      params: { changes: '3 new' },
+    })
+  })
+
   it('leaves a running scan alone (busy) and does not scan an unready library', async () => {
     const scan = vi.fn(async () => ({}))
     expect(await runLibraryScan({ initStatus: ok('initializing'), scan })).toEqual({ kind: 'busy' })
