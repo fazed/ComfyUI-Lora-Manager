@@ -13,6 +13,7 @@ from ..services.service_registry import ServiceRegistry
 from ..services.pending_delete_service import get_pending_delete_service
 from ..utils.constants import PREVIEW_EXTENSIONS
 from ..utils.metadata_manager import MetadataManager
+from ..utils.safe_paths import require_within_any
 from ..utils.sidecar_paths import (
     get_metadata_path,
     get_preview_dir,
@@ -99,31 +100,28 @@ async def delete_model_artifacts(
 def _require_path_in_library_roots(file_path: str, scanner, *, label: str = "path") -> None:
     """Raise ``ValueError`` if *file_path* is not inside a configured model root.
 
-    Uses ``os.path.abspath()`` (NOT ``realpath``) to resolve ``..`` and ``.``
-    while preserving symlinks — this keeps the check in business-path space.
-    Skips when the scanner does not expose ``get_model_roots`` or the list
-    is empty.
+    Thin wrapper over :func:`py.utils.safe_paths.require_within_any`: uses
+    ``os.path.abspath()`` (NOT ``realpath``) to resolve ``..`` and ``.``
+    while preserving symlinks — this keeps the check in business-path space —
+    and compares with ``normcase`` so a case difference on Windows is not an
+    escape or a false rejection. Fails closed: a scanner whose root list is
+    empty (none configured, wildcards/workflows disabled) or not implemented
+    admits nothing.
+
+    An object without a ``get_model_roots`` attribute at all has no root
+    concept and is not checked; every real scanner implements the method
+    (``ModelScanner`` declares it), so only duck-typed test doubles take that
+    branch.
     """
 
-    roots = None
-    if hasattr(scanner, "get_model_roots"):
-        try:
-            roots = scanner.get_model_roots()
-        except NotImplementedError:
-            roots = None
-    if not roots:
+    if not hasattr(scanner, "get_model_roots"):
         return
+    try:
+        roots = scanner.get_model_roots()
+    except NotImplementedError:
+        roots = None
 
-    resolved = os.path.abspath(os.path.normpath(file_path))
-
-    for root in roots:
-        root_resolved = os.path.abspath(os.path.normpath(root))
-        if resolved == root_resolved or resolved.startswith(root_resolved + os.sep):
-            return
-
-    raise ValueError(
-        f"{label} '{file_path}' is outside configured library directories"
-    )
+    require_within_any(file_path, roots, label=label)
 
 
 class BulkRenameContext:

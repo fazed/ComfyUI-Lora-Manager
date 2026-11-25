@@ -59,6 +59,7 @@ from ...services.download_queue_worker import (
 )
 from ...services.errors import RateLimitError, ResourceNotFoundError
 from ...utils.civitai_utils import resolve_license_payload
+from ...services.model_lifecycle_service import _require_path_in_library_roots
 from ...utils.file_utils import calculate_sha256
 from ...utils.metadata_manager import MetadataManager
 from ...utils.paid_access import is_early_access_deadline_active
@@ -526,6 +527,16 @@ class ModelManagementHandler:
         self._tag_update_service = tag_update_service
         self._lifecycle_service = lifecycle_service
 
+    def _require_in_library(self, path: Any, *, label: str = "File path") -> None:
+        """Raise ``ValueError`` unless *path* is inside this model type's roots.
+
+        Pure string check (no filesystem access), so it runs before any
+        stat/open/write on a request-supplied path.
+        """
+        if not isinstance(path, str):
+            raise ValueError(f"{label} must be a string")
+        _require_path_in_library_roots(path, self._service.scanner, label=label)
+
     async def delete_model(self, request: web.Request) -> web.Response:
         try:
             data = await request.json()
@@ -711,6 +722,10 @@ class ModelManagementHandler:
                     status=400,
                 )
 
+            # The re-linked sidecar is written next to file_path and the path
+            # becomes a cache entry: it must be a model in this library.
+            self._require_in_library(file_path)
+
             metadata_path = get_metadata_path(file_path)
             local_metadata = await self._metadata_sync.load_local_metadata(
                 metadata_path
@@ -815,6 +830,14 @@ class ModelManagementHandler:
                 raise ValueError("Expected 'model_path' field")
             model_path = (await field.read()).decode()
 
+            # replace_preview deletes <stem>.<every preview extension> and
+            # writes the preview plus a sidecar next to model_path, so the
+            # path must be a model inside this library's roots.
+            try:
+                self._require_in_library(model_path, label="Model path")
+            except ValueError as exc:
+                return web.Response(text=str(exc), status=400)
+
             nsfw_level = 0
             field = await reader.next()
             if field and field.name == "nsfw_level":
@@ -865,6 +888,14 @@ class ModelManagementHandler:
             if not image_url:
                 return web.json_response(
                     {"success": False, "error": "Image URL is required"}, status=400
+                )
+
+            # Same guard as replace_preview, checked before downloading.
+            try:
+                self._require_in_library(model_path, label="Model path")
+            except ValueError as exc:
+                return web.json_response(
+                    {"success": False, "error": str(exc)}, status=400
                 )
 
             # Rewrite URL to use optimized rendition if it's a Civitai URL
@@ -1000,6 +1031,14 @@ class ModelManagementHandler:
             if not file_path:
                 return web.Response(text="File path is required", status=400)
 
+            # The sidecar is written next to file_path: library models only.
+            try:
+                self._require_in_library(file_path)
+            except ValueError as exc:
+                return web.json_response(
+                    {"success": False, "error": str(exc)}, status=400
+                )
+
             if not os.path.isfile(os.path.abspath(file_path)):
                 return web.json_response(
                     {
@@ -1050,6 +1089,13 @@ class ModelManagementHandler:
 
             if not isinstance(new_tags, list):
                 return web.Response(text="Tags must be a list", status=400)
+
+            try:
+                self._require_in_library(file_path)
+            except ValueError as exc:
+                return web.json_response(
+                    {"success": False, "error": str(exc)}, status=400
+                )
 
             if not os.path.isfile(os.path.abspath(file_path)):
                 return web.json_response(
@@ -1143,6 +1189,20 @@ class ModelManagementHandler:
                         "error": "No file paths provided for verification",
                     },
                     status=400,
+                )
+
+            # Every path is hashed and may get its sidecar rewritten.
+            if not isinstance(file_paths, list):
+                return web.json_response(
+                    {"success": False, "error": "file_paths must be a list"},
+                    status=400,
+                )
+            try:
+                for path in file_paths:
+                    self._require_in_library(path)
+            except ValueError as exc:
+                return web.json_response(
+                    {"success": False, "error": str(exc)}, status=400
                 )
 
             results = await self._metadata_sync.verify_duplicate_hashes(
@@ -1247,6 +1307,26 @@ class ModelQueryHandler:
     def __init__(self, *, service, logger: logging.Logger) -> None:
         self._service = service
         self._logger = logger
+
+    async def _require_known_model_path(self, file_path: str) -> None:
+        """Raise ``ValueError`` unless *file_path* is a model of this library.
+
+        GET endpoints are reachable cross-site (``<img src>``), so a
+        request-supplied path is checked with string operations only before
+        any filesystem access (a UNC path would open an SMB connection).
+        Accepted: a path inside this model type's roots, or one the scanner
+        cache already lists (an offline drive or a remembered root).
+        """
+        try:
+            _require_path_in_library_roots(
+                file_path, getattr(self._service, "scanner", None), label="File path"
+            )
+            return
+        except ValueError:
+            finder = getattr(self._service, "_find_cache_entry", None)
+            if callable(finder) and await finder(file_path) is not None:
+                return
+            raise
 
     @staticmethod
     def _parse_include_empty(request: web.Request) -> bool:
@@ -1766,6 +1846,12 @@ class ModelQueryHandler:
             file_path = request.query.get("file_path")
             if not file_path:
                 return web.Response(text="File path is required", status=400)
+            try:
+                await self._require_known_model_path(file_path)
+            except ValueError as exc:
+                return web.json_response(
+                    {"success": False, "error": str(exc)}, status=400
+                )
             metadata, partial, offline = await self._service.get_model_metadata_with_fallback(
                 file_path
             )
@@ -1805,6 +1891,12 @@ class ModelQueryHandler:
             file_path = request.query.get("file_path")
             if not file_path:
                 return web.Response(text="File path is required", status=400)
+            try:
+                await self._require_known_model_path(file_path)
+            except ValueError as exc:
+                return web.json_response(
+                    {"success": False, "error": str(exc)}, status=400
+                )
             description = await self._service.get_model_description(file_path)
             if description is not None:
                 return web.json_response({"success": True, "description": description})

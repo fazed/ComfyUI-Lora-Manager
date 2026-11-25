@@ -90,7 +90,13 @@ from ...utils.example_images_paths import (
     is_valid_example_images_root,
 )
 from ...utils.lora_metadata import extract_trained_words
-from ...utils.safe_paths import UnsafePathError, is_within, validate_path_segment
+from ...utils import library_roots
+from ...utils.safe_paths import (
+    UnsafePathError,
+    is_within,
+    require_within_any,
+    validate_path_segment,
+)
 from ...utils.session_logging import get_standalone_session_log_snapshot
 from ...utils.sidecar_paths import (
     describe_sidecar_root,
@@ -2394,6 +2400,19 @@ class TrainedWordsHandler:
                     {"success": False, "error": "Missing file_path parameter"},
                     status=400,
                 )
+            # GET endpoint: a cross-site <img src> reaches it, so check the
+            # path against the library roots (pure string check) before any
+            # filesystem access; a UNC path would open an SMB connection.
+            try:
+                require_within_any(
+                    file_path,
+                    library_roots.configured_download_roots(),
+                    label="File path",
+                )
+            except UnsafePathError as exc:
+                return web.json_response(
+                    {"success": False, "error": str(exc)}, status=400
+                )
             if not os.path.exists(file_path):
                 return web.json_response(
                     {"success": False, "error": "File not found"}, status=404
@@ -2425,6 +2444,18 @@ class ModelExampleFilesHandler:
                 return web.json_response(
                     {"success": False, "error": "Missing model_path parameter"},
                     status=400,
+                )
+            # GET endpoint: confine the listing to the library roots before
+            # any filesystem access (see get_trained_words).
+            try:
+                require_within_any(
+                    model_path,
+                    library_roots.configured_download_roots(),
+                    label="Model path",
+                )
+            except UnsafePathError as exc:
+                return web.json_response(
+                    {"success": False, "error": str(exc)}, status=400
                 )
             model_dir = os.path.dirname(model_path)
             if not os.path.exists(model_dir):
