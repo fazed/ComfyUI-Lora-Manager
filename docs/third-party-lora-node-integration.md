@@ -151,9 +151,17 @@ Third-party loader.loaded_loras (STRING)
   -> TriggerWord Toggle (LoraManager).trigger_words
 ```
 
-The resolver's `trigger_words` output preserves LoRA and trigger-group order. It uses `",, "` between groups, matching LoRA Manager's built-in loaders. Unknown LoRAs and LoRAs without metadata contribute no trigger words.
+The resolver's `trigger_words` output preserves LoRA and trigger-group order and returns prompt-ready text using `", "` between all groups, matching LoRA Manager's built-in loaders. Unknown LoRAs and LoRAs without metadata contribute no trigger words. TriggerWord Toggle receives structured groups separately through frontend synchronization. It continues to accept legacy `",, "` group separators from third-party `STRING` inputs, but new nodes should emit ordinary single-comma prompt text.
 
 Frontend synchronization follows connections directly from an adapted node to a TriggerWord Toggle and connections passing through `LoRA Trigger Words (LoraManager)`, so the same graph supports both immediate canvas updates and execution-time values.
+
+### Toggle selections and the canvas
+
+TriggerWord Toggle applies its per-word selections to the trigger words currently shown in the node. The list is refreshed when a connection changes and after a cycler or randomizer picks the LoRA set for the next run, so for manual, one-at-a-time generation the words on screen are the ones the next queue will load.
+
+When a chain node cannot report its LoRAs (no adapter and no known built-in type), the Toggle cannot know which words will arrive. The execution-time `trigger_words` value is then passed through unchanged and the per-word selections do not apply, including for words that are on the canvas. Backend triggers that change between queue and execution (for example a randomized pick in a batch queue) are covered by the same pass-through rule.
+
+Registering an adapter with `getActiveLoraNames` removes this limitation: the words reach the canvas, the list tracks the execution-time value, and selections apply as usual.
 
 API version 1 does not expose a public Python metadata resolver. Third-party nodes that must return trigger words directly from their own Python execution method remain responsible for that implementation; the resolver node is the supported low-coupling alternative.
 

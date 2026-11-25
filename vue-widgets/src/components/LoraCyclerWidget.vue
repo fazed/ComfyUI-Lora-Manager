@@ -45,7 +45,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, computed } from 'vue'
+import { onMounted, ref, computed, nextTick } from 'vue'
 import LoraCyclerSettingsView from './lora-cycler/LoraCyclerSettingsView.vue'
 import LoraListModal from './lora-cycler/LoraListModal.vue'
 import { useLoraCyclerState } from '../composables/useLoraCyclerState'
@@ -58,6 +58,8 @@ const props = defineProps<{
   widget: CyclerWidget
   node: { id: number; inputs?: any[]; widgets?: any[]; graph?: any }
   api?: any  // ComfyUI API for execution events
+  /** Push the refreshed LoRA set to downstream TriggerWord Toggle nodes. */
+  syncTriggerWords?: (node: any) => void
 }>()
 
 // State management
@@ -193,6 +195,10 @@ const handleIndexUpdate = async (newIndex: number) => {
     const loraList = await state.fetchCyclerList(poolConfig)
     cachedLoraList.value = loraList
     updateDisplayFromLoraList(loraList, clampedIndex)
+    // The display now holds the LoRA the next run will use. Wait for the Vue
+    // flush that writes it back to the widget value, then refresh the
+    // downstream toggles so their word list matches that run.
+    nextTick(() => props.syncTriggerWords?.(props.node))
   } catch (error) {
     console.error('[LoraCyclerWidget] Error updating index:', error)
   }
@@ -256,6 +262,9 @@ const handleResetIndex = async () => {
     const loraList = await state.fetchCyclerList(poolConfig)
     cachedLoraList.value = loraList
     updateDisplayFromLoraList(loraList, 1)
+    // Same as a manual pick: the reset LoRA is what the next run will load,
+    // so the downstream toggles must describe it.
+    nextTick(() => props.syncTriggerWords?.(props.node))
   } catch (error) {
     console.error('[LoraCyclerWidget] Error resetting index:', error)
   }
@@ -536,6 +545,13 @@ onMounted(async () => {
       if (pendingExecutions.length === 0) {
         state.isWorkflowExecuting.value = false
         state.executingRepeatStep.value = 0
+      }
+
+      // The display now holds the LoRA the next run will use. Wait for the Vue
+      // flush that writes it back to the widget value, then refresh the
+      // downstream toggles so their word list matches that run.
+      if (pending.output) {
+        nextTick(() => props.syncTriggerWords?.(props.node))
       }
     }
 

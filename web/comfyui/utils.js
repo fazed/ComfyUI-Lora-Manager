@@ -1051,7 +1051,15 @@ export function getPoolConfigFromConnectedNode(node) {
     return poolWidget?.value || null;
 }
 
-// Helper function to find and update downstream Lora Loader nodes
+/**
+ * Refresh every downstream node whose trigger words depend on `startNode`:
+ * Lora Loaders and intermediate chain nodes (a Lora Stacker between the Cycler
+ * and the Loader). Both emit trigger words for their whole upstream stack, so
+ * a change upstream changes the words a toggle receives at execution time.
+ *
+ * Chain nodes are traversed recursively; the fetch is coalesced per target
+ * node, so walking a chain that ends without any toggle is cheap.
+ */
 export function updateDownstreamLoaders(startNode, visited = new Set()) {
   const nodeKey = getNodeKey(startNode);
   if (!nodeKey || visited.has(nodeKey)) return;
@@ -1065,18 +1073,28 @@ export function updateDownstreamLoaders(startNode, visited = new Set()) {
           const link = getLinkFromGraph(startNode.graph, linkId);
           if (link) {
             const targetNode = startNode.graph?.getNodeById?.(link.target_id);
-
-            // If target is a Lora Loader, collect all active loras in the chain and update
-            if (
-              targetNode &&
-              targetNode.comfyClass === "Lora Loader (LoraManager)"
-            ) {
-              const allActiveLoraNames =
-                collectActiveLorasFromChain(targetNode);
-              updateConnectedTriggerWords(targetNode, allActiveLoraNames);
+            if (!targetNode) {
+              continue;
             }
-            // If target is another LORA_STACK chain node, recursively check its outputs
-            else if (targetNode && isLoraChainNode(targetNode.comfyClass)) {
+
+            const isLoraLoader =
+              targetNode.comfyClass === "Lora Loader (LoraManager)";
+            const isChainNode = isLoraChainNode(targetNode.comfyClass);
+            if (!isLoraLoader && !isChainNode) {
+              continue;
+            }
+
+            // Toggles wired straight to this node (directly, or through a
+            // LoRA Trigger Words node) see the chain-wide set: a Lora Loader
+            // applies the LORA_STACK it receives, and a Lora Stacker forwards
+            // its own entries *plus* the upstream stack. Using only the
+            // node's own LoRAs would drop the upstream pick from the toggle.
+            updateConnectedTriggerWords(
+              targetNode,
+              collectActiveLorasFromChain(targetNode)
+            );
+
+            if (isChainNode) {
               updateDownstreamLoaders(targetNode, visited);
             }
           }
@@ -1084,4 +1102,49 @@ export function updateDownstreamLoaders(startNode, visited = new Set()) {
       }
     }
   }
+}
+
+/**
+ * Push a chain node's current trigger words to the TriggerWord Toggle nodes
+ * that depend on it: toggles wired straight to the node, and toggles behind the
+ * Lora Loaders and intermediate chain nodes it feeds.
+ *
+ * Call this whenever the chain can have changed at execution time: link edits,
+ * a cycler/randomizer picking its next LoRA, or a restored widget value. The
+ * fetch is coalesced per target node, so repeated calls are cheap.
+ */
+export function syncTriggerWordsForChain(node) {
+  if (!node?.graph) {
+    return;
+  }
+
+  updateConnectedTriggerWords(node, collectActiveLorasFromChain(node));
+  updateDownstreamLoaders(node);
+}
+
+/**
+ * Install a connection-change hook that refreshes downstream TriggerWord Toggle
+ * nodes.
+ *
+ * Connecting an upstream stack changes the trigger words a Lora Loader emits at
+ * execution time, but nothing else tells the toggle, so its list would keep
+ * showing the previous set until some widget changes. The hook covers both the
+ * link made into a chain node and the link made out of it to a toggle.
+ *
+ * Idempotent: several extensions target the same node class, and the first
+ * install wins.
+ */
+export function installTriggerWordConnectionSync(nodeType) {
+  const prototype = nodeType?.prototype;
+  if (!prototype || prototype.__lmTriggerWordConnectionSync) {
+    return;
+  }
+  prototype.__lmTriggerWordConnectionSync = true;
+
+  const original = prototype.onConnectionsChange;
+  prototype.onConnectionsChange = function (...args) {
+    const result = original?.apply(this, args);
+    syncTriggerWordsForChain(this);
+    return result;
+  };
 }

@@ -22,6 +22,7 @@ from ..utils.sidecar_paths import (
     get_preview_path,
     get_sidecar_base_name,
     get_sidecar_dir,
+    get_sidecar_root,
     is_centralized,
     resolve_centralized_dir_for_dir,
 )
@@ -2410,6 +2411,72 @@ class ModelScanner:
                     # This is a new file to process
                     new_files.append(file_path)
 
+            # Determine missing files before processing additions so a new path
+            # can be matched back to the cache entry of an externally moved model.
+            # Scoped scans only remove inside their scope. A full-library refresh
+            # also drops rows left under roots removed from the configuration,
+            # while configured-but-unreadable roots remain protected below.
+            missing_files: Set[str] = set()
+            full_library_reconcile = scope is None or (
+                scope.roots is None and scope.folder is None
+            )
+            for path in cached_paths - found_paths:
+                in_scope = any(
+                    _path_matches_prefix(path, prefix)
+                    for _root, prefix in scope_prefixes
+                )
+                if not in_scope:
+                    protected_by_configured_root = any(
+                        _path_matches_prefix(path, _scope_prefix(root, None))
+                        for root in configured_only
+                    )
+                    if full_library_reconcile and not protected_by_configured_root:
+                        missing_files.add(path)
+                    continue
+                unreachable_prefix = unreachable.match(path)
+                if unreachable_prefix is not None:
+                    unreachable.record_kept(unreachable_prefix)
+                    continue
+                missing_files.add(path)
+
+            missing_by_size: Dict[int, List[Dict[str, Any]]] = {}
+            for path in missing_files:
+                entry = path_to_item[path]
+                sha_value = (entry.get("sha256") or "").lower()
+                if (
+                    not sha_value
+                    or is_empty_placeholder_hash(sha_value)
+                    or entry.get("hash_status", "completed") != "completed"
+                ):
+                    continue
+                try:
+                    size = int(entry.get("size") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if size > 0:
+                    missing_by_size.setdefault(size, []).append(entry)
+            matched_missing_paths: Set[str] = set()
+            sidecar_cleanup_dirs: Set[str] = set()
+            if new_files and missing_files and is_centralized():
+                directory_move_pairs = self._match_directory_move_pairs(
+                    new_files,
+                    missing_files,
+                    path_to_item,
+                )
+                for entry, new_path in directory_move_pairs:
+                    old_path = str(entry.get("file_path") or "")
+                    if await self._relocate_cached_sidecar(
+                        entry,
+                        new_path,
+                        cleanup_dirs=sidecar_cleanup_dirs,
+                    ):
+                        matched_missing_paths.add(old_path)
+                        logger.info(
+                            "Reconciled externally moved model %s -> %s",
+                            old_path,
+                            new_path,
+                        )
+
             # Process new files in batches
             total_added = 0
             if new_files:
@@ -2437,7 +2504,22 @@ class ModelScanner:
                                     break
                             
                             if root_path:
-                                model_data = await self._process_model_file(path, root_path)
+                                precomputed_sha256 = await self._recover_moved_model_sidecar(
+                                    path,
+                                    candidates_by_size=missing_by_size,
+                                    matched_paths=matched_missing_paths,
+                                    cleanup_dirs=sidecar_cleanup_dirs,
+                                )
+                                process_kwargs = (
+                                    {"precomputed_sha256": precomputed_sha256}
+                                    if precomputed_sha256
+                                    else {}
+                                )
+                                model_data = await self._process_model_file(
+                                    path,
+                                    root_path,
+                                    **process_kwargs,
+                                )
                                 if model_data:
                                     model_data = self.adjust_cached_entry(dict(model_data))
                                     if not model_data:
@@ -2498,6 +2580,8 @@ class ModelScanner:
                                 elapsed_seconds=time.time() - start_time,
                             )
                             return
+
+            self._prune_relocated_sidecar_dirs(sidecar_cleanup_dirs)
 
             # Repair rows whose file_name drifted from the file on disk. Only
             # mismatching entries are re-read here, so a clean library never
@@ -2567,32 +2651,6 @@ class ModelScanner:
                     total_folder_repaired,
                 )
 
-            # Find missing files (in cache but not in filesystem). Scoped scans
-            # only remove inside their scope. A full-library refresh also drops
-            # rows left under roots that were removed from the configuration,
-            # while configured-but-unreadable roots remain protected below.
-            missing_files: Set[str] = set()
-            full_library_reconcile = scope is None or (
-                scope.roots is None and scope.folder is None
-            )
-            for path in cached_paths - found_paths:
-                in_scope = any(
-                    _path_matches_prefix(path, prefix)
-                    for _root, prefix in scope_prefixes
-                )
-                if not in_scope:
-                    protected_by_configured_root = any(
-                        _path_matches_prefix(path, _scope_prefix(root, None))
-                        for root in configured_only
-                    )
-                    if full_library_reconcile and not protected_by_configured_root:
-                        missing_files.add(path)
-                    continue
-                unreachable_prefix = unreachable.match(path)
-                if unreachable_prefix is not None:
-                    unreachable.record_kept(unreachable_prefix)
-                    continue
-                missing_files.add(path)
             total_removed = 0
             
             if missing_files:
@@ -3547,9 +3605,18 @@ class ModelScanner:
 
         return sorted(discovered, key=lambda x: x.lower())
     
-    async def _create_default_metadata(self, file_path: str) -> Optional[BaseModelMetadata]:
+    async def _create_default_metadata(
+        self,
+        file_path: str,
+        *,
+        precomputed_sha256: Optional[str] = None,
+    ) -> Optional[BaseModelMetadata]:
         """Get model file info and metadata (extensible for different model types)"""
-        return await MetadataManager.create_default_metadata(file_path, self.model_class)
+        return await MetadataManager.create_default_metadata(
+            file_path,
+            self.model_class,
+            precomputed_sha256=precomputed_sha256,
+        )
     
     def _calculate_folder(self, file_path: str, roots: Optional[List[str]] = None) -> str:
         """Return the library-relative folder holding *file_path*.
@@ -3676,13 +3743,270 @@ class ModelScanner:
 
         return None
 
+    @staticmethod
+    def _find_cached_sidecar_path(entry: Mapping[str, Any]) -> Optional[str]:
+        old_path = str(entry.get("file_path") or "")
+        if not old_path:
+            return None
+
+        metadata_path = get_metadata_path(old_path)
+        candidates = [metadata_path]
+        preview_url = str(entry.get("preview_url") or "")
+        if preview_url:
+            candidates.append(
+                os.path.join(
+                    os.path.dirname(preview_url),
+                    os.path.basename(metadata_path),
+                )
+            )
+        for candidate in candidates:
+            if os.path.isfile(candidate):
+                return candidate
+        return None
+
+    async def _relocate_cached_sidecar(
+        self,
+        entry: Mapping[str, Any],
+        new_path: str,
+        *,
+        cleanup_dirs: Optional[Set[str]] = None,
+    ) -> bool:
+        old_path = str(entry.get("file_path") or "")
+        source_metadata = self._find_cached_sidecar_path(entry)
+        if not old_path or not source_metadata:
+            return False
+
+        target_metadata = get_metadata_path(new_path)
+        if os.path.exists(target_metadata):
+            return False
+
+        source_base = get_sidecar_base_name(old_path)
+        target_base = get_sidecar_base_name(new_path)
+        source_dir = os.path.dirname(source_metadata)
+        assets: List[Tuple[str, str]] = [(source_metadata, target_metadata)]
+        try:
+            for filename in os.listdir(source_dir):
+                if (
+                    filename == os.path.basename(source_metadata)
+                    or not filename.startswith(source_base + ".")
+                    or filename.endswith(".civitai.info")
+                    or filename.endswith(".tmp")
+                ):
+                    continue
+                source_asset = os.path.join(source_dir, filename)
+                if not os.path.isfile(source_asset):
+                    continue
+                suffix = filename[len(source_base):]
+                assets.append((source_asset, os.path.join(
+                    os.path.dirname(target_metadata),
+                    target_base + suffix,
+                )))
+        except OSError as exc:
+            logger.warning("Cannot enumerate moved model sidecars for %s: %s", old_path, exc)
+            return False
+
+        copied: List[Tuple[str, str]] = []
+        temporary_paths: List[str] = []
+        try:
+            os.makedirs(os.path.dirname(target_metadata), exist_ok=True)
+            for source_asset, target_asset in assets:
+                if os.path.exists(target_asset):
+                    continue
+                temporary = target_asset + ".tmp"
+                temporary_paths.append(temporary)
+                shutil.copy2(os.path.abspath(source_asset), os.path.abspath(temporary))
+                os.replace(os.path.abspath(temporary), os.path.abspath(target_asset))
+                temporary_paths.remove(temporary)
+                copied.append((source_asset, target_asset))
+
+            metadata = await self._update_metadata_paths(target_metadata, new_path)
+            if metadata is None:
+                raise ValueError("could not update relocated metadata")
+        except Exception as exc:
+            logger.warning(
+                "Cannot relocate sidecar metadata %s -> %s: %s",
+                source_metadata,
+                target_metadata,
+                exc,
+            )
+            for temporary in temporary_paths:
+                with suppress(OSError):
+                    os.remove(os.path.abspath(temporary))
+            for _source_asset, target_asset in copied:
+                with suppress(OSError):
+                    os.remove(os.path.abspath(target_asset))
+            return False
+
+        for source_asset, _target_asset in copied:
+            try:
+                os.remove(os.path.abspath(source_asset))
+            except OSError as exc:
+                logger.warning("Cannot remove old sidecar asset %s: %s", source_asset, exc)
+        if cleanup_dirs is not None:
+            cleanup_dirs.add(source_dir)
+        return True
+
+    @staticmethod
+    def _prune_relocated_sidecar_dirs(source_dirs: Set[str]) -> None:
+        sidecar_root = get_sidecar_root()
+        if not sidecar_root or not source_dirs:
+            return
+
+        root = os.path.abspath(sidecar_root)
+        root_key = os.path.normcase(root)
+        candidates: Set[str] = set()
+        for source_dir in source_dirs:
+            current = os.path.abspath(source_dir)
+            while os.path.normcase(current) != root_key:
+                try:
+                    contained = os.path.normcase(
+                        os.path.commonpath([root, current])
+                    ) == root_key
+                except ValueError:
+                    contained = False
+                if not contained:
+                    break
+                candidates.add(current)
+                parent = os.path.dirname(current)
+                if parent == current:
+                    break
+                current = parent
+
+        for directory in sorted(candidates, key=len, reverse=True):
+            try:
+                os.rmdir(directory)
+            except OSError:
+                pass
+
+    @staticmethod
+    def _directory_move_parts(path: str) -> Tuple[str, str]:
+        directory, _separator, filename = path.replace("\\", "/").rpartition("/")
+        return os.path.normcase(directory), os.path.normcase(filename)
+
+    def _match_directory_move_pairs(
+        self,
+        new_files: Sequence[str],
+        missing_files: Set[str],
+        path_to_item: Mapping[str, Dict[str, Any]],
+    ) -> List[Tuple[Dict[str, Any], str]]:
+        """Match moved directories by identical filename/size sets, without hashing."""
+        old_signatures: Dict[str, Dict[str, int]] = {}
+        old_entries: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        old_names: Set[str] = set()
+        for path in sorted(missing_files):
+            directory, filename = self._directory_move_parts(path)
+            try:
+                size = int(path_to_item[path].get("size") or 0)
+            except (TypeError, ValueError):
+                size = 0
+            old_signatures.setdefault(directory, {})[filename] = size if size > 0 else -1
+            old_entries.setdefault(directory, {})[filename] = path_to_item[path]
+            old_names.add(filename)
+
+        new_signatures: Dict[str, Dict[str, int]] = {}
+        new_paths: Dict[str, Dict[str, str]] = {}
+        for path in new_files:
+            directory, filename = self._directory_move_parts(path)
+            new_paths.setdefault(directory, {})[filename] = path
+            if filename not in old_names:
+                size = -1
+            else:
+                try:
+                    size = os.path.getsize(os.path.realpath(path))
+                except OSError:
+                    size = -1
+            new_signatures.setdefault(directory, {})[filename] = size
+
+        candidates: Dict[str, List[str]] = {}
+        for new_directory, signature in new_signatures.items():
+            if any(size <= 0 for size in signature.values()):
+                continue
+            matches = [
+                old_directory
+                for old_directory, old_signature in old_signatures.items()
+                if old_directory != new_directory and old_signature == signature
+            ]
+            if matches:
+                candidates[new_directory] = matches
+
+        singular_matches = {
+            new_directory: matches[0]
+            for new_directory, matches in candidates.items()
+            if len(matches) == 1
+        }
+        old_directory_counts: Dict[str, int] = {}
+        for old_directory in singular_matches.values():
+            old_directory_counts[old_directory] = old_directory_counts.get(old_directory, 0) + 1
+
+        pairs: List[Tuple[Dict[str, Any], str]] = []
+        for new_directory, old_directory in singular_matches.items():
+            if old_directory_counts[old_directory] != 1:
+                continue
+            for filename, new_path in new_paths[new_directory].items():
+                pairs.append((old_entries[old_directory][filename], new_path))
+        return pairs
+
+    async def _recover_moved_model_sidecar(
+        self,
+        file_path: str,
+        *,
+        candidates_by_size: Mapping[int, List[Dict[str, Any]]],
+        matched_paths: Set[str],
+        cleanup_dirs: Optional[Set[str]] = None,
+    ) -> Optional[str]:
+        """Relocate a uniquely matching cached sidecar and return the file hash."""
+        if not candidates_by_size or not is_centralized():
+            return None
+        if os.path.exists(get_metadata_path(file_path)):
+            return None
+
+        try:
+            real_path = os.path.realpath(file_path)
+            size = os.path.getsize(real_path)
+        except OSError:
+            return None
+        candidates = [
+            entry
+            for entry in candidates_by_size.get(size, [])
+            if entry.get("file_path") not in matched_paths
+        ]
+        if not candidates:
+            return None
+
+        sha256 = await calculate_sha256(real_path)
+        if not sha256 or is_empty_placeholder_hash(sha256):
+            return None
+        normalized_sha = sha256.lower()
+        matches = [
+            entry
+            for entry in candidates
+            if (entry.get("sha256") or "").lower() == normalized_sha
+        ]
+        if len(matches) != 1:
+            return normalized_sha
+
+        old_path = str(matches[0].get("file_path") or "")
+        if await self._relocate_cached_sidecar(
+            matches[0],
+            file_path,
+            cleanup_dirs=cleanup_dirs,
+        ):
+            matched_paths.add(old_path)
+            logger.info(
+                "Reconciled externally moved model %s -> %s",
+                old_path,
+                file_path,
+            )
+        return normalized_sha
+
     async def _process_model_file(
         self,
         file_path: str,
         root_path: str,
         *,
         hash_index: Optional[ModelHashIndex] = None,
-        excluded_models: Optional[List[str]] = None
+        excluded_models: Optional[List[str]] = None,
+        precomputed_sha256: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """Process a single model file and return its metadata"""
         hash_index = hash_index or self._hash_index
@@ -3769,7 +4093,13 @@ class ModelScanner:
                         logger.error(f"Error restoring civitai data from .civitai.info for {file_path}: {e}")
             
         if metadata is None:
-            metadata = await self._create_default_metadata(file_path)
+            if precomputed_sha256:
+                metadata = await self._create_default_metadata(
+                    file_path,
+                    precomputed_sha256=precomputed_sha256,
+                )
+            else:
+                metadata = await self._create_default_metadata(file_path)
 
         if metadata is None:
             # create_default_metadata returns None for empty/vanished files and

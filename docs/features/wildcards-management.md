@@ -151,7 +151,8 @@ The `/wildcards` page uses `WildcardScanner`, `WildcardModelService`, and
 
 - standard download and download-queue behavior;
 - one standard model card per downloaded artifact/version;
-- sorting, searching, pagination, and infinite scrolling;
+- sorting, substring searching by resource name, filename, and source/effective
+  wildcard keys, pagination, and infinite scrolling;
 - bulk mode, move, delete, favorite, and exclude operations;
 - folder sidebar, previews, versions, and update management;
 - the standard model modal and Civitai metadata.
@@ -190,9 +191,9 @@ resources.
 ## ComfyUI Global Wildcards panel
 
 Plugin mode adds a **Global Wildcards** floating panel. Open it from **Quick
-Actions → Global Wildcards** or the default `Alt+W` binding. The command id is
-`LoraManager.ToggleWildcardQuickPanel`; the binding can be changed or removed in
-ComfyUI's keybinding settings.
+Actions → Global Wildcards**. The command id is
+`LoraManager.ToggleWildcardQuickPanel`; it has no default binding, but one can
+be assigned in ComfyUI's keybinding settings.
 
 The panel provides:
 

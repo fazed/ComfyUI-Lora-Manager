@@ -356,6 +356,7 @@ export const state = {
             searchOptions: {
                 filename: true,
                 modelname: true,
+                wildcardKeys: true,
                 tags: false,
                 creator: false,
                 recursive: getStorageItem(`${MODEL_TYPES.WILDCARD}_recursiveSearch`, true),
