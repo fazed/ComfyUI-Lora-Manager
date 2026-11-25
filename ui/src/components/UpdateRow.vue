@@ -9,6 +9,7 @@
 import { computed } from 'vue'
 import AppIcon from './AppIcon.vue'
 import LazyMedia from './LazyMedia.vue'
+import MenuButton, { type MenuEntry } from './MenuButton.vue'
 import type { ModelPrefix, UpdateCandidate, UpdateGroup } from '@/api/types'
 import { civitaiModelUrl } from '@/utils/civitai'
 import { formatBytes, formatDate } from '@/utils/format'
@@ -16,6 +17,8 @@ import { isBlurred } from '@/utils/mature'
 import {
   canQueue,
   currentCard,
+  fileLabel,
+  formatLabel,
   hiddenText,
   libraryLink,
   reasonText,
@@ -24,20 +27,29 @@ import {
 } from '@/utils/updates'
 import { t, type MessageKey } from '@/i18n'
 
-const props = defineProps<{
-  group: UpdateGroup
-  candidate: UpdateCandidate
-  prefix: ModelPrefix
-  state: RowQueueState
-  queuing: boolean
-  destination: DerivedDestination
-  /** Newer candidates of this line not shown in the row. */
-  moreCount: number
-  blurMature: boolean
-  civitaiHost: string
-}>()
+const props = withDefaults(
+  defineProps<{
+    group: UpdateGroup
+    candidate: UpdateCandidate
+    prefix: ModelPrefix
+    state: RowQueueState
+    queuing: boolean
+    destination: DerivedDestination
+    /** Newer candidates of this line not shown in the row. */
+    moreCount: number
+    blurMature: boolean
+    civitaiHost: string
+    /** Bulk update: whether the row is ticked. */
+    selected?: boolean
+    /** Bulk update running: the checkbox and Update are locked. */
+    locked?: boolean
+    /** An ignore of this row is being stored. */
+    ignoreBusy?: boolean
+  }>(),
+  { selected: false, locked: false, ignoreBusy: false },
+)
 
-const emit = defineEmits<{ update: [] }>()
+const emit = defineEmits<{ update: []; select: [value: boolean]; ignore: [scope: 'version' | 'model'] }>()
 
 const name = computed(() => props.group.modelName || t('updates.unknownVersion'))
 const newName = computed(() => props.candidate.name || t('updates.unknownVersion'))
@@ -72,16 +84,49 @@ const stateClass = computed(() => {
   if (kind === 'paused') return 'lm-badge--warning'
   return 'lm-badge--accent'
 })
-const updateDisabled = computed(() => props.queuing || !canQueue(props.state))
+const updateDisabled = computed(() => props.locked || props.queuing || !canQueue(props.state))
+/** Only a row whose Update action is available can be ticked. */
+const canSelect = computed(() => !props.queuing && canQueue(props.state))
 const rowId = computed(() => `update-${props.group.key.replace(/[^a-z0-9-]/gi, '-')}`)
+const format = computed(() => formatLabel(props.candidate))
+const changelog = computed(() => props.candidate.description || '')
+/** The file list is only worth showing when there is more than the main file. */
+const files = computed(() => ((props.candidate.files?.length ?? 0) > 1 ? props.candidate.files! : []))
+const ignoreItems = computed<MenuEntry[]>(() => [
+  { id: 'version', label: t('updates.ignore.version'), icon: 'eyeOff', disabled: props.ignoreBusy || props.candidate.isIgnored },
+  { id: 'model', label: t('updates.ignore.model'), icon: 'eyeOff', disabled: props.ignoreBusy || props.group.isIgnored },
+])
+function onIgnore(id: string): void {
+  if (id === 'version' || id === 'model') emit('ignore', id)
+}
 
 const action = 'lm-btn phone:min-h-touch'
 const iconAction = 'lm-btn lm-btn--ghost lm-btn--icon phone:size-touch'
 </script>
 
 <template>
-  <li class="lm-panel flex gap-4 p-3 phone:flex-col phone:gap-3" :aria-labelledby="`${rowId}-name`">
+  <li
+    class="lm-panel flex gap-4 p-3 phone:flex-col phone:gap-3"
+    :class="selected && 'border-accent'"
+    :aria-labelledby="`${rowId}-name`"
+  >
     <div class="flex min-w-0 flex-1 gap-3">
+      <!-- Bulk selection: a 44px hit area on phones, the native checkbox for keyboard and screen readers. -->
+      <label
+        v-if="canSelect"
+        class="-m-1 flex flex-none cursor-pointer items-start p-1 phone:-my-2 phone:min-h-touch phone:min-w-touch phone:items-center phone:justify-center"
+      >
+        <input
+          type="checkbox"
+          class="mt-1 size-[16px] cursor-pointer accent-accent phone:mt-0"
+          :checked="selected"
+          :disabled="locked"
+          :aria-label="t('updates.bulk.selectRow', { name, version: newName })"
+          :data-testid="`select-${group.key}`"
+          @change="emit('select', ($event.target as HTMLInputElement).checked)"
+        />
+      </label>
+      <span v-else class="w-[16px] flex-none phone:hidden" aria-hidden="true"></span>
       <LazyMedia
         class="lm-thumb h-[88px] w-[66px] overflow-hidden phone:h-[72px] phone:w-[54px]"
         :media-class="['size-full object-cover', blurred && 'scale-110 blur-[12px]']"
@@ -112,6 +157,7 @@ const iconAction = 'lm-btn lm-btn--ghost lm-btn--icon phone:size-touch'
             <span class="font-medium text-accent">{{ newName }}</span>
             <span class="ml-2 text-muted">{{ formatDate(candidate.releasedAt) }}</span>
             <span v-if="candidate.sizeBytes" class="ml-2 text-muted">{{ formatBytes(candidate.sizeBytes) }}</span>
+            <span v-if="format" class="lm-badge ml-2" :title="t('updates.formatLabel')" data-testid="format-badge">{{ format }}</span>
           </dd>
         </dl>
 
@@ -125,6 +171,29 @@ const iconAction = 'lm-btn lm-btn--ghost lm-btn--icon phone:size-touch'
           {{ t('updates.moreVersions', { count: moreCount, versions: moreCount === 1 ? t('updates.version') : t('updates.versions') }) }}
         </p>
         <p v-if="state?.kind === 'failed' && state.error" class="lm-error-text">{{ state.error }}</p>
+        <!-- Changelog: plain text from the backend (no HTML is rendered). Only when a check stored it. -->
+        <details v-if="changelog || files.length" class="group/changelog text-sm" data-testid="changelog">
+          <summary
+            class="inline-flex min-h-control-sm cursor-pointer items-center gap-1 rounded-sm text-accent hover:underline phone:min-h-touch"
+            :aria-label="t('updates.whatsNewLabel', { name, version: newName })"
+          >
+            <AppIcon name="chevronRight" :size="14" class="transition-transform group-open/changelog:rotate-90 motion-reduce:transition-none" />
+            {{ t('updates.whatsNew') }}
+          </summary>
+          <div class="mt-1 flex flex-col gap-2 rounded-sm bg-sunken p-3">
+            <p v-if="changelog" class="max-h-[240px] overflow-y-auto text-pretty whitespace-pre-line wrap-anywhere">{{ changelog }}</p>
+            <div v-if="files.length">
+              <p class="text-xs font-medium text-muted">{{ t('updates.files') }}</p>
+              <ul class="flex flex-col gap-[2px] text-xs tabular-nums">
+                <li v-for="(file, index) in files" :key="index">
+                  {{ fileLabel(file) || file.type }}
+                  <span v-if="file.sizeBytes" class="text-muted"> · {{ formatBytes(file.sizeBytes) }}</span>
+                  <span v-if="file.primary" class="text-muted"> ({{ t('updates.filePrimary') }})</span>
+                </li>
+              </ul>
+            </div>
+          </div>
+        </details>
       </div>
     </div>
 
@@ -140,6 +209,14 @@ const iconAction = 'lm-btn lm-btn--ghost lm-btn--icon phone:size-touch'
         >
           <AppIcon name="download" :size="16" />{{ t('updates.action.update') }}
         </button>
+        <MenuButton
+          :label="t('updates.ignore.menu')"
+          icon="eyeOff"
+          align="right"
+          button-class="lm-btn lm-btn--ghost phone:min-h-touch"
+          :items="ignoreItems"
+          @select="onIgnore"
+        />
         <a
           v-if="civitaiUrl"
           :class="iconAction"

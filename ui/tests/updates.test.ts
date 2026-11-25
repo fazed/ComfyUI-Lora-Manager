@@ -229,8 +229,8 @@ describe('updates helpers', () => {
     expect(groupsForFilter(data.groups, 'likely').map((g) => g.modelId)).toEqual([1])
     expect(groupsForFilter(data.groups, 'possible').map((g) => g.modelId)).toEqual([2])
     expect(groupsForFilter(data.groups, 'all').map((g) => g.modelId)).toEqual([1, 2, 3])
-    expect(filterCounts(data)).toEqual({ likely: 1, possible: 1, all: 3 })
-    expect(filterCounts(null)).toEqual({ likely: 0, possible: 0, all: 0 })
+    expect(filterCounts(data)).toEqual({ likely: 1, possible: 1, all: 3, ignored: 0 })
+    expect(filterCounts(null)).toEqual({ likely: 0, possible: 0, all: 0, ignored: 0 })
   })
 
   it('picks the candidate a row shows per filter', () => {

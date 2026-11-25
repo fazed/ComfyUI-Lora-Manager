@@ -173,6 +173,29 @@ export interface UpdateCandidate {
   confidence: UpdateConfidence
   reason: UpdateReason
   hiddenBecause: UpdateHiddenReason[]
+  /** Changelog as plain text (capped by the backend); null until the next Check now. Phase 2. */
+  description?: string | null
+  /** Format / precision of the primary weight file ("SafeTensor", "fp16"); null when unknown. */
+  fileFormat?: string | null
+  precision?: string | null
+  /** Weight files of the version (primary first); [] when unknown. */
+  files?: UpdateFileInfo[]
+}
+
+export interface UpdateFileInfo {
+  type: string | null
+  format: string | null
+  precision: string | null
+  /** Civitai's size label ("full" / "pruned"). */
+  size: string | null
+  sizeBytes: number | null
+  primary: boolean
+}
+
+/** `POST /api/lm/{prefix}/updates/ignore(-version)` answer (only the parts the UI reads). */
+export interface UpdateIgnoreResponse {
+  success: boolean
+  record?: unknown
 }
 
 export interface UpdateLocalCard {
