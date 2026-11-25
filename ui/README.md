@@ -213,30 +213,149 @@ JavaScript toolchain. After every change under `ui/src` (or `index.html`):
 
 ## Syncing the fork with upstream safely
 
-Everything lives in new paths (`ui/`, `py/routes/modern_ui_routes.py`,
-`tests/routes/test_modern_ui_routes.py`, `web/comfyui/modern_ui_link.js`,
-`tests/frontend/components/modernUiLink.test.js`), so upstream merges normally
-do not conflict. The only upstream-owned files that were touched are listed
-below; if a merge conflicts there, keep upstream's version and re-apply the
-change.
+**Last synced upstream:** `willmiao/ComfyUI-Lora-Manager` `main` at
+`b8767835` (`git describe`: `v1.3.0-53-gb8767835`, committed 2026-11-25),
+merged into the fork's `main` as `b2a8f101` on 2026-11-25. The next sync
+starts from there: `git log b8767835..upstream/main` shows what is new.
+
+Most fork work lives in new paths, but the fork also changes a number of
+upstream-owned files. Those are where a merge can conflict, or merge cleanly
+and still silently drop fork behaviour. The lists below were derived with
+`git diff --name-status upstream/main main` (merge base = `upstream/main`
+after the last sync); re-derive them the same way before the next sync:
+
+```bash
+git fetch upstream
+git diff --name-status $(git merge-base main upstream/main) main | grep -v '^A'   # upstream-owned files we modified
+git diff --name-status $(git merge-base main upstream/main) main | grep '^A'      # fork-only files
+```
+
+### Upstream-owned files the fork modified (high conflict risk)
+
+32 files. On a conflict, take upstream's version and re-apply the fork change
+listed here; on a clean merge, still check that the change survived.
+
+**App wiring (2)**
+
+| File | Change / behaviour to preserve |
+| --- | --- |
+| `py/lora_manager.py` | In `LoraManager.add_routes`, after `PreviewRoutes.setup_routes(app)`: a comment plus `from .routes.modern_ui_routes import ModernUiRoutes; ModernUiRoutes.setup_routes(app)` (serves `/lm-ui/`). Imports `start_download_queue_worker` / `stop_download_queue_worker` and appends them to `app.on_startup` / `app.on_shutdown` (server-side queue worker). |
+| `standalone.py` | Same two changes in `StandaloneLoraManager.add_routes` (import path `py.routes.modern_ui_routes`, `py.services.download_queue_worker`). Keep both entry points in step. |
+
+**Backend routes and handlers (3)**
+
+| File | Change / behaviour to preserve |
+| --- | --- |
+| `py/routes/model_route_registrar.py` | Adds `GET /api/lm/{prefix}/updates/overview` -> `get_updates_overview` (read-only Updates page, no Civitai calls) and `GET /api/lm/downloads/queue/pause-all` / `resume-all` -> `pause_download_queue` / `resume_download_queue`. |
+| `py/routes/handlers/model_handlers.py` | `ModelDownloadHandler`: `download_model(_get)` and the `start=true` retry path run through `get_download_queue_worker().run_download(...)` (a running `download_id` is joined, never started twice; 409 `already_running` via `_download_failure_status`); `queue/add` validates the optional destination (`_parse_queue_destination`: `model_root` must be a configured root, safe `relative_path`, 400 otherwise), fills an empty thumbnail from the resolved version, and calls `wake_download_queue_worker()` after add / retry / reorder; queue and stats responses carry `queue_worker: true` plus `worker` (`_queue_worker_payload`); new `pause_download_queue` / `resume_download_queue`. `ModelUpdateHandler.get_updates_overview` (uses `update_classifier`). Both handlers registered in `ModelHandlerSet`. |
+| `py/routes/handlers/misc_handlers.py` | `SettingsHandler`: validates `download_queue_max_concurrent` (integer 1-5 via `normalize_max_concurrent`) and wakes the worker when it changes. `ModelLibraryHandler`: `/model-versions-status` returns `downloadedVersionIds` from the download history for models without local files (one bulk query per type); the CivitAI version list goes through `ModelVersionsStatusCache` (stale-while-revalidate, `?refresh=1`, `cached`/`stale`/`source` fields, 429 with `retryAfter` when rate-limited, 500 on error). |
+
+**Backend services and utils (7)**
+
+| File | Change / behaviour to preserve |
+| --- | --- |
+| `py/services/model_scanner.py` | **Scan guard.** One library scan per scanner (model type) at a time: `scan_library(rebuild_cache=, scope=)` coalesces identical overlapping scans (returns `(summary, joined)`) and serialises different ones; the scan runs as its own task so a cancelled request does not abort it. `get_cached_data(force_refresh=True)` delegates to `scan_library`; `initialize_in_background` holds the guard and its reconcile calls `_run_scan_locked()` directly (the guard is already held, never re-enter it). `is_scanning()` reports guard state. **Every cache-building path must go through `scan_library` or `_run_scan_locked` under the lock**: if upstream adds a new path that calls `_initialize_cache()` / `_reconcile_cache()` directly, route it through the guard. Upstream's move-aware reconcile (issue #1224) lives inside `_reconcile_cache` and therefore already runs under the guard. |
+| `py/services/base_model_service.py` | `scan_models(force_refresh=...)`: without `force_refresh` only `get_cached_data()`; with it, `scanner.scan_library(...)`, and a joined scan returns the summary with `"joined": True`. |
+| `py/services/download_manager.py` | Version lookups in the resolve step and at download start run inside `with civitai_lookup_cache():` (a batch of adds for one model shares one `/models` call); the resolve result carries `thumbnail_url` (`build_civitai_thumbnail_url`); new `get_running_download_ids()` (used by the worker for dedupe and its concurrency count). |
+| `py/services/download_queue_service.py` | New `download_queue_state` table with `get_state` / `set_state` (persisted worker pause flag); a `destination` JSON column on `download_queue` and `download_history` (added by migration for existing databases) carried through add, history moves and retry. |
+| `py/services/civitai_client.py` | `get_model_version` and the model fetch use short-TTL `TTLLookupCache`s, but only inside `civitai_lookup_cache()` (elsewhere they always fetch); the version result is also filed under its canonical ids. Uncached bodies are `_get_model_version_uncached` / `_fetch_model_data_uncached`. |
+| `py/services/settings_manager.py` | `DEFAULT_SETTINGS["download_queue_max_concurrent"] = 2`. |
+| `py/utils/civitai_utils.py` | New `build_civitai_video_still_url` and `build_civitai_thumbnail_url` (first image as an optimized rendition, a video as a JPEG still) for queue/history thumbnails. |
+
+**Classic frontend: static, templates, ComfyUI web extension (6)**
+
+| File | Change / behaviour to preserve |
+| --- | --- |
+| `static/js/state/index.js` | `download_queue_max_concurrent: 2` in `DEFAULT_SETTINGS_BASE`. |
+| `static/js/managers/SettingsManager.js` | Loads the `downloadQueueMaxConcurrent` select from `state.global.settings.download_queue_max_concurrent ?? 2`. |
+| `templates/components/modals/settings/general.html` | A "Parallel queue downloads" setting item (select 1-5, `saveSelectSetting('downloadQueueMaxConcurrent', 'download_queue_max_concurrent')`) right before `aria2PathSetting`. |
+| `web/comfyui/lora_canvas_api.js` | Imports from the fork-local `modern_ui_link.js`; `openLoraManagerHome` uses `managerHomePath(modernUiAvailability())` and `openLoraManager` uses `modelDeepLinkPath(filePath, modernUiAvailability())` instead of the fixed `/loras` and `/loras#model=` (modern UI when `/lm-ui/` is served, classic otherwise). |
+| `web/comfyui/recipe_canvas_api.js` | `openRecipeManager` uses `recipeDeepLinkPath(recipeId, modernUiAvailability())` instead of the fixed `/loras/recipes#recipe=`. |
+| `web/comfyui/top_menu_extension.js` | `setup()` calls `probeModernUi()` first (HEAD probe of `/lm-ui/` ahead of the first click). The native top-menu button (upstream PR #1230) still opens through `openLoraManagerHome`, so it follows the modern-UI link. |
+
+**Locales (10)**
+
+`locales/en.json` and `locales/{de,es,fr,he,ja,ko,ru,zh-CN,zh-TW}.json` each
+add one key, `settings.downloadQueueMaxConcurrent` with `label` and `help`
+(placed right before `settings.aria2cPath`), used by the settings template
+above. The nine non-English locales carry the **English text**, without
+upstream's `[TODO: Translate]` prefix. If upstream reorganises the
+`settings` block, re-add the key in all ten files.
+
+**Config (1)**
 
 | File | Change |
 | --- | --- |
-| `py/lora_manager.py` | after `PreviewRoutes.setup_routes(app)` in `LoraManager.add_routes`: a comment line plus `from .routes.modern_ui_routes import ModernUiRoutes; ModernUiRoutes.setup_routes(app)` |
-| `standalone.py` | after `PreviewRoutes.setup_routes(app)` in `StandaloneLoraManager.add_routes`: a comment line plus `from py.routes.modern_ui_routes import ModernUiRoutes; ModernUiRoutes.setup_routes(app)` |
-| `.gitignore` | `ui/node_modules/` (plus a comment) |
-| `web/comfyui/lora_canvas_api.js` | `openLoraManagerHome` builds its URL from `managerHomePath(modernUiAvailability())` (import from the fork-local `modern_ui_link.js`) instead of the fixed `/loras` |
-| `web/comfyui/lora_canvas_api.js` | `openLoraManager` builds its URL from `modelDeepLinkPath(filePath, modernUiAvailability())` instead of the fixed `/loras#model=` |
-| `web/comfyui/recipe_canvas_api.js` | `openRecipeManager` builds its URL from `recipeDeepLinkPath(recipeId, modernUiAvailability())` (import from `modern_ui_link.js`) instead of the fixed `/loras/recipes#recipe=` |
-| `web/comfyui/top_menu_extension.js` | `setup()` starts `probeModernUi()` (import from `modern_ui_link.js`) |
+| `.gitignore` | `ui/node_modules/` (plus a comment; `ui/dist` is committed on purpose). |
 
-No templates, static files or locale files were changed. A "Modern UI" link
-in the classic UI would require editing upstream templates, so it was left
-out; use `/lm-ui/` directly (the new UI links back to the classic one).
+**Upstream tests extended (3)**
 
-After pulling upstream, check that the endpoints used in `src/api/endpoints.ts`
-still exist (`py/routes/model_route_registrar.py`, `misc_route_registrar.py`,
-`recipe_route_registrar.py`) and run `bun run test`.
+| File | Change |
+| --- | --- |
+| `tests/routes/test_download_queue_handlers.py` | Thumbnail fill, worker capability flag, pause-all/resume-all, add wakes the worker, `download-model-get` joins a running download / returns 409. |
+| `tests/routes/test_misc_routes.py` | `downloadedVersionIds` from history for missing models; `download_queue_max_concurrent` validation. |
+| `tests/utils/test_civitai_utils_rewrite.py` | `build_civitai_thumbnail_url` / `build_civitai_video_still_url`. |
+
+No upstream docs were changed. A "Modern UI" link inside the classic UI
+pages would require more template edits, so it was left out; use `/lm-ui/`
+directly (the new UI links back to the classic one).
+
+### Fork-only files (normally conflict-free)
+
+* `ui/` - the whole modern UI (source, committed `dist/`, this README).
+* `py/routes/modern_ui_routes.py` - serves `/lm-ui/` and the user themes.
+* `py/services/download_queue_worker.py` - server-side executor for the
+  persistent download queue (concurrency, pause/resume, dedupe by
+  `download_id`, destination handling).
+* `py/services/civitai_lookup_cache.py` - short-TTL lookup cache and the
+  `civitai_lookup_cache()` context.
+* `py/services/model_versions_status_cache.py` - per-model cache of CivitAI
+  version lists for `/model-versions-status`.
+* `py/services/update_classifier.py` - classification behind
+  `/updates/overview`.
+* `web/comfyui/modern_ui_link.js` - `/lm-ui/` availability probe and link
+  builders used by the three web files above.
+* 15 test files: `tests/frontend/components/modernUiLink.test.js`,
+  `tests/frontend/components/topMenuExtension.modernUi.test.js`,
+  `tests/routes/test_{modern_ui_routes,updates_overview_route,download_queue_destination,b2b_ui_contract,recipe_ui_contract}.py`,
+  `tests/services/test_{model_scanner_scan_guard,scan_guard_move_reconcile,download_queue_worker,civitai_lookup_cache,model_versions_status_cache,update_classifier,model_actions_contract,model_tools_contract}.py`.
+
+### Tests that guard the seams
+
+| Seam | Tests |
+| --- | --- |
+| Scan guard | `tests/services/test_model_scanner_scan_guard.py`, `tests/services/test_scan_guard_move_reconcile.py` (upstream's move-aware reconcile runs inside the guard) |
+| Modern-UI link from ComfyUI | `tests/frontend/components/modernUiLink.test.js`, `tests/frontend/components/topMenuExtension.modernUi.test.js` |
+| `/lm-ui/` route | `tests/routes/test_modern_ui_routes.py` |
+| Queue worker and its hooks | `tests/services/test_download_queue_worker.py`, `tests/routes/test_download_queue_handlers.py`, `tests/routes/test_download_queue_destination.py`, `tests/services/test_civitai_lookup_cache.py` |
+| Updates overview / versions status | `tests/routes/test_updates_overview_route.py`, `tests/services/test_update_classifier.py`, `tests/services/test_model_versions_status_cache.py`, `tests/routes/test_misc_routes.py` |
+| Upstream behaviour the UI relies on | `tests/services/test_model_actions_contract.py`, `tests/services/test_model_tools_contract.py`, `tests/routes/test_recipe_ui_contract.py`, `tests/routes/test_b2b_ui_contract.py` |
+
+### Sync procedure
+
+1. Work in your own worktree and branch, never in the installed checkout:
+   `git worktree add -b sync/upstream-<date> ../lm-wt-sync main`.
+2. Python baseline **before** merging: run pytest with the ComfyUI venv
+   (here `ComfyUI/.venv/Scripts/python.exe -m pytest`; `pytest.ini` sets
+   the options) and save the list of failures. On this Windows install about
+   40 failures are known and all come from symlink creation (needs admin or
+   developer mode); they are not regressions.
+3. `git fetch upstream && git merge upstream/main`. Resolve conflicts with the
+   tables above; also re-check the files that merged cleanly.
+4. After the merge:
+   * Python: the same pytest run; the failure list must equal the baseline.
+   * Root frontend tests: `bun run vitest run` (or `bun run test:js`). Do not
+     use the root `bun run test`: it chains `npm`/`npx`.
+   * `ui/`: `cd ui && bun run test && bun run build`; check that the
+     endpoints in `src/api/endpoints.ts` still exist
+     (`py/routes/model_route_registrar.py`, `misc_route_registrar.py`,
+     `recipe_route_registrar.py`). Commit a regenerated `ui/dist` if the
+     build changed it.
+   * `vue-widgets/` (upstream's Vue widgets; not run by any of the above):
+     `cd vue-widgets && bun install && bun run test` (its `test` script is
+     `vitest run`).
+5. Re-derive the lists in this section and update the "Last synced upstream"
+   line.
 
 ## Theming
 
