@@ -7,6 +7,7 @@ import copy
 import json
 import logging
 import os
+import re
 import asyncio
 import inspect
 import shutil
@@ -3611,8 +3612,20 @@ class DownloadManager:
                     extension = os.path.splitext(info.filename)[1].lower()
                     if extension not in normalized_extensions:
                         continue
-                    file_name = os.path.basename(info.filename)
+                    # The member name is attacker-controlled: keep only its
+                    # last component (either separator, on every OS) and
+                    # require it to be one safe segment (no drive, ':', NUL,
+                    # reserved device name such as "CON.safetensors").
+                    file_name = re.split(r"[\\/]", info.filename)[-1]
                     if not file_name:
+                        continue
+                    try:
+                        validate_path_segment(file_name)
+                    except UnsafePathError:
+                        logger.warning(
+                            "Skipping archive member with an unsafe name: %r",
+                            info.filename,
+                        )
                         continue
                     # Archive member names come from the uploader uncapped;
                     # fit each to the destination budget like any other
@@ -3633,6 +3646,12 @@ class DownloadManager:
                     dest_path = self._resolve_extracted_destination(
                         target_dir, fitted_stem + member_ext
                     )
+                    if not is_within(target_dir, dest_path):
+                        logger.warning(
+                            "Skipping archive member outside the target folder: %r",
+                            info.filename,
+                        )
+                        continue
                     with archive.open(info) as source, open(dest_path, "wb") as target:
                         shutil.copyfileobj(source, target)
                     extracted_files.append(dest_path)

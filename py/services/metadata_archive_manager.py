@@ -1,9 +1,12 @@
 import zipfile
 import logging
 import asyncio
+import os
+import shutil
 from pathlib import Path
 from typing import Optional
 from .downloader import get_downloader, DownloadProgress
+from ..utils.safe_paths import UnsafePathError, safe_join
 
 logger = logging.getLogger(__name__)
 
@@ -129,9 +132,29 @@ class MetadataArchiveManager:
             return False
             
     def _extract_zip_sync(self):
-        """Synchronous zip extraction (runs in thread pool)"""
+        """Synchronous zip extraction (runs in thread pool).
+
+        Every member name is validated as a relative path and joined with
+        ``safe_join`` instead of trusting ``extractall``'s sanitizer: drives,
+        UNC prefixes, ``..``, ``:`` (NTFS streams) and reserved device names
+        are skipped, so nothing lands outside ``base_path``.
+        """
+        base = str(self.base_path)
         with zipfile.ZipFile(self.archive_path, 'r') as archive:
-            archive.extractall(path=self.base_path)
+            for info in archive.infolist():
+                try:
+                    destination = safe_join(base, info.filename)
+                except UnsafePathError:
+                    logger.warning("Skipping unsafe archive member: %r", info.filename)
+                    continue
+                if destination == base:
+                    continue
+                if info.is_dir():
+                    os.makedirs(destination, exist_ok=True)
+                    continue
+                os.makedirs(os.path.dirname(destination), exist_ok=True)
+                with archive.open(info) as source, open(destination, 'wb') as target:
+                    shutil.copyfileobj(source, target)
             
     async def remove_database(self) -> bool:
         """Remove the metadata database and folder"""
