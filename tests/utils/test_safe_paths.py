@@ -281,3 +281,80 @@ def test_reject_unc_or_device_rejects(value):
 )
 def test_reject_unc_or_device_accepts(value):
     assert reject_unc_or_device(value) == value
+
+
+# --- Phase B1: string-only absolute / UNC detection -------------------------
+
+from py.utils.safe_paths import is_absolute_like, is_unc_or_device  # noqa: E402
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        r"C:\models\x.safetensors",
+        "C:/models/x.safetensors",
+        "d:\\",
+        "/home/u/models",
+        r"\models\x",
+        r"\\srv\share\x",
+        "//srv/share/x",
+        r"\\?\C:\x",
+        r"\\.\pipe\x",
+    ],
+)
+def test_is_absolute_like_true(value):
+    assert is_absolute_like(value) is True
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["", "x.safetensors", "a/b", r"a\b", "C:evil", r"c:x\y", "./a", "../a", None, 3],
+)
+def test_is_absolute_like_false(value):
+    assert is_absolute_like(value) is False
+
+
+def test_is_absolute_like_matches_pre_313_windows_semantics_for_rooted_paths():
+    # Python 3.12 ntpath.isabs treated "/x" and "\\x" as absolute; 3.13 does
+    # not. The helper keeps the old meaning on every OS and Python version.
+    import ntpath
+
+    for value in ("/x", "\\x", "C:/x", r"\\srv\share\x"):
+        assert is_absolute_like(value)
+    for value in ("C:x", "x"):
+        assert not is_absolute_like(value)
+        assert not ntpath.isabs(value)
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        (r"\\srv\share\x", True),
+        ("//srv/share/x", True),
+        (r"\\?\C:\x", True),
+        (r"\\.\pipe\x", True),
+        (r"/\srv\share", True),
+        (r"\x", False),
+        (r"C:\x", False),
+        ("/x", False),
+        ("x", False),
+        ("", False),
+        (None, False),
+    ],
+)
+def test_is_unc_or_device(value, expected):
+    assert is_unc_or_device(value) is expected
+
+
+def test_string_helpers_never_touch_the_filesystem(monkeypatch):
+    import ntpath as _ntpath
+
+    def boom(*_a, **_k):  # pragma: no cover - must not run
+        raise AssertionError("filesystem access")
+
+    for name in ("stat", "lstat", "listdir", "scandir"):
+        monkeypatch.setattr(os, name, boom)
+    monkeypatch.setattr(os.path, "exists", boom)
+    monkeypatch.setattr(_ntpath, "exists", boom, raising=False)
+    assert is_unc_or_device(r"\\evil\share\x")
+    assert is_absolute_like(r"\\evil\share\x")

@@ -36,6 +36,8 @@ __all__ = [
     "safe_join",
     "require_within_any",
     "reject_unc_or_device",
+    "is_unc_or_device",
+    "is_absolute_like",
 ]
 
 
@@ -226,6 +228,42 @@ def reject_unc_or_device(path: object) -> str:
         if segment and segment not in (".", "..") and _is_reserved_name(segment):
             raise UnsafePathError(f"Path uses a reserved device name: {path!r}")
     return path
+
+
+def is_unc_or_device(path: object) -> bool:
+    r"""Return whether *path* is a UNC or device-namespace path (string check).
+
+    ``\\host\share``, ``//host/share``, ``\\?\C:\x`` and
+    ``\\.\pipe\x`` (with either separator) are UNC/device paths;
+    anything else, including non-strings, is not. Never touches the
+    filesystem.
+    """
+
+    if not isinstance(path, str):
+        return False
+    return path.replace("/", "\\").startswith("\\\\")
+
+
+def is_absolute_like(path: object) -> bool:
+    r"""Return whether *path* is meant as an absolute path, on any OS.
+
+    Python 3.13 made ``os.path.isabs('/x')`` return ``False`` on Windows,
+    which silently turned rooted business paths into relative ones. This
+    helper applies one rule everywhere: a drive path with a root
+    (``C:\x``, ``C:/x``), a UNC or device path (``\\srv\share``,
+    ``//srv/share``, ``\\?\...``) and a rooted path (``/x``,
+    ``\x``) are absolute-like; a drive-relative path (``C:x``), a bare
+    name and ``""`` are not. Pure string check.
+    """
+
+    if not isinstance(path, str) or not path:
+        return False
+    if path[0] in ("/", "\\"):
+        return True
+    drive, rest = ntpath.splitdrive(path)
+    if not drive:
+        return False
+    return rest[:1] in ("/", "\\")
 
 
 # Exposed for tests that exercise Windows and POSIX semantics on any OS.
