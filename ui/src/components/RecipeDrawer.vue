@@ -102,6 +102,13 @@ async function loadDetail(): Promise<void> {
   }
 }
 
+/** Page refresh: re-read the recipe in place (the drawer stays open; "opened" is not recorded again). */
+async function refresh(): Promise<void> {
+  if (!loading.value) await loadDetail()
+}
+
+defineExpose({ refresh })
+
 watch(
   () => props.item.id,
   () => {

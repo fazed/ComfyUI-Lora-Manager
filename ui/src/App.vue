@@ -6,9 +6,12 @@ import ToastHost from '@/components/ToastHost.vue'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import NodePickerDialog from '@/components/NodePickerDialog.vue'
 import { useTheme } from '@/composables/useTheme'
+import { useRefreshHost } from '@/composables/useRefresh'
 import { t } from '@/i18n'
 
 useTheme()
+// `r` refreshes the current page; opted-in pages refresh silently after the tab was hidden for a while.
+useRefreshHost()
 const route = useRoute()
 
 // Route change (not a tab/query change inside a page): move focus to <main> when it was on

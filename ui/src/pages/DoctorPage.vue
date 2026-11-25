@@ -11,6 +11,7 @@ import EnvironmentPanel from '@/components/EnvironmentPanel.vue'
 import PageShell from '@/components/PageShell.vue'
 import StateBlock from '@/components/StateBlock.vue'
 import { useDoctor } from '@/composables/useMaintenance'
+import { useRefreshHandler } from '@/composables/useRefresh'
 import { actionKind, type CheckStatus } from '@/utils/maintenance'
 import { withMountPrefix } from '@/utils/basePath'
 import { t, type MessageKey } from '@/i18n'
@@ -51,13 +52,20 @@ async function runAction(id: string): Promise<void> {
 const isFix = (id: string) => id === 'repair-cache' || id === 'resolve-filename-conflicts'
 
 onMounted(() => void doctor.run())
+// `r` runs the checks again; the page keeps its own "Run again" button instead of the shell's Refresh.
+useRefreshHandler({
+  run: async () => {
+    if (!loading.value && !busy.value) await doctor.run()
+  },
+  button: false,
+})
 </script>
 
 <template>
   <PageShell :title="t('doctor.title')">
     <template #description>{{ t('doctor.intro') }}</template>
     <template #actions>
-      <button type="button" class="lm-btn" :disabled="loading || !!busy" @click="doctor.run()">
+      <button type="button" class="lm-btn" :disabled="loading || !!busy" aria-keyshortcuts="R" :title="t('doctor.rerunShortcut')" @click="doctor.run()">
         <AppIcon name="refresh" :size="16" />{{ loading ? t('doctor.running') : report ? t('doctor.rerun') : t('doctor.run') }}
       </button>
       <button type="button" class="lm-btn" :disabled="!report || !!busy" :title="t('doctor.exportHint')" @click="doctor.exportBundle()">

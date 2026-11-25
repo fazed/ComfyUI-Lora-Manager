@@ -10,7 +10,7 @@
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useEventListener, useMutationObserver, useResizeObserver } from '@vueuse/core'
 import { scrollTopToReveal } from '@/utils/drawerNav'
-import { gridMetrics, parseLength, rowTop, type GridLayout, type LayoutTokens, type VirtualGridExposed } from '@/utils/gridLayout'
+import { anchorAt, gridMetrics, parseLength, rowTop, type GridLayout, type LayoutTokens, type VirtualGridExposed } from '@/utils/gridLayout'
 import { t } from '@/i18n'
 
 const props = withDefaults(
@@ -151,10 +151,17 @@ function scrollTo(top: number): void {
   scrollTop.value = scroller.value.scrollTop
 }
 
+/** Refresh: remember the top visible item, then put it back at the same spot after the items were replaced. */
+const anchor = () => anchorAt(scroller.value?.scrollTop ?? 0, metrics.value)
+
+function scrollToAnchor(index: number, offset: number): void {
+  scrollTo(rowTop(index, metrics.value) + offset)
+}
+
 /** Placeholder cells that fill the viewport at the real column count. */
 const skeletonCount = computed(() => columns.value * (Math.ceil(viewportHeight.value / rowHeight.value) + 1))
 
-defineExpose<VirtualGridExposed>({ scrollToTop, scrollToIndex, scrollTo, scrollOffset })
+defineExpose<VirtualGridExposed>({ scrollToTop, scrollToIndex, scrollTo, scrollOffset, anchor, scrollToAnchor })
 </script>
 
 <template>

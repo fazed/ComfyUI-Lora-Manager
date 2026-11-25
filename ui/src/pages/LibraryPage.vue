@@ -38,6 +38,7 @@ import { copyText, useToasts } from '@/composables/useFeedback'
 import { useFolderPanel } from '@/composables/useFolderPanel'
 import { useInfiniteList } from '@/composables/useInfiniteList'
 import { useLibraryFilters } from '@/composables/useLibraryFilters'
+import { useRefreshHandler } from '@/composables/useRefresh'
 import { takeStashedItem } from '@/composables/useSearch'
 import { queryParam } from '@/config/navigation'
 import type { SuggestOption } from '@/utils/suggest'
@@ -48,6 +49,7 @@ import type { TemplateScope } from '@/api/endpoints'
 import { sortBaseModels } from '@/utils/baseModelChips'
 import { computeNav, type NavDirection } from '@/utils/drawerNav'
 import { isVideoUrl } from '@/utils/format'
+import { refreshInPlace } from '@/utils/refreshList'
 import { clearBrowseView, RESTORE_MAX_ITEMS, saveBrowseView, takeBrowseView, unfilteredTotal, type BrowseViewState } from '@/utils/browse'
 import { hiddenSelectedCount, invertSelection, pruneSelection, selectRange, validateFileName } from '@/utils/modelActions'
 import { withMountPrefix } from '@/utils/basePath'
@@ -125,6 +127,7 @@ const list = useInfiniteList<ModelItem>((page, signal) =>
 )
 
 const grid = ref<VirtualGridExposed | null>(null)
+const drawer = ref<{ refresh(): Promise<void> } | null>(null)
 const tree = shallowRef<FolderTreeData>({})
 const baseModels = ref<CountEntry[]>([])
 const topTags = ref<TagEntry[]>([])
@@ -196,13 +199,36 @@ onBeforeUnmount(() => {
   })
 })
 
+/** Folder tree, base-model chips and tag filters: failures keep the previous data (as on the first load). */
+function loadSecondary(): Promise<unknown> {
+  return Promise.allSettled([
+    api.folderTree().then((value) => (tree.value = value)),
+    api.baseModels(100).then((value) => (baseModels.value = value)),
+    api.topTags(40).then((value) => (topTags.value = value)),
+  ])
+}
+
 onMounted(() => {
   void list.reset().then(() => (restored ? restoreScroll(restored) : undefined))
   void loadSettings()
-  api.folderTree().then((value) => (tree.value = value)).catch(() => undefined)
-  api.baseModels(100).then((value) => (baseModels.value = value)).catch(() => undefined)
-  api.topTags(40).then((value) => (topTags.value = value)).catch(() => undefined)
+  void loadSecondary()
 })
+
+// --- Refresh (toolbar button, `r`, tab visible again): re-read in place, keep filters, sort, folder,
+// selection, scroll and the open drawer. Only GET requests; no library rescan.
+const REFRESH_MAX_PAGES = Math.ceil(RESTORE_MAX_ITEMS / PAGE_SIZE)
+
+async function refreshPage(): Promise<void> {
+  const secondary = loadSecondary()
+  await refreshInPlace(list, grid.value, (item) => item.file_path, REFRESH_MAX_PAGES)
+  // The open drawer shows the refreshed copy of its model (when it is among the loaded items) and re-reads its metadata.
+  const open = openItem.value
+  const fresh = open && list.items.value.find((item) => item.file_path === open.file_path)
+  if (fresh) openItem.value = fresh
+  await Promise.all([secondary, drawer.value?.refresh()])
+}
+
+useRefreshHandler({ run: refreshPage, onVisible: true })
 
 function selectFolder(path: string): void {
   state.folder = state.folder === path ? '' : path
@@ -844,6 +870,7 @@ function bulkSend(event: MouseEvent): void {
 
     <ModelDrawer
       v-if="openItem"
+      ref="drawer"
       :item="openItem"
       :api="api"
       :classic-url="classicUrl"

@@ -42,6 +42,8 @@ export const ICON_PATHS = {
   eyeOff: ['M3 3l18 18', 'M10.6 10.6a2 2 0 0 0 2.8 2.8', 'M9.9 5.1A10 10 0 0 1 12 5c5 0 9 5 10 7a17 17 0 0 1-3 3.9', 'M6.6 6.6C4.4 8 2.8 10.2 2 12c1 2 5 7 10 7a10 10 0 0 0 5.4-1.6'],
   wand: ['m15 4 5 5', 'M3 21 14.5 9.5', 'M19 2v2', 'M22 5h-2'],
   refresh: ['M21 12a9 9 0 1 1-2.6-6.4', 'M21 3v6h-6'],
+  /** Reload the page's data (two arrows: distinct from `refresh`, which marks "Refresh from Civitai"). */
+  reload: ['M3 12a9 9 0 0 1 15.5-6.2L21 8', 'M21 3v5h-5', 'M21 12a9 9 0 0 1-15.5 6.2L3 16', 'M3 21v-5h5'],
   pause: ['M7 4h3v16H7z', 'M14 4h3v16h-3z'],
   play: ['m7 4 13 8-13 8V4Z'],
   plus: ['M12 5v14', 'M5 12h14'],

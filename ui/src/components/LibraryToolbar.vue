@@ -10,7 +10,9 @@
  * wrapping), search drops to its own row at 900px and below, and on phones
  * (<= 720px) a "Filters and sort" button opens a bottom sheet holding sort,
  * folders, selection, tools and the filter groups. Bare `f` / `s` toggle the
- * filters and selection mode outside text fields, menus and dialogs.
+ * filters and selection mode outside text fields, menus and dialogs. The
+ * page's Refresh button (composables/useRefresh.ts) sits before Tools on
+ * desktop and is a row of the phone sheet; `r` is handled by the app shell.
  */
 import { ref } from 'vue'
 import { useEventListener, useMediaQuery } from '@vueuse/core'
@@ -18,6 +20,7 @@ import AppIcon from './AppIcon.vue'
 import BottomSheet from './BottomSheet.vue'
 import type { IconName } from './icons'
 import MenuButton, { type MenuEntry } from './MenuButton.vue'
+import RefreshButton from './RefreshButton.vue'
 import SearchCombobox from './SearchCombobox.vue'
 import type { FilterChip, ViewMode } from '@/composables/useLibraryFilters'
 import { CARD_SIZE_MAX, CARD_SIZE_MIN } from '@/composables/useLibraryFilters'
@@ -255,6 +258,7 @@ defineExpose({ foldersToggle })
     >
       <AppIcon name="checkSquare" :size="16" /><span class="max-[1279px]:sr-only">{{ t('library.select') }}</span>
     </button>
+    <RefreshButton :hint="t('refresh.rescanHint')" />
     <MenuButton :label="t('library.toolsMenu')" icon="wrench" align="right" :items="toolItems" @select="emit('tool', $event)" />
   </div>
 
@@ -324,6 +328,8 @@ defineExpose({ foldersToggle })
           <AppIcon name="checkSquare" :size="16" />{{ t('library.select') }}
         </button>
       </div>
+      <!-- Stays open while refreshing, so the busy state is visible. -->
+      <RefreshButton variant="row" :hint="t('refresh.rescanHint')" />
       <div v-if="toolItems.length" class="grid gap-1" role="group" :aria-label="t('library.tools')">
         <button
           v-for="entry in toolItems"

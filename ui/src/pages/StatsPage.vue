@@ -15,6 +15,7 @@ import ScatterChart from '@/components/charts/ScatterChart.vue'
 import StackedBars from '@/components/charts/StackedBars.vue'
 import { seriesBg } from '@/components/charts/chartClasses'
 import { statsApi } from '@/api/maintenance'
+import { useRefreshHandler } from '@/composables/useRefresh'
 import { withMountPrefix } from '@/utils/basePath'
 import { formatBytes } from '@/utils/format'
 import {
@@ -145,9 +146,17 @@ function onTabKey(event: KeyboardEvent): void {
   document.getElementById(`stats-tab-${next}`)?.focus()
 }
 
-async function load(): Promise<void> {
-  loading.value = true
-  error.value = null
+/**
+ * `keep` (refresh): the current charts stay on screen while loading and a
+ * failure keeps them (and rejects, so the refresh reports it) instead of
+ * replacing the page with the error block.
+ */
+async function load(keep = false): Promise<void> {
+  const inPlace = keep && !error.value && !loading.value
+  if (!inPlace) {
+    loading.value = true
+    error.value = null
+  }
   try {
     const [ov, usage, base, tagData, store, ins] = await Promise.all([
       statsApi.overview(),
@@ -170,13 +179,28 @@ async function load(): Promise<void> {
     storage.value = normaliseStorage(store)
     insights.value = normaliseInsights(ins)
   } catch (err) {
+    if (inPlace) throw err
     error.value = (err as Error).message
   } finally {
     loading.value = false
   }
 }
 
-onMounted(load)
+onMounted(() => load())
+
+/** The paged "most used" lists that were opened: re-read the rows already shown, in one request each. */
+async function reloadUsageLists(): Promise<void> {
+  await Promise.all(
+    USAGE_TYPES.filter(({ type }) => lists[type].loaded && !lists[type].loading).map(async ({ type }) => {
+      const list = lists[type]
+      const page = await statsApi.usageList(type, 0, Math.max(20, list.items.length))
+      list.items = normaliseUsageItems(page.items)
+      list.total = Number(page.total) || list.items.length
+    }),
+  )
+}
+
+useRefreshHandler({ run: () => Promise.all([load(true), reloadUsageLists()]).then(() => undefined) })
 
 const tagSize: Record<number, string> = { 1: 'text-xs', 2: 'text-sm', 3: 'text-md', 4: 'text-lg', 5: 'text-xl' }
 const insightClass: Record<string, string> = {

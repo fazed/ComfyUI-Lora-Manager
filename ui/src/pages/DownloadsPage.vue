@@ -8,6 +8,7 @@ import { downloadsApi } from '@/api/endpoints'
 import type { QueueItem } from '@/api/types'
 import { useConfirm, useToasts } from '@/composables/useFeedback'
 import { useDownloadQueue } from '@/composables/useDownloadQueue'
+import { useRefreshHandler } from '@/composables/useRefresh'
 import PageShell from '@/components/PageShell.vue'
 import { parseCivitaiInput } from '@/utils/civitai'
 import { formatBytes, formatDateTime, formatSpeed, progressPercent } from '@/utils/format'
@@ -147,6 +148,14 @@ async function addDownload(): Promise<void> {
 
 onMounted(() => {
   void loadHistory()
+})
+
+// Refresh: the queue (also polled while this page is open) and the history, in place.
+useRefreshHandler({
+  run: async () => {
+    await Promise.all([queue.refresh(), loadHistory()])
+    if (historyError.value) throw new Error(historyError.value)
+  },
 })
 
 watch(finishedCount, (value) => {

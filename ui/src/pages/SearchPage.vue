@@ -13,6 +13,7 @@ import StateBlock from '@/components/StateBlock.vue'
 import { GLOBAL_SCOPES, searchLibrary, type LibraryScope } from '@/api/suggestSource'
 import { stashItem } from '@/composables/useSearch'
 import { useAppSettings } from '@/composables/useAppSettings'
+import { useRefreshHandler } from '@/composables/useRefresh'
 import { NAV_TABS, itemTarget, queryParam, seeAllTarget } from '@/config/navigation'
 import { splitHighlight, SUGGEST_MIN_CHARS, type SuggestItem } from '@/utils/suggest'
 import { t } from '@/i18n'
@@ -41,9 +42,10 @@ function tabFor(scope: LibraryScope) {
   return NAV_TABS.find((tab) => tab.to === `/${scope}`)!
 }
 
-async function run(q: string): Promise<void> {
+/** `keep` (refresh): the current results stay until the new ones arrive. */
+async function run(q: string, keep = false): Promise<void> {
   controller?.abort()
-  sections.value = []
+  if (!keep) sections.value = []
   if (q.length < SUGGEST_MIN_CHARS) return
   const current = new AbortController()
   controller = current
@@ -65,6 +67,7 @@ function open(scope: LibraryScope, item: SuggestItem): void {
 }
 
 watch(query, (q) => void run(q), { immediate: true })
+useRefreshHandler({ run: () => run(query.value, true) })
 void loadSettings()
 onBeforeUnmount(() => controller?.abort())
 </script>

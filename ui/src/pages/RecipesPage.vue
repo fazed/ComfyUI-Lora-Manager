@@ -36,6 +36,8 @@ import { useDismissLayer } from '@/composables/useDismiss'
 import { useToasts } from '@/composables/useFeedback'
 import { useFolderPanel } from '@/composables/useFolderPanel'
 import { useInfiniteList } from '@/composables/useInfiniteList'
+import { useRefreshHandler } from '@/composables/useRefresh'
+import { refreshInPlace } from '@/utils/refreshList'
 import { useLibraryFilters } from '@/composables/useLibraryFilters'
 import { recipeTitle, useRecipeActions } from '@/composables/useRecipeActions'
 import { clearBrowseView, RESTORE_MAX_ITEMS, saveBrowseView, takeBrowseView, unfilteredTotal, type BrowseViewState } from '@/utils/browse'
@@ -106,6 +108,7 @@ const list = useInfiniteList<RecipeItem>((page, signal) =>
 )
 
 const grid = ref<VirtualGridExposed | null>(null)
+const drawer = ref<{ refresh(): Promise<void> } | null>(null)
 const tree = shallowRef<FolderTreeData>({})
 const baseModels = ref<CountEntry[]>([])
 const topTags = ref<TagEntry[]>([])
@@ -146,14 +149,14 @@ const countText = computed(() => {
     : t('recipes.countOf', { count: count.toLocaleString(), total: all.toLocaleString() })
 })
 
-function refreshMeta(): void {
-  recipesApi.folderTree().then((value) => (tree.value = value)).catch(() => undefined)
-  // The synthetic "Unknown" bucket filters by a marker value; it is left out of the chips.
-  recipesApi
-    .baseModels(100)
-    .then((value) => (baseModels.value = value.filter((entry) => !entry.value)))
-    .catch(() => undefined)
-  recipesApi.topTags(40).then((value) => (topTags.value = value)).catch(() => undefined)
+/** Folder tree, base-model chips and tag filters; a failure keeps the previous data. */
+function refreshMeta(): Promise<unknown> {
+  return Promise.allSettled([
+    recipesApi.folderTree().then((value) => (tree.value = value)),
+    // The synthetic "Unknown" bucket filters by a marker value; it is left out of the chips.
+    recipesApi.baseModels(100).then((value) => (baseModels.value = value.filter((entry) => !entry.value))),
+    recipesApi.topTags(40).then((value) => (topTags.value = value)),
+  ])
 }
 
 function reload(): void {
@@ -189,8 +192,23 @@ onBeforeUnmount(() => {
 onMounted(() => {
   void list.reset().then(() => (restored ? restoreScroll(restored) : undefined))
   void loadSettings()
-  refreshMeta()
+  void refreshMeta()
 })
+
+// --- Refresh (toolbar button, `r`, tab visible again): re-read in place, keep filters, sort, folder,
+// "missing only", selection, scroll and the open drawer. Only GET requests; no recipe rescan.
+const REFRESH_MAX_PAGES = Math.ceil(RESTORE_MAX_ITEMS / PAGE_SIZE)
+
+async function refreshPage(): Promise<void> {
+  const meta = refreshMeta()
+  await refreshInPlace(list, grid.value, (item) => item.id, REFRESH_MAX_PAGES)
+  const open = openItem.value
+  const fresh = open && list.items.value.find((item) => item.id === open.id)
+  if (fresh) openItem.value = fresh
+  await Promise.all([meta, drawer.value?.refresh()])
+}
+
+useRefreshHandler({ run: refreshPage, onVisible: true })
 
 function selectFolder(path: string): void {
   state.folder = state.folder === path ? '' : path
@@ -539,6 +557,7 @@ function filterByTag(tag: string): void {
 
     <RecipeDrawer
       v-if="openItem"
+      ref="drawer"
       :item="openItem"
       :actions="actions"
       :blur-mature="blurMature"

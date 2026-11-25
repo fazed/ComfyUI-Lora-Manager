@@ -73,4 +73,15 @@ export interface VirtualGridExposed {
   scrollToIndex(index: number): void
   scrollTo(top: number): void
   scrollOffset(): number
+  /** First item of the top visible row and the pixels scrolled into that row (refresh scroll anchor). */
+  anchor(): { index: number; offset: number }
+  /** Scroll so the row of `index` starts `offset` pixels above the viewport top. */
+  scrollToAnchor(index: number, offset: number): void
+}
+
+/** Scroll anchor for a scroll offset: the first item of the row at the top, and how far that row is scrolled. */
+export function anchorAt(scrollTop: number, metrics: GridMetrics): { index: number; offset: number } {
+  const stride = metrics.itemHeight + metrics.gap
+  const row = stride > 0 ? Math.max(0, Math.floor(scrollTop / stride)) : 0
+  return { index: row * metrics.columns, offset: Math.max(0, scrollTop - row * stride) }
 }

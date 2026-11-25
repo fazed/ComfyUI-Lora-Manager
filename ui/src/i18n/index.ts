@@ -754,6 +754,13 @@ export const messages = {
   'notFound.body': 'This page does not exist in the new UI.',
   'notFound.home': 'Go to LoRAs',
   'confirm.title': 'Are you sure?',
+  'refresh.label': 'Refresh',
+  'refresh.busy': 'Refreshing...',
+  'refresh.tooltip': 'Refresh (R)',
+  'refresh.rescanHint':
+    'Refresh (R): reloads what this page shows. Files added outside LoRA Manager appear after a library rescan (Refresh menu of the classic UI).',
+  'refresh.failed': 'Could not refresh: {message}',
+  'doctor.rerunShortcut': 'Run the checks again (R)',
 } as const
 
 export type MessageKey = keyof typeof messages

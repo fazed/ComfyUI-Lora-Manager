@@ -176,9 +176,10 @@ const notesDirty = computed(() => notes.value !== (props.item.notes ?? ''))
 const metaGuard = createRequestGuard()
 const versionsGuard = createRequestGuard()
 
-async function loadMetadata(): Promise<void> {
+/** `quiet` (refresh): keep the current data on screen instead of showing the loading placeholders. */
+async function loadMetadata(quiet = false): Promise<void> {
   const request = metaGuard.begin()
-  metaLoading.value = true
+  if (!quiet) metaLoading.value = true
   metaError.value = null
   try {
     const result = await props.api.metadata(props.item.file_path, request.signal)
@@ -197,13 +198,13 @@ async function loadMetadata(): Promise<void> {
   }
 }
 
-async function loadVersions(): Promise<void> {
+async function loadVersions(quiet = false): Promise<void> {
   if (!modelId.value) {
     versionsLoaded.value = true
     return
   }
   const request = versionsGuard.begin()
-  versionsLoading.value = true
+  if (!quiet) versionsLoading.value = true
   versionsError.value = null
   try {
     const result = await props.api.versions(modelId.value, request.signal)
@@ -294,6 +295,33 @@ watch(
     }
   },
 )
+
+// A refresh can bring newer notes / tags for the same model: follow them unless the notes hold an unsaved draft.
+watch(
+  () => props.item.notes,
+  (next, previous) => {
+    if (notes.value === (previous ?? '')) notes.value = next ?? ''
+  },
+)
+watch(
+  () => props.item.tags,
+  (next, previous) => {
+    const shown = tags.value.join('\n')
+    if (shown === (previous ?? []).join('\n') && shown !== (next ?? []).join('\n')) tags.value = [...(next ?? [])]
+  },
+)
+
+/**
+ * Page refresh: re-read the metadata (examples, trigger words, description) and,
+ * once they were loaded, the versions, without placeholders. The tab, the scroll
+ * position and an unsaved notes draft stay.
+ */
+async function refresh(): Promise<void> {
+  if (metaLoading.value && !metadata.value) return
+  await Promise.all([loadMetadata(true), versionsLoaded.value && !versionsLoading.value ? loadVersions(true) : undefined])
+}
+
+defineExpose({ refresh })
 
 // Warm the neighbours' preview images only (no metadata requests while stepping).
 const prefetched = new Set<string>()

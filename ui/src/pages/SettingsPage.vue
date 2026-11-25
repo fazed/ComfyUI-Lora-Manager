@@ -34,6 +34,7 @@ import { ALL_FIELDS, LLM_PRESETS, SETTINGS_SECTIONS } from '@/config/settingsSch
 import { DEFAULT_SETTINGS_TAB, SETTINGS_TAB_STORAGE_KEY, SETTINGS_TABS } from '@/config/settingsTabs'
 import { useConfirm, useToasts, copyText } from '@/composables/useFeedback'
 import { confirmLeave, useSettingsForm } from '@/composables/useSettingsForm'
+import { useRefreshHandler } from '@/composables/useRefresh'
 import { useTheme } from '@/composables/useTheme'
 import { withMountPrefix } from '@/utils/basePath'
 import { isVisible, type DraftValue, type FieldDef } from '@/utils/settingsModel'
@@ -282,6 +283,16 @@ onMounted(() => {
   void load()
 })
 
+// Refresh: re-read the stored settings (changed elsewhere, e.g. in the classic UI) and the root lists;
+// unsaved edits are kept on top. A failed read shows the existing load-error banner.
+useRefreshHandler({
+  run: async () => {
+    if (saving.value) return
+    loadRoots()
+    await form.reloadKeeping(changed.value)
+  },
+})
+
 const savedExamplePath = computed(() => String(server.value?.example_images_path ?? ''))
 const savedOptimize = computed(() => server.value?.optimize_example_images !== false)
 const nightly = computed(() => server.value?.update_channel === 'nightly')
@@ -294,7 +305,7 @@ const nightly = computed(() => server.value?.update_channel === 'nightly')
         <a :href="classicUrl">{{ t('common.openClassic') }} <AppIcon name="external" :size="12" /></a>
       </template>
       <template #actions>
-        <div class="relative w-[300px] phone:w-full">
+        <div class="relative w-[300px] phone:w-auto phone:min-w-0 phone:flex-1">
           <label class="sr-only" for="settings-filter">{{ t('set.searchShortcut') }}</label>
           <AppIcon name="search" :size="16" class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted" />
           <input
