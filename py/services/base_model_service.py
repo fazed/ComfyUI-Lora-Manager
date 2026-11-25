@@ -1015,12 +1015,18 @@ class BaseModelService(ABC):
 
         Returns the reconcile summary (added / removed / repaired / skipped
         roots / kept entries) for incremental scans, ``None`` for a full
-        rebuild.
+        rebuild. A scan that joined an identical one already in flight (see
+        ``ModelScanner.scan_library``) carries ``"joined": True``.
         """
-        await self.scanner.get_cached_data(
-            force_refresh=force_refresh, rebuild_cache=rebuild_cache, scope=scope
+        if not force_refresh:
+            await self.scanner.get_cached_data()
+            return self.scanner.last_reconcile_summary
+        summary, joined = await self.scanner.scan_library(
+            rebuild_cache=rebuild_cache, scope=scope
         )
-        return self.scanner.last_reconcile_summary
+        if joined:
+            return {**(summary or {}), "joined": True}
+        return summary
 
     def describe_model_roots(self) -> List[Dict[str, Any]]:
         """Describe configured roots (label / reachability / cached count).

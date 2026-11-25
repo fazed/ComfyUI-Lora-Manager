@@ -1302,11 +1302,19 @@ class ModelScanner:
     async def initialize_in_background(self, reconcile: bool = False) -> None:
         """Initialize cache in background using thread pool
 
+        Holds the scan guard (see :meth:`scan_library`): a scan requested
+        meanwhile waits instead of reconciling against a half-built cache.
+
         Args:
             reconcile: When True and a persisted snapshot is hydrated, run an
                 incremental reconcile afterwards so the cache matches the
                 current root configuration.
         """
+        lock, _inflight = self._scan_guard()
+        async with lock:
+            await self._initialize_in_background_locked(reconcile=reconcile)
+
+    async def _initialize_in_background_locked(self, reconcile: bool = False) -> None:
         try:
             # Set initial empty cache to avoid None reference errors
             if self._cache is None:
@@ -1351,8 +1359,8 @@ class ModelScanner:
                 if reconcile:
                     # Root configuration changed (e.g. Other Models toggles):
                     # pick up newly enabled folders and drop rows for folders
-                    # that are no longer managed.
-                    await self.get_cached_data(force_refresh=True)
+                    # that are no longer managed. The guard is already held.
+                    await self._run_scan_locked()
                 return
 
             # Persistent load failed; fall back to a full scan
@@ -1899,18 +1907,98 @@ class ModelScanner:
                 name_display_mode=self._name_display_mode,
             )
 
-        # If force refresh is requested, initialize the cache directly
+        # If force refresh is requested, scan (through the per-scanner guard)
         if force_refresh:
-            # A reconcile diffs against the existing cache; when there is no
-            # cache yet (e.g. a scan fired while background initialization is
-            # still deferred), a full initialization is the only option.
-            if rebuild_cache or self._cache is None:
-                self._last_reconcile_summary = None
-                await self._initialize_cache()
-            else:
-                self._last_reconcile_summary = await self._reconcile_cache(scope=scope)
-        
+            await self.scan_library(rebuild_cache=rebuild_cache, scope=scope)
+
         return cast(ModelCache, self._cache)
+
+    # -- Scan guard ---------------------------------------------------------
+    # One library scan per scanner (model type) at a time. Identical requests
+    # that overlap are coalesced: the later caller awaits the scan already in
+    # flight (running or queued) and gets the same summary. Different requests
+    # (a full rebuild while a quick scan runs, another scope, the background
+    # initialization) wait for the running one and then run. Scanners of other
+    # model types have their own guard and never wait for this one.
+
+    def _scan_guard(self) -> Tuple[asyncio.Lock, Dict[Any, "asyncio.Future[Any]"]]:
+        """Lock + in-flight scans, (re)created per event loop."""
+        loop = asyncio.get_running_loop()
+        if getattr(self, "_scan_guard_loop", None) is not loop:
+            self._scan_guard_loop = loop
+            self._scan_lock = asyncio.Lock()
+            self._scan_inflight: Dict[Any, "asyncio.Future[Any]"] = {}
+        return self._scan_lock, self._scan_inflight
+
+    def is_scanning(self) -> bool:
+        """True while a guarded scan (or background initialization) runs or waits."""
+        lock = getattr(self, "_scan_lock", None)
+        return bool(getattr(self, "_scan_inflight", None)) or bool(
+            lock is not None and lock.locked()
+        )
+
+    async def scan_library(
+        self,
+        *,
+        rebuild_cache: bool = False,
+        scope: Optional[ReconcileScope] = None,
+    ) -> Tuple[Optional[Dict[str, Any]], bool]:
+        """Run a quick reconcile (or a full rebuild) through the scan guard.
+
+        Returns ``(summary, joined)``: the reconcile summary (``None`` for a
+        full rebuild) and whether this call joined a scan that was already in
+        flight instead of starting one. The scan runs as its own task, so a
+        caller that goes away (cancelled request) neither aborts it for the
+        other callers nor leaves the guard held; use ``cancel_task`` to stop a
+        scan.
+        """
+        lock, inflight = self._scan_guard()
+        key = ("rebuild", None) if rebuild_cache else ("reconcile", scope)
+        task = inflight.get(key)
+        joined = task is not None and not task.done()
+        if not joined:
+            task = asyncio.ensure_future(
+                self._run_guarded_scan(lock, rebuild_cache=rebuild_cache, scope=scope)
+            )
+            inflight[key] = task
+
+            def _forget(done: "asyncio.Future[Any]", key: Any = key) -> None:
+                if inflight.get(key) is done:
+                    inflight.pop(key, None)
+                # Every caller may have gone away: mark the outcome as seen.
+                if not done.cancelled():
+                    done.exception()
+
+            task.add_done_callback(_forget)
+        summary = await asyncio.shield(cast("asyncio.Future[Any]", task))
+        return summary, joined
+
+    async def _run_guarded_scan(
+        self,
+        lock: asyncio.Lock,
+        *,
+        rebuild_cache: bool,
+        scope: Optional[ReconcileScope],
+    ) -> Optional[Dict[str, Any]]:
+        async with lock:
+            return await self._run_scan_locked(rebuild_cache=rebuild_cache, scope=scope)
+
+    async def _run_scan_locked(
+        self,
+        *,
+        rebuild_cache: bool = False,
+        scope: Optional[ReconcileScope] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """The scan itself; the caller holds the scan lock."""
+        # A reconcile diffs against the existing cache; when there is no
+        # cache yet (e.g. a scan fired while background initialization is
+        # still deferred), a full initialization is the only option.
+        if rebuild_cache or self._cache is None:
+            self._last_reconcile_summary = None
+            await self._initialize_cache()
+        else:
+            self._last_reconcile_summary = await self._reconcile_cache(scope=scope)
+        return self._last_reconcile_summary
 
     @property
     def last_reconcile_summary(self) -> Optional[Dict[str, Any]]:
