@@ -2798,7 +2798,7 @@ async def test_download_root_rule_tag_match_routes_to_rule_root(
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     "relative_path",
-    ["/abs", "\abs", "C:evil", "C:\abs", "..", "a/../../b", "a\..\..\b", "x:ads", "CON"],
+    ["/abs", "\\abs", "C:evil", "C:\\abs", "..", "a/../../b", "a\\..\\..\\b", "x:ads", "CON"],
 )
 async def test_download_rejects_unsafe_client_relative_path(
     monkeypatch, scanners, metadata_provider, tmp_path, relative_path
@@ -2834,7 +2834,7 @@ async def test_download_rejects_template_path_escaping_root(
     manager = DownloadManager()
     captured = {}
     _capture_execute_download(monkeypatch, captured)
-    metadata_provider.payload = _lora_payload("..\..\..\Startup")
+    metadata_provider.payload = _lora_payload("..\\..\\..\\Startup")
 
     result = await manager.download_from_civitai(
         model_version_id=99,
@@ -2883,7 +2883,7 @@ async def test_download_accepts_nested_client_relative_path(
         ("%E2%80%A6%5C..%5C..%5C..%5Cevil.safetensors", "evil.safetensors"),
         ("%E2%80%A6%2F..%2F..%2Fevil.safetensors", "evil.safetensors"),
         ("%E2%80%A6C%3A%5CUsers%5CPublic%5Cx.safetensors", "x.safetensors"),
-        ("..\..\evil.safetensors", "evil.safetensors"),
+        ("..\\..\\evil.safetensors", "evil.safetensors"),
         ("sub/dir/model.safetensors", "model.safetensors"),
         ("%E7%8A%AC.safetensors", "犬.safetensors"),
         # Still unsafe after stripping: refused.
