@@ -10,6 +10,7 @@ from abc import ABC, abstractmethod
 from ..utils.utils import calculate_relative_path_for_model, fit_stem_to_path_budget, remove_empty_dirs
 from ..utils.constants import AUTO_ORGANIZE_BATCH_SIZE, MODEL_FILE_EXTENSIONS
 from ..utils.recipes_paths import path_is_or_contains_recipes_dir
+from ..utils.safe_paths import is_within, validate_relative_path
 from ..utils.sidecar_paths import is_centralized, resolve_centralized_dir_for_dir
 from ..services.settings_manager import get_settings_manager
 from ..services.model_lifecycle_service import _require_path_in_library_roots
@@ -43,8 +44,14 @@ def normalize_relative_folder(folder: str) -> str:
     normalized = posixpath.normpath(normalized)
     if normalized == ".." or normalized.startswith("../"):
         raise ValueError("Folder path must stay inside the library root")
+    if normalized == ".":
+        # "a/.." folds to the root itself; historically accepted.
+        return normalized
 
-    return normalized
+    # Shared rules on the folded form: drives, ':' (drive-relative paths and
+    # NTFS streams), control characters, reserved device names, segments
+    # ending in a space or dot. UnsafePathError is a ValueError.
+    return validate_relative_path(normalized)
 
 
 def _normalize_match_path(path: Any) -> str:
@@ -569,12 +576,10 @@ class ModelFileService:
     
     def _find_model_root(self, file_path: str, model_roots: List[str]) -> Optional[str]:
         """Find which model root the file belongs to"""
+        # Boundary-aware (``loras`` does not contain ``loras_old``) and
+        # case-insensitive on Windows; the first configured root wins.
         for root in model_roots:
-            # Normalize paths for comparison
-            normalized_root = os.path.normpath(root).replace(os.sep, '/')
-            normalized_file = os.path.normpath(file_path).replace(os.sep, '/')
-
-            if normalized_file.startswith(normalized_root):
+            if is_within(root, file_path):
                 return root
         return None
 
@@ -812,7 +817,7 @@ class ModelMoveService:
             candidate = os.path.abspath(os.path.join(abs_root, relative))
             # normpath already collapsed any "." / ".." segment; the
             # containment check is belt-and-braces, not traversal defence.
-            if candidate != abs_root and not candidate.startswith(abs_root + os.sep):
+            if not is_within(abs_root, candidate):
                 continue
             if not os.path.isdir(candidate):
                 continue

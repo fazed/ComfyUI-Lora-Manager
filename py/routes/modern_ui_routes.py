@@ -39,6 +39,8 @@ from typing import Any, Callable
 
 from aiohttp import web
 
+from ..utils.safe_paths import UnsafePathError, safe_join
+
 logger = logging.getLogger(__name__)
 
 MOUNT = "/lm-ui"
@@ -85,13 +87,15 @@ def relative_base_href(tail: str) -> str:
 def _safe_join(root: str, relative: str) -> str | None:
     """Join ``relative`` under ``root``; ``None`` when it would escape it."""
 
-    if not relative or "\x00" in relative:
+    if not relative:
         return None
-    root_abs = os.path.abspath(root)
-    candidate = os.path.abspath(os.path.join(root_abs, *relative.split("/")))
-    if candidate != root_abs and candidate.startswith(root_abs + os.sep):
-        return candidate
-    return None
+    # The shared validator refuses drives, UNC/device paths, ':' and reserved
+    # names before anything is joined, so a hostile tail never reaches the
+    # filesystem.
+    try:
+        return safe_join(os.path.abspath(root), relative)
+    except UnsafePathError:
+        return None
 
 
 def parse_theme_header(css: str, fallback_id: str) -> dict[str, Any]:

@@ -18,6 +18,7 @@ from .constants import (
     PATH_BUDGET_SUFFIX_ALLOWANCE,
 )
 from .sidecar_paths import get_sidecar_dir
+from .safe_paths import is_within
 import asyncio
 
 logger = logging.getLogger(__name__)
@@ -68,7 +69,7 @@ def get_lora_info(lora_name):
             )
             for root in all_roots:
                 root = root.replace(os.sep, "/")
-                if file_path.startswith(root):
+                if is_within(root, file_path):
                     relative_path = os.path.relpath(file_path, root).replace(
                         os.sep, "/"
                     )

@@ -41,6 +41,7 @@ from ...utils.library_roots import match_configured_root
 from ...utils.metadata_manager import MetadataManager
 from ...utils.safe_paths import (
     UnsafePathError,
+    is_absolute_like,
     is_within,
     validate_path_segment,
     validate_relative_path,
@@ -196,7 +197,7 @@ async def _save_source_metadata(
         # 4. Determine relative folder path for cache
         #    model_root is an absolute path; dest_path is under it
         folder = ""
-        if os.path.isabs(model_root) and dest_path.startswith(model_root):
+        if is_absolute_like(model_root) and is_within(model_root, dest_path):
             rel = os.path.relpath(os.path.dirname(dest_path), model_root)
             folder = rel.replace(os.sep, "/") if rel != "." else ""
 
@@ -232,11 +233,13 @@ def _find_matching_root(dest_dir: str) -> str | None:
         config.other_roots or [],
     ):
         all_roots.extend([os.path.normpath(p).replace(os.sep, "/") for p in root_list])
-    # Find the longest matching prefix. The boundary check prevents a root like
-    # `/models/vae` from swallowing a sibling directory like `/models/vae-old`.
+    # Find the longest (most specific) containing root. ``is_within`` is
+    # boundary-aware (`/models/vae` does not swallow `/models/vae-old`) and
+    # case-insensitive on Windows, where `d:/Models` and `D:/models` are the
+    # same directory.
     match: str | None = None
     for root in all_roots:
-        if norm == root or norm.startswith(root + "/"):
+        if root and is_within(root, norm):
             if match is None or len(root) > len(match):
                 match = root
     return match
@@ -338,12 +341,8 @@ class ModelSourceHandler:
                 status=400,
             )
 
-        if not os.path.isfile(file_path):
-            return web.json_response(
-                {"success": False, "error": f"File not found: {file_path}"},
-                status=404,
-            )
-
+        # Containment first (pure string check): a path outside the library,
+        # such as a UNC share, must not reach os.path.isfile.
         model_root = _find_matching_root(os.path.dirname(file_path))
         if not model_root:
             return web.json_response(
@@ -352,6 +351,12 @@ class ModelSourceHandler:
                     "error": "File is not within any configured model directory. Cannot link to a model source.",
                 },
                 status=400,
+            )
+
+        if not os.path.isfile(file_path):
+            return web.json_response(
+                {"success": False, "error": f"File not found: {file_path}"},
+                status=404,
             )
 
         try:

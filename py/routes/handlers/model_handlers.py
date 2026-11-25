@@ -63,7 +63,9 @@ from ...services.model_lifecycle_service import _require_path_in_library_roots
 from ...utils.file_utils import calculate_sha256
 from ...utils.metadata_manager import MetadataManager
 from ...utils.paid_access import is_early_access_deadline_active
+from ...utils.library_roots import match_configured_root
 from ...utils.root_paths import normalize_root_identity
+from ...utils.safe_paths import UnsafePathError, validate_relative_path
 from ...utils.sidecar_paths import get_metadata_path
 from ...utils.url_utils import relative_root_prefix
 
@@ -2380,26 +2382,26 @@ class ModelDownloadHandler:
             "extra_unet_roots",
             "extra_embeddings_roots",
         ):
-            configured.extend(getattr(config, attr, None) or [])
+            configured.extend(
+                root for root in getattr(config, attr, None) or [] if isinstance(root, str)
+            )
 
-        def _key(path: str) -> str:
-            return os.path.normcase(os.path.normpath(path))
-
-        matches = [root for root in configured if root and _key(root) == _key(raw_root)]
-        if not matches:
-            raise ValueError("model_root is not a configured model root")
-        model_root = os.path.normpath(matches[0]).replace(os.sep, "/")
+        try:
+            matched = match_configured_root(raw_root, configured)
+        except UnsafePathError as exc:
+            raise ValueError("model_root is not a configured model root") from exc
+        model_root = os.path.normpath(matched).replace(os.sep, "/")
 
         relative = ""
         if not use_default and raw_relative:
             candidate = raw_relative.replace("\\", "/")
-            if candidate.startswith("/") or re.match(r"^[A-Za-z]:", candidate):
+            if candidate.startswith("/"):
                 raise ValueError("relative_path must be relative")
-            segments = [segment for segment in candidate.split("/") if segment]
-            for segment in segments:
-                if segment in (".", "..") or re.search(r'[<>:"|?*]', segment) or segment != segment.rstrip(" ."):
-                    raise ValueError(f"Invalid folder name: {segment}")
-            relative = "/".join(segments)
+            # Repeated separators were always folded; keep that, then apply
+            # the shared rules (drives, ':', '..', reserved names, ...).
+            candidate = re.sub(r"/{2,}", "/", candidate).strip("/")
+            if candidate:
+                relative = validate_relative_path(candidate)
 
         return {
             "model_root": model_root,

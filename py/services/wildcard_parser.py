@@ -7,10 +7,11 @@ import os
 import re
 import zipfile
 from dataclasses import dataclass, field
-from pathlib import PurePosixPath
 from typing import Any
 
 import yaml
+
+from ..utils.safe_paths import UnsafePathError, validate_relative_path
 
 
 SUPPORTED_TEXT_EXTENSIONS = (".txt", ".yaml", ".yml", ".json")
@@ -92,11 +93,21 @@ def normalize_wildcard_key(value: str) -> str:
 
 
 def _safe_member_name(value: str) -> str | None:
-    normalized = value.replace("\\", "/")
-    path = PurePosixPath(normalized)
-    if path.is_absolute() or ".." in path.parts or not normalized:
+    """Return a member name as a safe ``a/b`` relative path, else ``None``.
+
+    Uses the shared validator (drives, UNC, ``:``, ``..``, reserved device
+    names, control characters). A leading ``./`` and repeated separators,
+    which zip tools commonly emit, are folded first.
+    """
+    if not isinstance(value, str):
         return None
-    return normalized.lstrip("/")
+    normalized = re.sub(r"/{2,}", "/", value.replace("\\", "/"))
+    while normalized.startswith("./"):
+        normalized = normalized[2:]
+    try:
+        return validate_relative_path(normalized)
+    except UnsafePathError:
+        return None
 
 
 def _flatten_payload(payload: Any, prefix: str = "") -> list[tuple[str, tuple[str, ...]]]:

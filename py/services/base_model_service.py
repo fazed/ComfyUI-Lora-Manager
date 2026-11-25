@@ -26,6 +26,7 @@ from .model_sources import source_group_key
 from ..utils.civitai_utils import build_civitai_model_page_url, decode_license_flags
 from ..utils.root_paths import normalize_root_identity
 from ..utils.sidecar_paths import is_centralized
+from ..utils.safe_paths import is_within
 
 logger = logging.getLogger(__name__)
 
@@ -1718,7 +1719,8 @@ class BaseModelService(ABC):
                 normalized_root = os.path.normpath(root)
                 normalized_file = os.path.normpath(file_path)
 
-                if normalized_file.startswith(normalized_root):
+                # Boundary-aware: `loras` must not claim `loras_old/x`.
+                if is_within(normalized_root, normalized_file):
                     # Remove root and leading separator to get relative path
                     relative_path = normalized_file[len(normalized_root) :].lstrip(
                         os.sep

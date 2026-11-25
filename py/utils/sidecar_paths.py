@@ -45,6 +45,8 @@ import time
 import uuid
 from typing import Dict, Iterable, List, Optional, Set, Tuple
 
+from .safe_paths import is_within
+
 logger = logging.getLogger(__name__)
 
 METADATA_SUFFIX = ".metadata.json"
@@ -154,13 +156,8 @@ def _path_contains(base: str, path: str) -> bool:
     """Containment check tolerant of symlinked installs (custom_nodes links)."""
 
     for candidate in (os.path.abspath(path), os.path.realpath(path)):
-        normalized = os.path.normcase(os.path.normpath(candidate))
         for root_variant in (os.path.abspath(base), os.path.realpath(base)):
-            root_normalized = os.path.normcase(os.path.normpath(root_variant))
-            if (
-                normalized == root_normalized
-                or normalized.startswith(root_normalized + os.sep)
-            ):
+            if is_within(root_variant, candidate):
                 return True
     return False
 
@@ -246,9 +243,10 @@ def _best_root_for(
 
     best: Optional[str] = None
     for normalized in normalized_roots:
-        if normalized_dir == normalized or normalized_dir.startswith(
-            normalized + os.sep
-        ):
+        # Case-sensitive on purpose: the identity map keys are business
+        # paths. A drive root (``D:\``) already ends in a separator.
+        prefix = normalized if normalized.endswith(os.sep) else normalized + os.sep
+        if normalized_dir == normalized or normalized_dir.startswith(prefix):
             if best is None or len(normalized) > len(best):
                 best = normalized
     return best
@@ -1101,14 +1099,8 @@ def is_workflow_artifact_path(model_path: str) -> bool:
     except Exception:
         return False
 
-    normalized = os.path.normcase(os.path.abspath(os.path.normpath(model_path)))
     for root in roots:
-        if not root:
-            continue
-        normalized_root = os.path.normcase(os.path.abspath(os.path.normpath(root)))
-        if normalized == normalized_root or normalized.startswith(
-            normalized_root + os.sep
-        ):
+        if root and is_within(root, model_path):
             return True
     return False
 

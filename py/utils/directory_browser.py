@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Tuple
 
+from .safe_paths import UnsafePathError, validate_path_segment
+
 # Virtual path token for the Windows drive list. Browsing up from a drive
 # root (e.g. C:\) lands here so users can switch drives without typing a
 # path. Only meaningful on Windows; elsewhere it falls through to normal
@@ -23,25 +25,10 @@ _IMAGE_EXTENSIONS = {
     ".tif",
 }
 
-# A new folder name must be a single path segment on every supported platform:
-# reject both separators regardless of the host OS so the request can never
-# escape the browsed directory ("../foo" and "a/b" are both rejected).
-_NAME_SEPARATORS = ("/", "\\")
-
-# Windows refuses these characters in a file name. POSIX allows them, but a
-# folder created here is meant to become a configured library path, so stay
-# portable and reject them everywhere.
-_INVALID_NAME_CHARS = frozenset('<>:"|?*') | frozenset(
-    chr(code) for code in range(32)
-)
-
-# Windows device names are unusable as directory names ("CON", "COM1", ...).
-_WINDOWS_RESERVED_NAMES = frozenset(
-    ["CON", "PRN", "AUX", "NUL"]
-    + [f"COM{index}" for index in range(1, 10)]
-    + [f"LPT{index}" for index in range(1, 10)]
-)
-
+# A new folder name must be a single path segment on every supported platform
+# (validate_path_segment applies the Windows rules everywhere: a folder
+# created here is meant to become a configured library path, so stay
+# portable).
 _MAX_NAME_LENGTH = 255
 
 
@@ -183,15 +170,13 @@ def _validate_new_directory_name(name: str) -> str | None:
         return "name_required"
     if len(name) > _MAX_NAME_LENGTH:
         return "name_invalid"
-    if name in (".", "..") or any(sep in name for sep in _NAME_SEPARATORS):
-        return "name_invalid"
-    if any(char in _INVALID_NAME_CHARS for char in name):
-        return "name_invalid"
-    # Windows silently strips trailing dots/spaces from paths, so a folder
-    # named "foo." would be stored under a different name than the user sees.
-    if name.endswith("."):
-        return "name_invalid"
-    if name.upper().split(".")[0] in _WINDOWS_RESERVED_NAMES:
+    # Shared single-segment rules: no separator, no '.'/'..', no control or
+    # <>:"|?* characters, no trailing dot or space (Windows silently strips
+    # them, so "foo." would be stored under another name), no reserved
+    # device name ("CON", "com1.txt", "LPT¹", ...).
+    try:
+        validate_path_segment(name)
+    except UnsafePathError:
         return "name_invalid"
     return None
 
