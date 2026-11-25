@@ -30,6 +30,16 @@ export interface RequestOptions {
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
 
+/**
+ * Client id sent on every backend request. The backend rejects cross-site
+ * requests to state-changing GET routes unless they carry this header (see
+ * "Request guard for state-changing GET routes" in ui/README.md); same-origin
+ * requests pass on Sec-Fetch-Site anyway, the header covers browsers and
+ * proxies without it.
+ */
+export const CLIENT_HEADER = 'X-LM-Client'
+export const CLIENT_ID = 'lm-ui'
+
 let fetchImpl: FetchLike = (input, init) => fetch(input, init)
 
 /** Test hook: swap the fetch implementation. */
@@ -62,7 +72,10 @@ export async function requestBlob(
   path: string,
   options: { method?: 'GET' | 'POST'; body?: unknown } = {},
 ): Promise<{ blob: Blob; disposition: string | null }> {
-  const init: RequestInit = { method: options.method ?? 'POST', headers: { Accept: 'application/zip, application/json' } }
+  const init: RequestInit = {
+    method: options.method ?? 'POST',
+    headers: { Accept: 'application/zip, application/json', [CLIENT_HEADER]: CLIENT_ID },
+  }
   if (options.body !== undefined) {
     init.body = JSON.stringify(options.body)
     init.headers = { ...init.headers, 'Content-Type': 'application/json' }
@@ -89,7 +102,7 @@ export async function requestBlob(
 
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { method = 'GET', query, body, signal } = options
-  const init: RequestInit = { method, signal, headers: { Accept: 'application/json' } }
+  const init: RequestInit = { method, signal, headers: { Accept: 'application/json', [CLIENT_HEADER]: CLIENT_ID } }
   if (typeof FormData !== 'undefined' && body instanceof FormData) {
     // Multipart: the browser sets the Content-Type with its boundary.
     init.body = body

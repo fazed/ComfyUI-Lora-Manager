@@ -3,6 +3,7 @@
 
 <head>
     {% include 'components/base_path_bootstrap.html' %}
+    {% include 'components/request_guard_bootstrap.html' %}
     <title>{% block title %}{{ t('header.appTitle') }}{% endblock %}</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="stylesheet" href="{{ rel_prefix }}loras_static/css/style.css?v={{ version }}">

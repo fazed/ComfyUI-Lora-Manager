@@ -1,0 +1,63 @@
+{#
+  Request-guard bootstrap (fork). Included in <head> right after
+  base_path_bootstrap.html. Wraps window.fetch once so every same-origin
+  request from the classic UI carries "X-LM-Client: lm-classic". The backend
+  rejects cross-site requests to state-changing GET routes unless they carry
+  this header (py/utils/request_guard.py); modern browsers are let through by
+  Sec-Fetch-Site anyway, the header covers browsers or proxies that do not
+  send Sec-Fetch-Site. Cross-origin requests (Civitai, ...) are left alone so
+  no CORS preflight is triggered there.
+#}
+<script>
+(function () {
+    'use strict';
+
+    var HEADER = 'X-LM-Client';
+    var CLIENT_ID = 'lm-classic';
+
+    if (!window.fetch || window.fetch.__lmClientHeader) {
+        return;
+    }
+
+    function requestUrl(input) {
+        if (typeof input === 'string') {
+            return input;
+        }
+        if (typeof URL !== 'undefined' && input instanceof URL) {
+            return input.href;
+        }
+        if (input && typeof input.url === 'string') {
+            return input.url;
+        }
+        return null;
+    }
+
+    function isSameOrigin(url) {
+        try {
+            return new URL(url, window.location.href).origin === window.location.origin;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    var nativeFetch = window.fetch;
+    var patchedFetch = function (input, init) {
+        try {
+            var url = requestUrl(input);
+            if (url !== null && isSameOrigin(url)) {
+                var source = init && init.headers !== undefined
+                    ? init.headers
+                    : (typeof Request !== 'undefined' && input instanceof Request ? input.headers : undefined);
+                var headers = new Headers(source);
+                if (!headers.has(HEADER)) {
+                    headers.set(HEADER, CLIENT_ID);
+                    init = Object.assign({}, init || {}, { headers: headers });
+                }
+            }
+        } catch (e) { /* never break a request over the header */ }
+        return nativeFetch.call(window, input, init);
+    };
+    patchedFetch.__lmClientHeader = true;
+    window.fetch = patchedFetch;
+})();
+</script>

@@ -125,3 +125,39 @@ describe('modelListParams', () => {
     expect(params.recursive).toBeUndefined()
   })
 })
+
+describe('request guard header', () => {
+  const fetchMock = vi.fn()
+
+  beforeEach(() => {
+    fetchMock.mockReset()
+    setFetch(fetchMock)
+  })
+
+  afterEach(() => {
+    setFetch(null)
+  })
+
+  it('sends X-LM-Client: lm-ui on GET requests (state-changing GET routes need it)', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ success: true }))
+    await request('downloads/queue/pause-all')
+    const init = fetchMock.mock.calls[0][1] as RequestInit
+    expect((init.headers as Record<string, string>)['X-LM-Client']).toBe('lm-ui')
+  })
+
+  it('keeps the header next to Content-Type on POST', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ success: true }))
+    await request('settings', { method: 'POST', body: { a: 1 } })
+    const headers = (fetchMock.mock.calls[0][1] as RequestInit).headers as Record<string, string>
+    expect(headers['X-LM-Client']).toBe('lm-ui')
+    expect(headers['Content-Type']).toBe('application/json')
+  })
+
+  it('sends the header on blob requests too', async () => {
+    const { requestBlob } = await import('@/api/http')
+    fetchMock.mockResolvedValue(new Response(new Blob(['PK']), { status: 200, headers: { 'Content-Type': 'application/zip' } }))
+    await requestBlob('backup/export')
+    const headers = (fetchMock.mock.calls[0][1] as RequestInit).headers as Record<string, string>
+    expect(headers['X-LM-Client']).toBe('lm-ui')
+  })
+})
