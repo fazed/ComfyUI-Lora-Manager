@@ -35,6 +35,7 @@ from ...services.service_registry import ServiceRegistry
 from ...services.settings_manager import SettingsManager, get_settings_manager
 from ...services.first_run_manager import get_first_run_manager
 from ...services.tag_update_service import TagUpdateService
+from ...services.update_classifier import build_updates_overview, collect_local_model_ids
 from ...services.use_cases import (
     AutoOrganizeInProgressError,
     AutoOrganizeUseCase,
@@ -3574,6 +3575,65 @@ class ModelUpdateHandler:
             }
         )
 
+    async def get_updates_overview(self, request: web.Request) -> web.Response:
+        """Classified update candidates for every local model line (read-only).
+
+        Reads the persisted update records in bulk, the scanner cache and the
+        download history. Never calls Civitai and never writes: stale or
+        missing records are reported (``unchecked``, ``lastCheckedAt``)
+        instead of refreshed. See ``py/services/update_classifier.py``.
+        """
+
+        try:
+            cache = await self._service.scanner.get_cached_data()
+        except Exception as exc:  # pragma: no cover - defensive logging
+            self._logger.error("Updates overview: cache unavailable: %s", exc, exc_info=True)
+            return web.json_response({"success": False, "error": str(exc)}, status=500)
+
+        local_items = list(getattr(cache, "raw_data", None) or [])
+        model_ids = collect_local_model_ids(local_items)
+
+        try:
+            records = await self._update_service.get_records_bulk(
+                self._service.model_type, model_ids
+            ) if model_ids else {}
+        except Exception as exc:  # pragma: no cover - defensive logging
+            self._logger.error("Updates overview: records unavailable: %s", exc, exc_info=True)
+            return web.json_response({"success": False, "error": str(exc)}, status=500)
+
+        downloaded: Dict[int, set] = {}
+        if model_ids:
+            try:
+                history_service = await ServiceRegistry.get_downloaded_version_history_service()
+                downloaded = await history_service.get_downloaded_version_ids_bulk(
+                    self._service.model_type, model_ids
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                self._logger.debug("Updates overview: download history unavailable: %s", exc)
+
+        hide_early_access = False
+        hide_paid = False
+        if self._settings is not None:
+            try:
+                hide_early_access = bool(self._settings.get("hide_early_access_updates", False))
+            except Exception:
+                pass
+            try:
+                hide_paid = bool(self._settings.get("hide_paid_updates", False))
+            except Exception:
+                pass
+
+        payload = build_updates_overview(
+            model_type=self._service.model_type,
+            local_items=local_items,
+            records=records or {},
+            downloaded_version_ids=downloaded or {},
+            hide_early_access=hide_early_access,
+            hide_paid=hide_paid,
+            preview_url_builder=config.get_preview_static_url,
+        )
+        return web.json_response(payload)
+
     def _uses_same_base_update_scope(self) -> bool:
         """Return True when update reporting must honor same-base scoping.
 
@@ -4231,5 +4291,6 @@ class ModelHandlerSet:
             "set_version_update_ignore": self.updates.set_version_update_ignore,
             "get_model_update_status": self.updates.get_model_update_status,
             "get_model_versions": self.updates.get_model_versions,
+            "get_updates_overview": self.updates.get_updates_overview,
             "cancel_task": self.query.cancel_task,
         }
