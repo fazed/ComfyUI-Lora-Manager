@@ -431,16 +431,31 @@ cross-site GETs reach the API without an `Origin` header.
 
 Some routes change state on `GET`, because the browser extension can only
 use `GET` against ComfyUI (ComfyUI's origin middleware rejects its other
-methods). ComfyUI's middleware only rejects `Sec-Fetch-Site: cross-site` and
-an `Origin` whose host differs from `Host`, and only when ComfyUI runs
-*without* `--enable-cors-header`. A cross-site `<img src>`, link or prefetch
-from another local port (`same-site`, no `Origin` on a plain GET), an old
-browser, or any page while `--enable-cors-header` is set would otherwise run
-the action. `py/utils/request_guard.py` closes that gap with an aiohttp
+methods). `py/utils/request_guard.py` guards those routes with an aiohttp
 middleware (registered right after `api_json_error` in both
 `py/lora_manager.py` and `standalone.py`).
 
-### Protocol (for every client, including the browser extension)
+**Threat model.** Current ComfyUI already blocks the classic attack:
+its `origin_only_middleware` (`ComfyUI/server.py`, about lines 204-242)
+returns 403 on **every method** for any request with
+`Sec-Fetch-Site: cross-site`, and for a loopback `Host` whose `Origin` host
+differs. With current ComfyUI and a modern browser, a cross-site
+`<img src="http://127.0.0.1:8188/api/lm/...">` never reaches LoRA Manager.
+That middleware is only installed when ComfyUI runs *without*
+`--enable-cors-header` (the flag swaps it for a CORS middleware). The guard
+is defence in depth for:
+
+* older ComfyUI versions without `origin_only_middleware`, and ComfyUI
+  started with `--enable-cors-header`;
+* standalone mode, which has no ComfyUI middleware at all;
+* `same-site` requests (a page on another local port, e.g.
+  `http://127.0.0.1:3000`): ComfyUI lets them through when a plain GET
+  carries no `Origin`;
+* future changes to ComfyUI's middleware.
+
+DNS rebinding stays uncovered (see the end of this section).
+
+### Protocol
 
 For a `GET` or `HEAD` request to a **guarded route** the backend decides, in
 this order:
@@ -449,9 +464,9 @@ this order:
    Browsers set this header; page script cannot forge it. `none` is a
    user-initiated request or an extension fetch.
 2. `Origin` has the scheme `chrome-extension`, `moz-extension` or
-   `safari-web-extension`: **allow**, with or without the client header. No
-   web page can send such an `Origin`, so it proves an extension context.
-   This rule keeps already-installed extension builds working (see below).
+   `safari-web-extension`: **allow**. No web page can send such an `Origin`,
+   so it proves an extension context. This is how the browser extension is
+   admitted; it sends no custom header (see below).
 3. The request carries `X-LM-Client: <client id>` and `Origin` is **absent**
    or names the **request's own host** (host and port, scheme ignored so a
    TLS-terminating proxy works; `Origin: null` never matches): **allow**.
@@ -471,7 +486,11 @@ empty or malformed value counts as absent. The ids in use:
 | Modern UI (`/lm-ui/`) | `lm-ui` | `ui/src/api/http.ts` (`request` and `requestBlob`) |
 | Classic UI pages | `lm-classic` | `templates/components/request_guard_bootstrap.html`: wraps `window.fetch` once and adds the header to every same-origin request (cross-origin requests such as Civitai are untouched, so no CORS preflight) |
 | ComfyUI-side code (`web/comfyui`, `vue-widgets`) | `lm-comfyui` (reserved) | Not sent today: these files call no guarded route (pinned by `test_comfyui_side_clients_do_not_call_guarded_get_routes`); they run same-origin and pass on rule 1. Add the header if one starts calling a guarded route. |
-| Browser extension | `lm-extension` | Extension repo (see below) |
+
+The header is for the in-repo same-origin web clients above, and for a
+future client that is itself a web page served from the backend's origin.
+The browser extension does **not** send it (`lm-extension` stays an
+accepted value, but no client uses it).
 
 Why the rules are safe with `--enable-cors-header`: that flag makes ComfyUI
 answer CORS for any origin, so a malicious page *could* get a custom header
@@ -488,23 +507,22 @@ Requests the guard does not touch: every method other than `GET`/`HEAD`
 (ComfyUI's origin middleware covers those in ComfyUI mode), read-only `GET`
 routes, unknown paths (404 as before), and everything outside `/api/lm/`.
 
-### What the browser extension must do
+### What the browser extension does
 
-* Send `X-LM-Client: lm-extension` on **every** request to the backend
-  (reads included; it costs nothing and keeps working if a read route is
-  guarded later). Background fetches with host permissions are not subject
-  to CORS preflight, so the custom header needs no server change.
-* Treat HTTP 403 with `code: "csrf_blocked"` as "the backend rejected the
-  request as cross-site" (distinct from ComfyUI's plain 403 origin check,
-  which has no JSON body). Seeing it means the request had neither an
-  extension `Origin` nor the header, e.g. a build that predates this
-  protocol running in a browser that sends no `Origin` but a cross-site
-  `Sec-Fetch-Site`.
-* Already-installed builds without the header keep working: Chrome sends
-  `Sec-Fetch-Site: none` for extension fetches (rule 1), and a request with
-  a `chrome-extension://` / `moz-extension://` `Origin` passes rule 2. Rule 2
-  is permanent, not a transition window: the extension Origin proves the
-  caller as well as the header does.
+* It sends **no** custom header. It is admitted by rule 2 (its
+  `chrome-extension://` / `moz-extension://` / `safari-web-extension://`
+  `Origin`) or, in Chrome, by rule 1 (`Sec-Fetch-Site: none` on extension
+  fetches). A custom header on a `GET` can trigger a CORS preflight in some
+  browser contexts, and ComfyUI only answers preflights with
+  `--enable-cors-header`, so adding one would break downloads and queue
+  actions. This holds for already-installed builds too: nothing changes on
+  the extension side.
+* It recognises HTTP 403 with `code: "csrf_blocked"` as "the backend rejected
+  the request as cross-site" (distinct from ComfyUI's own 403 origin check,
+  which has no JSON body). Seeing it means the request carried neither an
+  extension `Origin` nor a trusted `Sec-Fetch-Site`, e.g. a browser that
+  sends a cross-site `Sec-Fetch-Site` without any `Origin` on extension
+  fetches.
 
 ### Guarded GET routes
 

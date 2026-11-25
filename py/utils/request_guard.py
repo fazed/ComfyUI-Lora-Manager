@@ -2,11 +2,16 @@
 
 Several LoRA Manager routes change state or start work on ``GET`` because the
 browser extension can only use ``GET`` against ComfyUI (ComfyUI's origin
-middleware rejects its non-GET requests). ComfyUI's middleware only acts on
-``Sec-Fetch-Site: cross-site`` and on an ``Origin`` header that differs from
-``Host``; a plain cross-site ``<img src>`` from another local port
-(``same-site``), a request from an old browser, or any request while ComfyUI
-runs with ``--enable-cors-header`` reaches the handler and runs the action.
+middleware rejects its non-GET requests).
+
+Current ComfyUI's ``origin_only_middleware`` already returns 403 on every
+method for ``Sec-Fetch-Site: cross-site`` and for a loopback ``Host`` whose
+``Origin`` host differs, so a cross-site ``<img src>`` from a modern browser
+is blocked before it reaches LoRA Manager. This guard is defence in depth
+for older ComfyUI versions without that middleware (or ComfyUI started with
+``--enable-cors-header``, which replaces it), standalone mode (no ComfyUI
+middleware), ``same-site`` requests from another local port, and future
+changes. DNS rebinding is not covered.
 
 This module holds:
 
@@ -27,10 +32,11 @@ GET routes"). For a ``GET``/``HEAD`` request to a guarded route:
    page script cannot forge it.
 2. ``Origin`` has the scheme ``chrome-extension``, ``moz-extension`` or
    ``safari-web-extension``: allow. A web page can never send such an Origin,
-   so it proves an extension context; this also keeps extension builds that
-   predate the ``X-LM-Client`` header working.
-3. ``X-LM-Client`` carries a client id (``lm-ui``, ``lm-classic``,
-   ``lm-comfyui``, ``lm-extension`` ...) and ``Origin`` is absent or equals
+   so it proves an extension context. This is how the browser extension is
+   admitted: it sends no custom header (a custom header on a GET can trigger
+   a CORS preflight that ComfyUI does not answer).
+3. ``X-LM-Client`` carries a client id (``lm-ui``, ``lm-classic`` for the
+   in-repo same-origin web clients ...) and ``Origin`` is absent or equals
    the request's own origin: allow. A page on another site always sends its
    own ``Origin`` with a custom header (CORS), so it can never satisfy this,
    even when ComfyUI answers CORS for any origin.
