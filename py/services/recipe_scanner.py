@@ -19,6 +19,7 @@ from ..utils.exif_utils import ExifUtils
 from ..utils.file_utils import calculate_autov3
 from ..utils.gc_utils import schedule_refreeze_after_rebuild
 from ..utils.recipe_open_stats import RecipeOpenStats
+from ..utils.recipes_paths import is_inside_recipes_dir
 from .model_scanner import WEIGHT_FILE_EXTENSIONS
 from .recipe_cache import RecipeCache
 from .recipes.errors import (
@@ -1563,7 +1564,11 @@ class RecipeScanner:
 
             # 5. Update EXIF if image exists
             image_path = recipe.get("file_path")
-            if image_path and os.path.exists(image_path):
+            if (
+                image_path
+                and is_inside_recipes_dir(image_path, self.recipes_dir)
+                and os.path.exists(image_path)
+            ):
                 from ..utils.exif_utils import ExifUtils
 
                 ExifUtils.append_recipe_metadata(image_path, recipe)
@@ -4032,7 +4037,9 @@ class RecipeScanner:
         candidate = os.path.normpath(
             os.path.join(recipes_dir, folder, f"{recipe_id}.recipe.json")
         )
-        if os.path.exists(candidate):
+        # ``folder`` comes from the recipe JSON: a "../.." value must not
+        # point the lookup (and every later write) outside the recipes folder.
+        if is_inside_recipes_dir(candidate, recipes_dir) and os.path.exists(candidate):
             return candidate
 
         for root, _, files in os.walk(recipes_dir):
@@ -4087,8 +4094,14 @@ class RecipeScanner:
             # If the recipe has an image, update its EXIF metadata
             from ..utils.exif_utils import ExifUtils
 
+            # file_path comes from the editable .recipe.json: only rewrite
+            # images inside the recipes folder.
             image_path = recipe_data.get("file_path")
-            if image_path and os.path.exists(image_path):
+            if (
+                image_path
+                and is_inside_recipes_dir(image_path, self.recipes_dir)
+                and os.path.exists(image_path)
+            ):
                 ExifUtils.append_recipe_metadata(image_path, recipe_data)
 
             return True

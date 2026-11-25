@@ -63,3 +63,27 @@ def path_is_or_contains_recipes_dir(path: str) -> bool:
         return False
     candidate = os.path.normcase(os.path.abspath(path))
     return candidate == key or key.startswith(candidate + os.sep)
+
+
+def is_inside_recipes_dir(path: object, recipes_dir: str | None = None) -> bool:
+    """True when *path* lies inside the recipes folder, also after ``realpath``.
+
+    A recipe's ``file_path`` (its image) and folder come from the editable
+    ``.recipe.json``, so they are untrusted: delete, move, EXIF rewrites and
+    re-import targets must stay inside the recipes folder. Both the business
+    path and the resolved path must be inside, so a junction or symlink
+    planted inside the folder cannot lead out of it. A UNC/device path is
+    refused without being resolved unless the recipes folder itself is one.
+    """
+    from .safe_paths import is_unc_or_device, is_within
+
+    root = recipes_dir if recipes_dir is not None else get_effective_recipes_dir()
+    if not isinstance(root, str) or not root:
+        return False
+    if not isinstance(path, str) or not path or "\x00" in path:
+        return False
+    if not is_within(root, path):
+        return False
+    if is_unc_or_device(path) and not is_unc_or_device(root):
+        return False  # pragma: no cover - is_within already refused it
+    return is_within(root, path, resolve=True)

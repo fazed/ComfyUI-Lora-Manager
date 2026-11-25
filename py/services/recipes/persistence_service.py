@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 import os
 import re
 import shutil
@@ -19,10 +20,32 @@ from ...utils.base_model import (
     base_model_relation,
 )
 from ...utils.constants import MAX_WORKFLOW_EMBED_BYTES
+from ...utils.recipes_paths import is_inside_recipes_dir
 from ...utils.utils import calculate_recipe_fingerprint
 from ..pending_delete_service import get_pending_delete_service
 from .errors import RecipeNotFoundError, RecipeValidationError
 from .import_info import CHANNEL_UPLOAD, CHANNEL_WIDGET, build_import_info
+
+logger = logging.getLogger(__name__)
+
+
+def _recipe_image_inside_root(recipe_scanner, image_path: Any, recipe_id: Any) -> Optional[str]:
+    """Return the recipe's image path only when it is inside the recipes folder.
+
+    ``file_path`` comes from the editable ``.recipe.json``: a value pointing
+    elsewhere must never be staged, deleted, moved or rewritten (EXIF).
+    """
+
+    if not image_path:
+        return None
+    if is_inside_recipes_dir(image_path, getattr(recipe_scanner, "recipes_dir", None)):
+        return image_path
+    logger.warning(
+        "Recipe %s points at an image outside the recipes folder; leaving it untouched: %s",
+        recipe_id,
+        image_path,
+    )
+    return None
 
 
 @dataclass(frozen=True)
@@ -257,7 +280,9 @@ class RecipePersistenceService:
         with open(recipe_json_path, "r", encoding="utf-8") as file_obj:
             recipe_data = json.load(file_obj)
 
-        image_path = recipe_data.get("file_path")
+        image_path = _recipe_image_inside_root(
+            recipe_scanner, recipe_data.get("file_path"), recipe_id
+        )
 
         # Stage the delete so the recipe can be undone within the undo window.
         # The staging service COPIES the JSON (and existing image) into the
@@ -326,12 +351,10 @@ class RecipePersistenceService:
         if not os.path.isabs(normalized_target):
             normalized_target = os.path.normpath(os.path.join(recipes_root, normalized_target))
 
-        try:
-            common_root = os.path.commonpath([normalized_target, recipes_root])
-        except ValueError as exc:
-            raise RecipeValidationError("Invalid target path") from exc
-
-        if common_root != recipes_root:
+        # Case-insensitive on Windows, boundary-aware, and also after
+        # realpath: a junction or symlink inside the recipes folder must not
+        # lead the move out of it.
+        if not is_inside_recipes_dir(normalized_target, recipes_root):
             raise RecipeValidationError("Target path must be inside the recipes directory")
 
         return normalized_target, recipes_root
@@ -372,7 +395,18 @@ class RecipePersistenceService:
         shutil.move(recipe_json_path, new_json_path)
 
         new_image_path = normalized_image_path
-        if normalized_image_path:
+        if normalized_image_path and not is_inside_recipes_dir(
+            normalized_image_path, recipes_root
+        ):
+            # file_path comes from the editable .recipe.json: never move a
+            # file from outside the recipes folder; keep the reference as is.
+            logger.warning(
+                "Recipe %s points at an image outside the recipes folder; "
+                "not moving it: %s",
+                recipe_id,
+                normalized_image_path,
+            )
+        elif normalized_image_path:
             target_image_path = os.path.normpath(os.path.join(normalized_target, os.path.basename(normalized_image_path)))
             if os.path.exists(normalized_image_path) and normalized_image_path != target_image_path:
                 shutil.move(normalized_image_path, target_image_path)
@@ -517,7 +551,9 @@ class RecipePersistenceService:
             target_lora=target_lora,
         )
 
-        image_path = recipe_data.get("file_path")
+        image_path = _recipe_image_inside_root(
+            recipe_scanner, recipe_data.get("file_path"), recipe_id
+        )
         if image_path and os.path.exists(image_path):
             self._exif_utils.append_recipe_metadata(image_path, recipe_data)
 
@@ -554,7 +590,9 @@ class RecipePersistenceService:
             recipe_id, lora_index
         )
 
-        image_path = recipe_data.get("file_path")
+        image_path = _recipe_image_inside_root(
+            recipe_scanner, recipe_data.get("file_path"), recipe_id
+        )
         if image_path and os.path.exists(image_path):
             self._exif_utils.append_recipe_metadata(image_path, recipe_data)
 
@@ -681,7 +719,9 @@ class RecipePersistenceService:
             target_checkpoint=target_checkpoint,
         )
 
-        image_path = recipe_data.get("file_path")
+        image_path = _recipe_image_inside_root(
+            recipe_scanner, recipe_data.get("file_path"), recipe_id
+        )
         if image_path and os.path.exists(image_path):
             self._exif_utils.append_recipe_metadata(image_path, recipe_data)
 
@@ -719,7 +759,9 @@ class RecipePersistenceService:
             recipe_id
         )
 
-        image_path = recipe_data.get("file_path")
+        image_path = _recipe_image_inside_root(
+            recipe_scanner, recipe_data.get("file_path"), recipe_id
+        )
         if image_path and os.path.exists(image_path):
             self._exif_utils.append_recipe_metadata(image_path, recipe_data)
 
@@ -825,7 +867,9 @@ class RecipePersistenceService:
             try:
                 with open(recipe_json_path, "r", encoding="utf-8") as file_obj:
                     recipe_data = json.load(file_obj)
-                image_path = recipe_data.get("file_path")
+                image_path = _recipe_image_inside_root(
+                    recipe_scanner, recipe_data.get("file_path"), recipe_id
+                )
 
                 # Stage each recipe into its own batch; collect the ids so the
                 # whole bulk action can be merged into ONE undoable batch.

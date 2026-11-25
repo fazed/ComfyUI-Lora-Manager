@@ -2795,3 +2795,77 @@ async def test_reimport_with_malformed_payload_falls_back_to_legacy(
         assert save_call["metadata"]["loras"] == []
         assert save_call["metadata"]["source_path"] == "https://civitai.com/images/12345"
         assert harness.persistence.delete_calls == ["rec-bad"]
+
+
+async def test_reimport_ignores_a_recipe_image_outside_the_recipes_folder(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Fork path safety (finding #7): file_path comes from the editable
+    .recipe.json. An image outside the recipes folder is neither read as the
+    re-import source nor used as the target folder."""
+    async with recipe_harness(monkeypatch, tmp_path) as harness:
+        outside = harness.tmp_dir / "victim" / "private.webp"
+        outside.parent.mkdir(parents=True, exist_ok=True)
+        outside.write_bytes(b"private")
+        harness.scanner.recipes["rec-out"] = {
+            "id": "rec-out",
+            "title": "Planted",
+            "file_path": str(outside),
+        }
+
+        response = await harness.client.post("/api/lm/recipe/rec-out/reimport")
+        payload = await response.json()
+
+        assert response.status == 400
+        assert payload["success"] is False
+        assert harness.analysis.local_calls == []
+        assert harness.persistence.delete_calls == []
+        assert outside.read_bytes() == b"private"
+
+
+async def test_reimport_target_folder_outside_the_recipes_folder_falls_back_to_default(
+    monkeypatch, tmp_path: Path
+) -> None:
+    provider_calls: list[str | int] = []
+
+    class Provider:
+        async def get_model_version_info(self, model_version_id):
+            provider_calls.append(model_version_id)
+            return {}, None
+
+    async def fake_get_default_metadata_provider():
+        return Provider()
+
+    monkeypatch.setattr(
+        "py.recipes.enrichment.get_default_metadata_provider",
+        fake_get_default_metadata_provider,
+    )
+
+    async with recipe_harness(monkeypatch, tmp_path) as harness:
+        harness.scanner.recipes["rec-esc"] = {
+            "id": "rec-esc",
+            "title": "Planted",
+            "file_path": str(harness.tmp_dir / "elsewhere" / "rec-esc.webp"),
+            "source_path": "https://civitai.com/images/12345",
+        }
+        harness.civitai.image_info["12345"] = {
+            "id": 12345,
+            "url": "https://image.civitai.com/x/y/original=true/pic.png",
+            "type": "image",
+        }
+        harness.persistence.save_result = SimpleNamespace(
+            payload={"success": True, "recipe_id": "new-rec-esc"}, status=200
+        )
+        harness.scanner.recipes["new-rec-esc"] = {"id": "new-rec-esc", "loras": []}
+
+        response = await harness.client.get(
+            "/api/lm/recipe/rec-esc/reimport",
+            params={
+                "image_url": "https://civitai.com/images/12345",
+                "name": "Extension Recipe",
+                "resources": json.dumps([]),
+            },
+        )
+
+        assert response.status == 200
+        assert harness.persistence.save_calls[-1]["target_dir"] is None

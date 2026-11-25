@@ -36,6 +36,7 @@ from ...utils.civitai_utils import (
 from ...utils.constants import NSFW_LEVELS
 from ...utils.directory_browser import WINDOWS_DRIVES_TOKEN, browse_directory
 from ...utils.exif_utils import ExifUtils
+from ...utils.recipes_paths import is_inside_recipes_dir
 from ...utils.recipe_open_stats import RecipeOpenStats
 from ...utils.url_utils import relative_root_prefix
 from ...recipes.merger import GenParamsMerger
@@ -1080,6 +1081,19 @@ class RecipeManagementHandler:
                 raise RecipeNotFoundError(f"Recipe {recipe_id} not found")
 
             old_file_path = old_recipe.get("file_path", "")
+            # file_path comes from the editable .recipe.json: its folder is
+            # the re-import target and the image may be read as the source,
+            # so both only count when inside the recipes folder.
+            if old_file_path and not is_inside_recipes_dir(
+                old_file_path, getattr(recipe_scanner, "recipes_dir", None)
+            ):
+                self._logger.warning(
+                    "Recipe %s image is outside the recipes folder; "
+                    "re-importing into the default folder: %s",
+                    recipe_id,
+                    old_file_path,
+                )
+                old_file_path = ""
             old_folder = os.path.dirname(old_file_path) if old_file_path else None
 
             source_path = old_recipe.get("source_path") or ""

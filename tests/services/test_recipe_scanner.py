@@ -4658,7 +4658,11 @@ async def test_rematch_recipe_by_id_exif_raise_counts_error_and_skips_fts(
     recipes_dir.mkdir(exist_ok=True)
     json_path = recipes_dir / "r1.recipe.json"
     json_path.write_text(json.dumps(recipe))
-    image = tmp_path / "r1.png"
+    # Recipe images live in the recipes folder; EXIF is only rewritten there.
+    monkeypatch.setattr(
+        type(scanner), "recipes_dir", property(lambda _self: str(recipes_dir))
+    )
+    image = recipes_dir / "r1.png"
     image.write_bytes(b"fake-png")
     recipe["file_path"] = str(image)
 
@@ -4750,7 +4754,11 @@ async def test_rematch_recipe_by_id_exif_written_once(tmp_path: Path, monkeypatc
     recipes_dir.mkdir(exist_ok=True)
     json_path = recipes_dir / "r1.recipe.json"
     json_path.write_text(json.dumps(recipe))
-    image = tmp_path / "r1.png"
+    # Recipe images live in the recipes folder; EXIF is only rewritten there.
+    monkeypatch.setattr(
+        type(scanner), "recipes_dir", property(lambda _self: str(recipes_dir))
+    )
+    image = recipes_dir / "r1.png"
     image.write_bytes(b"fake-png")
     recipe["file_path"] = str(image)
 
