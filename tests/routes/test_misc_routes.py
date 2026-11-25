@@ -884,6 +884,14 @@ async def test_open_wildcards_location_creates_and_opens_directory(tmp_path, mon
     assert calls == [[_expected_opener(), str(wildcards_dir)]]
 
 
+def _register_library_root(monkeypatch, root) -> None:
+    """open-file-location / open-model-sidecar-location only act inside library roots."""
+    monkeypatch.setattr(
+        "py.routes.handlers.misc_handlers.library_roots.configured_download_roots",
+        lambda *_a, **_k: [str(root)],
+    )
+
+
 @_posix_only("dbus file-manager selection is Linux-only")
 @pytest.mark.asyncio
 async def test_open_file_location_linux_selects_via_dbus(tmp_path, monkeypatch):
@@ -893,6 +901,7 @@ async def test_open_file_location_linux_selects_via_dbus(tmp_path, monkeypatch):
     model_file.write_text("x", encoding="utf-8")
 
     handler = FileSystemHandler(settings_service=SimpleNamespace())
+    _register_library_root(monkeypatch, tmp_path)
 
     monkeypatch.setenv("DISPLAY", ":0")
     monkeypatch.setattr("py.routes.handlers.misc_handlers._is_docker", lambda: False)
@@ -933,6 +942,7 @@ async def test_open_file_location_linux_falls_back_to_xdg_open(tmp_path, monkeyp
     model_file.write_text("x", encoding="utf-8")
 
     handler = FileSystemHandler(settings_service=SimpleNamespace())
+    _register_library_root(monkeypatch, tmp_path)
 
     monkeypatch.setenv("DISPLAY", ":0")
     monkeypatch.setattr("py.routes.handlers.misc_handlers._is_docker", lambda: False)
@@ -965,6 +975,7 @@ async def test_open_file_location_headless_returns_clipboard_mode(tmp_path, monk
     model_file.write_text("x", encoding="utf-8")
 
     handler = FileSystemHandler(settings_service=SimpleNamespace())
+    _register_library_root(monkeypatch, tmp_path)
 
     monkeypatch.delenv("DISPLAY", raising=False)
     monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
@@ -1006,6 +1017,7 @@ async def test_open_model_sidecar_location_reveals_metadata_file(tmp_path, monke
     metadata_file.write_text("{}", encoding="utf-8")
 
     handler = FileSystemHandler(settings_service=SimpleNamespace())
+    _register_library_root(monkeypatch, tmp_path)
     _patch_linux_desktop(monkeypatch)
     monkeypatch.setattr(
         "py.routes.handlers.misc_handlers.get_metadata_path",
@@ -1041,6 +1053,7 @@ async def test_open_model_sidecar_location_falls_back_to_sidecar_dir(tmp_path, m
     sidecar_dir.mkdir()
 
     handler = FileSystemHandler(settings_service=SimpleNamespace())
+    _register_library_root(monkeypatch, tmp_path)
     _patch_linux_desktop(monkeypatch)
     monkeypatch.setattr(
         "py.routes.handlers.misc_handlers.get_metadata_path",
@@ -1073,6 +1086,7 @@ async def test_open_model_sidecar_location_missing_sidecar_returns_404(tmp_path,
     missing_dir = tmp_path / "missing"
 
     handler = FileSystemHandler(settings_service=SimpleNamespace())
+    _register_library_root(monkeypatch, tmp_path)
     monkeypatch.setattr(
         "py.routes.handlers.misc_handlers.get_metadata_path",
         lambda path: str(missing_dir / "model.metadata.json"),
@@ -1100,6 +1114,7 @@ async def test_open_model_sidecar_location_headless_returns_clipboard_mode(tmp_p
     metadata_file.write_text("{}", encoding="utf-8")
 
     handler = FileSystemHandler(settings_service=SimpleNamespace())
+    _register_library_root(monkeypatch, tmp_path)
     monkeypatch.delenv("DISPLAY", raising=False)
     monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
     monkeypatch.setattr("py.routes.handlers.misc_handlers._is_docker", lambda: False)
@@ -1124,8 +1139,9 @@ async def test_open_model_sidecar_location_headless_returns_clipboard_mode(tmp_p
 
 
 @pytest.mark.asyncio
-async def test_open_model_sidecar_location_validates_input(tmp_path):
+async def test_open_model_sidecar_location_validates_input(tmp_path, monkeypatch):
     handler = FileSystemHandler(settings_service=SimpleNamespace())
+    _register_library_root(monkeypatch, tmp_path)
 
     response = await handler.open_model_sidecar_location(FakeRequest())  # pyright: ignore[reportArgumentType]
     assert response.status == 400

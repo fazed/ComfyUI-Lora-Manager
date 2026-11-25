@@ -4157,6 +4157,31 @@ class FileSystemHandler:
             }
         )
 
+    def _open_location_roots(self) -> list[str]:
+        """Folders whose files the UI may reveal in the file manager.
+
+        Every configured library root, the recipes folder and the example
+        images folder. The settings-UI directory picker (browse/create/
+        validate) is deliberately not limited to these: choosing a new root
+        means browsing outside the current ones.
+        """
+        roots: list[str] = list(library_roots.configured_download_roots())
+        try:
+            from ...utils.recipes_paths import get_effective_recipes_dir
+
+            recipes_dir = get_effective_recipes_dir()
+            if recipes_dir:
+                roots.append(recipes_dir)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.debug("Recipes dir unavailable for open-location: %s", exc)
+        try:
+            example_root = self._settings.get("example_images_path")
+        except Exception:  # pragma: no cover - defensive
+            example_root = None
+        if isinstance(example_root, str) and example_root.strip():
+            roots.append(example_root)
+        return roots
+
     async def open_file_location(self, request: web.Request) -> web.Response:
         try:
             data = await request.json()
@@ -4167,6 +4192,16 @@ class FileSystemHandler:
                     status=400,
                 )
             file_path = os.path.abspath(file_path)
+            # Only files the UI can show (models, recipe images, example
+            # images) may be revealed; checked as strings before isfile.
+            try:
+                require_within_any(
+                    file_path, self._open_location_roots(), label="File path"
+                )
+            except UnsafePathError as exc:
+                return web.json_response(
+                    {"success": False, "error": str(exc)}, status=400
+                )
             if not os.path.isfile(file_path):
                 return web.json_response(
                     {"success": False, "error": "File does not exist"}, status=404
@@ -4194,6 +4229,16 @@ class FileSystemHandler:
                     status=400,
                 )
             file_path = os.path.abspath(file_path)
+            try:
+                require_within_any(
+                    file_path,
+                    library_roots.configured_download_roots(),
+                    label="File path",
+                )
+            except UnsafePathError as exc:
+                return web.json_response(
+                    {"success": False, "error": str(exc)}, status=400
+                )
             if not os.path.isfile(file_path):
                 return web.json_response(
                     {"success": False, "error": "File does not exist"}, status=404
