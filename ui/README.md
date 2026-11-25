@@ -232,7 +232,7 @@ git diff --name-status $(git merge-base main upstream/main) main | grep '^A'    
 
 ### Upstream-owned files the fork modified (high conflict risk)
 
-32 files. On a conflict, take upstream's version and re-apply the fork change
+33 files. On a conflict, take upstream's version and re-apply the fork change
 listed here; on a clean merge, still check that the change survived.
 
 **App wiring (2)**
@@ -261,6 +261,7 @@ listed here; on a clean merge, still check that the change survived.
 | `py/services/civitai_client.py` | `get_model_version` and the model fetch use short-TTL `TTLLookupCache`s, but only inside `civitai_lookup_cache()` (elsewhere they always fetch); the version result is also filed under its canonical ids. Uncached bodies are `_get_model_version_uncached` / `_fetch_model_data_uncached`. |
 | `py/services/settings_manager.py` | `DEFAULT_SETTINGS["download_queue_max_concurrent"] = 2`. |
 | `py/utils/civitai_utils.py` | New `build_civitai_video_still_url` and `build_civitai_thumbnail_url` (first image as an optimized rendition, a video as a JPEG still) for queue/history thumbnails. |
+| `py/services/model_update_service.py` | Updates phase 2: `ModelVersionRecord.description` / `files_meta`; columns `description TEXT`, `files_meta TEXT` in `_SCHEMA`, in the additive migrations and in the primary-key rebuild; filled in `_extract_single_version` (`_extract_files_meta`), kept by `_build_record_from_remote` when the response lacks them; read in `_get_records_bulk`, written in `_upsert_record`. |
 
 **Classic frontend: static, templates, ComfyUI web extension (6)**
 
@@ -413,10 +414,10 @@ directly (the new UI links back to the classic one).
   `/updates/overview`.
 * `web/comfyui/modern_ui_link.js` - `/lm-ui/` availability probe and link
   builders used by the three web files above.
-* 15 test files: `tests/frontend/components/modernUiLink.test.js`,
+* 16 test files: `tests/frontend/components/modernUiLink.test.js`,
   `tests/frontend/components/topMenuExtension.modernUi.test.js`,
   `tests/routes/test_{modern_ui_routes,updates_overview_route,download_queue_destination,b2b_ui_contract,recipe_ui_contract}.py`,
-  `tests/services/test_{model_scanner_scan_guard,scan_guard_move_reconcile,download_queue_worker,civitai_lookup_cache,model_versions_status_cache,update_classifier,model_actions_contract,model_tools_contract}.py`.
+  `tests/services/test_{model_scanner_scan_guard,scan_guard_move_reconcile,download_queue_worker,civitai_lookup_cache,model_versions_status_cache,update_classifier,update_changelog,model_actions_contract,model_tools_contract}.py`.
 
 ### Tests that guard the seams
 
@@ -426,7 +427,7 @@ directly (the new UI links back to the classic one).
 | Modern-UI link from ComfyUI | `tests/frontend/components/modernUiLink.test.js`, `tests/frontend/components/topMenuExtension.modernUi.test.js` |
 | `/lm-ui/` route | `tests/routes/test_modern_ui_routes.py` |
 | Queue worker and its hooks | `tests/services/test_download_queue_worker.py`, `tests/routes/test_download_queue_handlers.py`, `tests/routes/test_download_queue_destination.py`, `tests/services/test_civitai_lookup_cache.py` |
-| Updates overview / versions status | `tests/routes/test_updates_overview_route.py`, `tests/services/test_update_classifier.py`, `tests/services/test_model_versions_status_cache.py`, `tests/routes/test_misc_routes.py` |
+| Updates overview / versions status | `tests/routes/test_updates_overview_route.py`, `tests/services/test_update_classifier.py`, `tests/services/test_update_changelog.py`, `tests/services/test_model_versions_status_cache.py`, `tests/routes/test_misc_routes.py` |
 | Upstream behaviour the UI relies on | `tests/services/test_model_actions_contract.py`, `tests/services/test_model_tools_contract.py`, `tests/routes/test_recipe_ui_contract.py`, `tests/routes/test_b2b_ui_contract.py` |
 
 ### Sync procedure
@@ -2165,8 +2166,17 @@ or missing records are reported, not refreshed. Answer:
              candidates: [{ versionId, name, baseModel, releasedAt, sizeBytes, fileCount,
                             usageControl, isEarlyAccess, earlyAccessEndsAt, isPaid, previewUrl,
                             hasBeenDownloaded, isIgnored,
-                            confidence: likely|possible|variant, reason, hiddenBecause: [] }] }] }
+                            confidence: likely|possible|variant, reason, hiddenBecause: [],
+                            // phase 2: null / [] until the next "Check now" fills them
+                            description,             // plain text, max 1200 chars + "…"
+                            fileFormat, precision,   // primary weight file ("SafeTensor", "fp16")
+                            files: [{ type, format, precision, size, sizeBytes, primary }] }] }] }
 ```
+
+Ignored models and versions stay in the payload: an ignored model's lines are
+`tier: hidden` groups with `isIgnored: true`, an ignored version is a
+candidate with `isIgnored: true` and the gate `ignored`. The page's Ignored
+view is built from that; no extra endpoint.
 
 ### Classification
 
@@ -2325,13 +2335,116 @@ and the filter's help text has an **Open Updates** link to `/updates`. The
 card and row pills take the pointer only for that tooltip; a click on them
 still opens (or selects) the item.
 
-### Phase 2 (not built yet)
+### Phase 2: bulk update, ignore, changelog, drawer
 
-Bulk select and "update all", ignore version / model from the page, changelog
-and file-format choice per row, an `update_tier` parameter on the library
-list so the toolbar's update filter and the pills use the classification
-instead of the per-file flag, the drawer Versions tab using the
-classification, and an optional background re-check.
+Code: `composables/useBulkUpdate.ts` (selection and the sequential run),
+`composables/useUpdateIgnore.ts` (optimistic ignore / restore),
+`composables/useVersionClassification.ts` (drawer chip),
+`components/UpdatesBulkBar.vue`, `components/UpdateIgnoredRow.vue`, pure
+helpers in `utils/updates.ts`, strings in `i18n/updatesMessages.ts`.
+
+**Bulk update.** Every row whose Update action is available (not queued,
+downloading or in the library) has a checkbox. **Select all visible** picks
+the rows of the current filter (Likely / Possible / All) that can be updated
+and whose candidate is not hidden, so All never mass-selects variants,
+ignored or other-base versions; those can still be ticked one by one. The bar
+under the list (sticky at the bottom, full width with
+`env(safe-area-inset-bottom)` on phones) shows the count and the total size
+(the sum of `sizeBytes`; "at least ... (N without a size)" or "size unknown").
+**Update selected** opens the shared `ConfirmDialog` with the count, the size,
+the distinct destination folders (the same derivation as a single Update:
+root and folder of the current file via `/roots`) and how many go to the
+default folder because no root matched, plus "nothing is deleted". After the
+confirm the updates are queued **one at a time** (`downloads/queue/add`
+through the same `queueUpdate` as a single Update; the shared queue is
+re-read once at the end) with "Queueing x/N" in a polite live region; the
+controls are locked and a second click does nothing while it runs. A per-item
+error (400 / 500) is recorded and the run continues; 403 (request guard),
+offline (network / 503) and 429 stop it when **Stop at the first connection,
+permission or rate-limit error** is on (default; the checkbox shows once
+something is selected). The result line lists added / already queued /
+failed (with the message per item) / not sent, the stop reason, and links to
+Downloads. Added and duplicate rows leave the selection; failed and unsent
+ones stay selected, so Update selected retries them. A type switch clears the
+selection.
+
+**Ignore / restore.** Each row has an **Ignore** menu (`MenuButton`, text on
+desktop, icon with a hidden label on phones) with **Ignore this version**
+(`POST /api/lm/{prefix}/updates/ignore-version {modelId, versionId,
+shouldIgnore: true}`) and **Ignore model** (`POST .../updates/ignore {modelId,
+shouldIgnore: true}`), LoRA Manager's existing endpoints (local database
+only). The change shows at once (`applyIgnoreChanges`: gate, tier and totals
+recomputed), then the overview is re-read and the badge counts are refreshed
+(`refreshLikelyCounts({force: true})`); a failed request rolls it back with an
+error toast. The success toast has **Undo** (the same endpoint with
+`shouldIgnore: false`). Semantics: an ignored version stays hidden from
+Likely / Possible, also after later checks; an ignored model hides all its
+versions and its refreshes are skipped by the backend (as in the classic UI)
+until it is restored. The filter **Ignored (n)** lists ignored models (once,
+"All versions") and ignored versions of models that are not ignored as a
+whole, each with **Restore**. Only versions that are newer candidates appear;
+an ignored version older than yours is not an update anyway.
+
+**Changelog and file format.** Data per version is stored by the update
+service (see the migration note below) and only appears after the next
+**Check now** for that model; until then the row shows nothing extra. With
+data, the row shows a format badge ("SafeTensor · fp16", the primary weight
+file) and a collapsed **What's new** (`<details>`) with the description as
+plain text (`whitespace-pre-line`, never `v-html`) and, when the version has
+more than one weight file, the files with format, precision, size label and
+size. The backend converts Civitai's HTML to text (`description_to_text` in
+`update_classifier.py`: block tags become line breaks, list items "- ",
+script / style / iframe content dropped, attributes never read, control
+characters removed, 1200 characters with an ellipsis).
+
+*Migration note:* `model_update_versions` gains two nullable columns,
+`description TEXT` (Civitai's version description, capped at 20 000
+characters) and `files_meta TEXT` (compact JSON of at most 12 weight files:
+`type, format, precision, size, sizeBytes, primary`), added by the existing
+additive `_apply_migrations` (`ALTER TABLE ... ADD COLUMN`, idempotent, old
+rows keep NULL) and carried through the legacy primary-key rebuild. They are
+filled in `_extract_single_version` from the Civitai model response (the
+`/models?ids=` bulk and `/models/{id}` answers carry `description` per
+version when one is set, and `files[].metadata.{format, fp, size}`), and a
+response without them keeps the stored values. An older build of the fork or
+of upstream simply ignores the columns.
+
+**Drawer Versions tab.** **Queue download** now sends the same destination
+as the Updates page (`destinationForFile`: the open file's root and folder,
+`/roots` read once per drawer; default root + path template when no root
+matches, which the toast says). Versions that are newer candidates get a chip
+**Likely update / Possible update / Variant** from the overview of the
+drawer's type, read once per drawer (GET, no Civitai); without the endpoint
+or without a classification there is no chip.
+
+**Check now progress and stop.** While a check runs a panel says it is
+checking (indeterminate: the backend reports no progress) with **Stop**,
+which sends the classic UI's cancel (`POST /api/lm/{prefix}/cancel-task`).
+The backend stops between models (the bulk Civitai request already running
+finishes) and answers the refresh with `status: "cancelled"`; the page
+re-reads the overview and says "Check stopped. Models checked so far keep
+their results." The cancel flag is the type's scanner flag, so a library scan
+of the same type running at that moment stops too (the Stop button's tooltip
+says so).
+
+Tests: `tests/services/test_update_changelog.py` (extraction, keeping data
+across refreshes, the old-schema migration and its idempotence, HTML to text,
+payload fields, empty until checked), `test_update_classifier.py` (payload
+shape, ignored lines stay in the payload) and `ui/tests/updatesPhase2.test.ts`
+(helpers, payloads of the ignore endpoints and the cancel, the row's checkbox,
+changelog as text and the menu, bulk selection rules, confirm contents,
+sequencing with one request at a time, live progress, partial failures,
+duplicates, the 403 stop and the option off, no double submit, optimistic
+ignore with rollback and Undo, the Ignored view and Restore, Check now stop,
+the drawer chip and destination). Checked in a browser against a local mock
+backend (never the live one) at 1100 and 375 px in Dark and Light.
+
+### Still to do
+
+An `update_tier` parameter on the library list so the toolbar's update
+filter and the pills use the classification instead of the per-file flag, a
+file choice per row (the files are shown, the queue still takes the primary
+file), and an optional background re-check.
 
 ## Roadmap: still in the classic UI
 

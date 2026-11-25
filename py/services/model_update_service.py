@@ -126,6 +126,12 @@ class ModelVersionRecord:
     # "never tried" from "tried and no price is readable", which is what lets the
     # UI say "price unavailable" for mature models instead of showing nothing.
     price_check_attempted_at: Optional[float] = None
+    # Version description ("changelog") as Civitai sends it (HTML, capped at
+    # ModelUpdateService.DESCRIPTION_STORE_MAX_CHARS) and a compact JSON list of
+    # the weight files ({type, format, precision, size, sizeBytes, primary}).
+    # None until a refresh after the column existed fills them.
+    description: Optional[str] = None
+    files_meta: Optional[str] = None
 
 
 @dataclass
@@ -344,6 +350,10 @@ class ModelUpdateService:
     """Persist and query remote model version metadata."""
 
     _SQLITE_MAX_VARIABLES = 500
+    # Upper bound of a stored version description (characters).
+    DESCRIPTION_STORE_MAX_CHARS = 20_000
+    # Upper bound of weight-file entries kept per version in files_meta.
+    FILES_META_MAX_ENTRIES = 12
 
     _SCHEMA = """
         PRAGMA foreign_keys = ON;
@@ -376,6 +386,8 @@ class ModelUpdateService:
             price_sale_ends_at TEXT,
             price_checked_at REAL,
             price_check_attempted_at REAL,
+            description TEXT,
+            files_meta TEXT,
             PRIMARY KEY (model_id, version_id),
             FOREIGN KEY(model_id) REFERENCES model_update_status(model_id) ON DELETE CASCADE
         );
@@ -652,6 +664,14 @@ class ModelUpdateService:
                 "ALTER TABLE model_update_versions "
                 "ADD COLUMN price_check_attempted_at REAL"
             ),
+            "description": (
+                "ALTER TABLE model_update_versions "
+                "ADD COLUMN description TEXT"
+            ),
+            "files_meta": (
+                "ALTER TABLE model_update_versions "
+                "ADD COLUMN files_meta TEXT"
+            ),
         }
 
         for column, statement in migrations.items():
@@ -779,6 +799,8 @@ class ModelUpdateService:
                 price_sale_ends_at TEXT,
                 price_checked_at REAL,
                 price_check_attempted_at REAL,
+                description TEXT,
+                files_meta TEXT,
                 PRIMARY KEY (model_id, version_id),
                 FOREIGN KEY(model_id) REFERENCES model_update_status(model_id) ON DELETE CASCADE
             )
@@ -809,6 +831,8 @@ class ModelUpdateService:
             "price_sale_ends_at",
             "price_checked_at",
             "price_check_attempted_at",
+            "description",
+            "files_meta",
         ]
         defaults = {
             "sort_index": "0",
@@ -832,6 +856,8 @@ class ModelUpdateService:
             "price_sale_ends_at": "NULL",
             "price_checked_at": "NULL",
             "price_check_attempted_at": "NULL",
+            "description": "NULL",
+            "files_meta": "NULL",
         }
 
         select_parts = []
@@ -1856,6 +1882,17 @@ class ModelUpdateService:
                         else file_count_map.get(version_id)
                     ),
                     gate_lapsed_at=gate_lapsed_at,
+                    # A response without the data keeps what an earlier refresh stored.
+                    description=(
+                        remote_version.description
+                        if remote_version.description is not None
+                        else getattr(existing_version, "description", None)
+                    ),
+                    files_meta=(
+                        remote_version.files_meta
+                        if remote_version.files_meta is not None
+                        else getattr(existing_version, "files_meta", None)
+                    ),
                     **price_fields,
                 )
             )
@@ -2142,6 +2179,10 @@ class ModelUpdateService:
         released_at = _normalize_string(entry.get("publishedAt") or entry.get("createdAt"))
         size_bytes = self._extract_size_bytes(entry.get("files"))
         file_count = self._extract_file_count(entry.get("files"))
+        files_meta = self._extract_files_meta(entry.get("files"))
+        description = _normalize_string(entry.get("description"))
+        if description is not None:
+            description = description[: self.DESCRIPTION_STORE_MAX_CHARS]
         preview_url = self._extract_preview_url(entry.get("images"))
         early_access_ends_at = _normalize_string(entry.get("earlyAccessEndsAt"))
 
@@ -2181,7 +2222,54 @@ class ModelUpdateService:
             paid_access=paid_access_json,
             is_paid=is_paid,
             file_count=file_count,
+            description=description,
+            files_meta=files_meta,
         )
+
+    @classmethod
+    def _extract_files_meta(cls, files) -> Optional[str]:
+        """Compact JSON of the weight files' format / precision / size.
+
+        Only entries whose ``type`` is a weight file type are kept (primary
+        first, at most ``FILES_META_MAX_ENTRIES``). Returns None when the
+        payload carries no files array, so a refresh without it keeps the
+        stored value.
+        """
+
+        if not isinstance(files, list):
+            return None
+
+        def text(value) -> Optional[str]:
+            return value.strip()[:40] or None if isinstance(value, str) else None
+
+        entries: List[Dict[str, Any]] = []
+        for entry in files:
+            if not isinstance(entry, Mapping):
+                continue
+            entry_type = entry.get("type")
+            if not (isinstance(entry_type, str) and entry_type in MODEL_WEIGHT_FILE_TYPES):
+                continue
+            metadata = entry.get("metadata") if isinstance(entry.get("metadata"), Mapping) else {}
+            size_bytes: Optional[int] = None
+            try:
+                if entry.get("sizeKB") is not None:
+                    size_bytes = int(float(entry.get("sizeKB")) * 1024)
+            except (TypeError, ValueError):
+                size_bytes = None
+            primary_flag = entry.get("primary")
+            entries.append(
+                {
+                    "type": entry_type,
+                    "format": text(metadata.get("format")),
+                    "precision": text(metadata.get("fp")),
+                    "size": text(metadata.get("size")),
+                    "sizeBytes": size_bytes,
+                    "primary": primary_flag is True
+                    or (isinstance(primary_flag, str) and primary_flag.strip().lower() == "true"),
+                }
+            )
+        entries.sort(key=lambda item: 0 if item["primary"] else 1)
+        return json.dumps(entries[: cls.FILES_META_MAX_ENTRIES])
 
     @staticmethod
     def _normalize_paid_access(value) -> Optional[Dict[str, Any]]:
@@ -2331,7 +2419,7 @@ class ModelUpdateService:
                            is_early_access, usage_control, paid_access, is_paid, file_count,
                            gate_lapsed_at, price_buzz, list_price_buzz, generation_price_buzz,
                            accepts_blue_buzz, price_sale_ends_at, price_checked_at,
-                           price_check_attempted_at
+                           price_check_attempted_at, description, files_meta
                     FROM model_update_versions
                     WHERE model_id IN ({placeholders})
                     ORDER BY model_id ASC, sort_index ASC, version_id ASC
@@ -2379,6 +2467,8 @@ class ModelUpdateService:
                         if row["price_check_attempted_at"] is not None
                         else None
                     ),
+                    description=row["description"],
+                    files_meta=row["files_meta"],
                 )
             )
 
@@ -2444,8 +2534,8 @@ class ModelUpdateService:
                         is_early_access, usage_control, paid_access, is_paid, file_count,
                         gate_lapsed_at, price_buzz, list_price_buzz, generation_price_buzz,
                         accepts_blue_buzz, price_sale_ends_at, price_checked_at,
-                        price_check_attempted_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        price_check_attempted_at, description, files_meta
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         version.version_id,
@@ -2472,6 +2562,8 @@ class ModelUpdateService:
                         version.price_sale_ends_at,
                         version.price_checked_at,
                         version.price_check_attempted_at,
+                        version.description,
+                        version.files_meta,
                     ),
                 )
             conn.commit()

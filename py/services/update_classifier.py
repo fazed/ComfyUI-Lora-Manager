@@ -39,9 +39,11 @@ other base model).
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
+from html.parser import HTMLParser
 from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence, Set
 
 from ..utils.paid_access import is_early_access_deadline_active, parse_civitai_timestamp
@@ -52,11 +54,18 @@ __all__ = [
     "CONFIDENCE_VARIANT",
     "REASON_CODES",
     "HIDDEN_CODES",
+    "DESCRIPTION_MAX_CHARS",
     "NameSignature",
     "name_signature",
+    "description_to_text",
     "collect_local_model_ids",
     "build_updates_overview",
 ]
+
+# Longest changelog text a candidate carries in the overview (characters).
+DESCRIPTION_MAX_CHARS = 1200
+# Weight-file entries listed per candidate.
+FILES_MAX_ENTRIES = 6
 
 CONFIDENCE_LIKELY = "likely"
 CONFIDENCE_POSSIBLE = "possible"
@@ -533,6 +542,112 @@ def _timestamp_to_iso(value: Optional[float]) -> Optional[str]:
         return None
 
 
+class _TextExtractor(HTMLParser):
+    """HTML -> plain text: block tags become line breaks, list items "- ".
+
+    Script / style / template content is dropped; attributes are never read,
+    so nothing of a link or image survives but its text.
+    """
+
+    _BLOCK = {"p", "div", "br", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "tr", "blockquote", "pre", "hr"}
+    _SKIP = {"script", "style", "template", "noscript", "iframe", "object"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: List[str] = []
+        self._skip_depth = 0
+
+    def handle_starttag(self, tag: str, attrs) -> None:  # noqa: D401 - HTMLParser API
+        if tag in self._SKIP:
+            self._skip_depth += 1
+        elif tag == "li":
+            self.parts.append("\n- ")
+        elif tag in self._BLOCK:
+            self.parts.append("\n")
+
+    def handle_startendtag(self, tag: str, attrs) -> None:
+        if tag in self._BLOCK:
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in self._SKIP:
+            self._skip_depth = max(0, self._skip_depth - 1)
+        elif tag in self._BLOCK:
+            self.parts.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        if not self._skip_depth:
+            self.parts.append(data)
+
+
+_CONTROL_CHARS = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+
+
+def description_to_text(value: Any, limit: int = DESCRIPTION_MAX_CHARS) -> Optional[str]:
+    """A version description (Civitai HTML) as plain text of at most ``limit``
+    characters (plus an ellipsis), or None when nothing readable is left."""
+
+    if not isinstance(value, str) or not value.strip():
+        return None
+    parser = _TextExtractor()
+    try:
+        parser.feed(value)
+        parser.close()
+    except Exception:  # pragma: no cover - HTMLParser is lenient
+        return None
+    text = _CONTROL_CHARS.sub("", "".join(parser.parts))
+    lines = [re.sub(r"[ \t ]+", " ", line).strip() for line in text.split("\n")]
+    out: List[str] = []
+    for line in lines:
+        if not line and (not out or not out[-1]):
+            continue
+        out.append(line)
+    text = "\n".join(out).strip()
+    if not text:
+        return None
+    if len(text) > limit:
+        cut = text[:limit]
+        space = max(cut.rfind(" "), cut.rfind("\n"))
+        if space > limit * 0.6:
+            cut = cut[:space]
+        text = cut.rstrip() + "…"
+    return text
+
+
+def _files_summary(raw: Any) -> List[Dict[str, Any]]:
+    """The stored weight-file list (JSON) as payload entries; [] when unknown."""
+
+    if not isinstance(raw, str) or not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        return []
+    if not isinstance(data, list):
+        return []
+    files: List[Dict[str, Any]] = []
+    for entry in data[:FILES_MAX_ENTRIES]:
+        if not isinstance(entry, Mapping):
+            continue
+
+        def text(key: str) -> Optional[str]:
+            value = entry.get(key)
+            return value if isinstance(value, str) and value else None
+
+        size = entry.get("sizeBytes")
+        files.append(
+            {
+                "type": text("type"),
+                "format": text("format"),
+                "precision": text("precision"),
+                "size": text("size"),
+                "sizeBytes": size if isinstance(size, int) and not isinstance(size, bool) else None,
+                "primary": entry.get("primary") is True,
+            }
+        )
+    return files
+
+
 def _serialize_candidate(
     candidate: _Version,
     *,
@@ -545,6 +660,8 @@ def _serialize_candidate(
     model_ignored: bool,
 ) -> Dict[str, Any]:
     record = candidate.record
+    files = _files_summary(getattr(record, "files_meta", None) if record is not None else None)
+    main_file = next((entry for entry in files if entry["primary"]), files[0] if files else None)
     return {
         "versionId": candidate.version_id,
         "name": candidate.name,
@@ -562,6 +679,14 @@ def _serialize_candidate(
         "confidence": confidence,
         "reason": reason,
         "hiddenBecause": hidden,
+        # Changelog and file format: filled by refreshes after the columns
+        # existed (null / [] until the next "Check now").
+        "description": description_to_text(
+            getattr(record, "description", None) if record is not None else None
+        ),
+        "fileFormat": main_file["format"] if main_file else None,
+        "precision": main_file["precision"] if main_file else None,
+        "files": files,
     }
 
 

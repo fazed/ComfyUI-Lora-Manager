@@ -15,6 +15,8 @@ import { modelTypeOf } from '@/utils/exampleImages'
 import { copyText, useConfirm, useToasts } from '@/composables/useFeedback'
 import { usePersistentToggle } from '@/composables/usePersistentToggle'
 import { useSendToWorkflow } from '@/composables/useSendToWorkflow'
+import { useVersionClassification } from '@/composables/useVersionClassification'
+import { destinationForFile } from '@/utils/updates'
 import { withMountPrefix } from '@/utils/basePath'
 import { civitaiModelUrl } from '@/utils/civitai'
 import { formatBytes, formatDate, isVideoUrl } from '@/utils/format'
@@ -126,6 +128,16 @@ const modelId = computed(() => props.item.civitai?.modelId ?? metadata.value?.mo
 const civitaiUrl = computed(() =>
   civitaiModelUrl(props.civitaiHost, modelId.value, props.item.civitai?.id ?? metadata.value?.id),
 )
+// Versions tab: the Updates classification (one read-only overview per drawer) and the
+// queue destination next to this file (same rule as the Updates page).
+const classification = useVersionClassification(() => props.api.prefix, modelId)
+const roots = ref<string[] | null>(null)
+function classificationChip(versionId: number): { label: string; tone: string } | null {
+  const confidence = classification.byVersion.value.get(versionId)
+  if (!confidence) return null
+  const tone = confidence === 'likely' ? 'lm-badge--success' : confidence === 'possible' ? 'lm-badge--accent' : ''
+  return { label: t(`detail.updateChip.${confidence}` as MessageKey), tone }
+}
 // External links (new tab) first, then the same model actions as the card menu.
 const currentVersion = computed(() => currentVersionId(props.item, metadata.value))
 const menuItems = computed<ActionMenuItem[]>(() => {
@@ -206,6 +218,7 @@ async function loadVersions(quiet = false): Promise<void> {
   const request = versionsGuard.begin()
   if (!quiet) versionsLoading.value = true
   versionsError.value = null
+  classification.ensure()
   try {
     const result = await props.api.versions(modelId.value, request.signal)
     if (!request.isCurrent()) return
@@ -385,10 +398,24 @@ async function toggleFavorite(): Promise<void> {
   if (await save({ favorite: next })) toasts.success(t(next ? 'detail.favoriteOn' : 'detail.favoriteOff'))
 }
 
+/**
+ * Queue a version next to this file: the same root and folder as the open
+ * model (`destinationForFile`, like Update on the Updates page); the default
+ * root + path template when the root cannot be determined.
+ */
 async function queueVersion(versionId: number): Promise<void> {
   try {
-    const result = await downloadsApi.add({ modelId: modelId.value, versionId })
-    toasts.success(result.duplicate ? t('detail.alreadyQueued') : t('detail.queued'))
+    if (roots.value === null) {
+      try {
+        roots.value = await props.api.roots()
+      } catch {
+        roots.value = []
+      }
+    }
+    const destination = destinationForFile(props.item.file_path, roots.value)
+    const result = await downloadsApi.add({ modelId: modelId.value, versionId, destination: destination.params })
+    if (result.duplicate) toasts.success(t('detail.alreadyQueued'))
+    else toasts.success(destination.known ? t('detail.queuedTo', { path: destination.display }) : t('detail.queuedDefault'))
   } catch (error) {
     toasts.error((error as Error).message)
   }
@@ -994,6 +1021,13 @@ useEventListener(document, 'keydown', onKey)
                   <span v-if="version.isInLibrary" class="lm-badge lm-badge--success">{{ t('detail.inLibrary') }}</span>
                   <span v-else-if="version.hasBeenDownloaded" class="lm-badge">{{ t('detail.downloaded') }}</span>
                   <span v-if="version.isEarlyAccess" class="lm-badge lm-badge--warning">{{ t('detail.earlyAccess') }}</span>
+                  <span
+                    v-if="!version.isInLibrary && classificationChip(version.versionId)"
+                    class="lm-badge"
+                    :class="classificationChip(version.versionId)!.tone"
+                    :title="t('detail.updateChipHint')"
+                    data-testid="update-chip"
+                  >{{ classificationChip(version.versionId)!.label }}</span>
                 </div>
               </div>
               <!-- Fixed-width actions column so every row lines up; a version already in the library keeps the space empty. -->

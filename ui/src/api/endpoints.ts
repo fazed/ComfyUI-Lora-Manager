@@ -38,6 +38,7 @@ import type {
   SettingsMap,
   TagEntry,
   UpdatesOverview,
+  UpdateIgnoreResponse,
   UpdatesRefreshResponse,
   WorkflowRegistry,
 } from './types'
@@ -363,6 +364,30 @@ export const updatesApi = {
    */
   refresh: (prefix: ModelPrefix) =>
     request<UpdatesRefreshResponse>(`${prefix}/updates/refresh`, { method: 'POST', body: { force: false } }),
+  /**
+   * Ignore (or restore with `ignore=false`) one version of a model: it stays
+   * in the overview, hidden with the gate `ignored`. Local database only.
+   */
+  ignoreVersion: (prefix: ModelPrefix, modelId: number, versionId: number, ignore: boolean) =>
+    request<UpdateIgnoreResponse>(`${prefix}/updates/ignore-version`, {
+      method: 'POST',
+      body: { modelId, versionId, shouldIgnore: ignore },
+    }),
+  /** Ignore (or restore) every version of a model, now and after later checks. Local database only. */
+  ignoreModel: (prefix: ModelPrefix, modelId: number, ignore: boolean) =>
+    request<UpdateIgnoreResponse>(`${prefix}/updates/ignore`, {
+      method: 'POST',
+      body: { modelId, shouldIgnore: ignore },
+    }),
+  /**
+   * Stop a running "Check now" (`POST /{prefix}/cancel-task`, the classic UI's
+   * cancel). The backend stops between models (the bulk Civitai request that
+   * is already running finishes) and keeps what was checked. It is the type's
+   * scanner cancel flag, so a library scan of the same type running at that
+   * moment stops too. Only sent while a check runs.
+   */
+  cancelCheck: (prefix: ModelPrefix) =>
+    request<{ status?: string; message?: string }>(`${prefix}/cancel-task`, { method: 'POST', body: {} }),
 }
 
 export const settingsApi = {

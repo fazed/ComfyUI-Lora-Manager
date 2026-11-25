@@ -7,29 +7,43 @@
  * folder of the current file. "Check now" (Civitai) runs only after a confirm.
  * Refresh (button / `r`) re-reads the overview: no scan, no Civitai request.
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useLocalStorage } from '@vueuse/core'
 import AppIcon from '@/components/AppIcon.vue'
 import PageShell from '@/components/PageShell.vue'
 import StateBlock from '@/components/StateBlock.vue'
+import UpdateIgnoredRow from '@/components/UpdateIgnoredRow.vue'
 import UpdateRow from '@/components/UpdateRow.vue'
+import UpdatesBulkBar from '@/components/UpdatesBulkBar.vue'
 import type { ModelPrefix, UpdateCandidate, UpdateGroup } from '@/api/types'
 import { useAppSettings } from '@/composables/useAppSettings'
+import { useBulkUpdate } from '@/composables/useBulkUpdate'
 import { useConfirm, useToasts } from '@/composables/useFeedback'
 import { useRefreshHandler } from '@/composables/useRefresh'
+import { useUpdateIgnore } from '@/composables/useUpdateIgnore'
 import { useUpdates, useUpdatesSummary } from '@/composables/useUpdates'
 import { LIBRARIES } from '@/config/libraries'
 import {
+  autoSelectable,
+  bulkConfirmMessage,
+  bulkSizeText,
+  canQueue,
   checkedAgoText,
   currentCard,
   deriveDestination,
   filterCounts,
   groupsForFilter,
+  ignoredEntries,
   isUpdatePrefix,
   primaryCandidate,
+  summarizeBulk,
   typeLikelyText,
   UPDATE_PREFIXES,
   UPDATES_FILTERS,
+  type BulkItem,
+  type IgnoredEntry,
+  type IgnoreChange,
+  type UpdateRowModel,
   type UpdatesFilter,
 } from '@/utils/updates'
 import { t, type MessageKey } from '@/i18n'
@@ -48,7 +62,11 @@ const filter = ref<UpdatesFilter>('likely')
 const updates = useUpdates(prefix)
 /** Likely count per type (shared with the top-bar badge); missing until read. */
 const likelyByType = useUpdatesSummary().byPrefix
-const { overview, loading, error, errorStatus } = updates
+const { loading, error, errorStatus } = updates
+
+// Ignore / restore: the page shows the overview with the changes still being stored.
+const ignore = useUpdateIgnore({ prefix, overview: updates.overview, reload: () => updates.load() })
+const overview = ignore.view
 
 const blurMature = computed(() => settings.value?.blur_mature_content !== false)
 const civitaiHost = computed(() => String(settings.value?.civitai_host || 'civitai.com'))
@@ -56,7 +74,8 @@ const typeLabel = (value: ModelPrefix) => t(LIBRARIES[value].title)
 
 const counts = computed(() => filterCounts(overview.value))
 const rows = computed(() => {
-  const list: Array<{ group: UpdateGroup; candidate: UpdateCandidate; more: number }> = []
+  const list: UpdateRowModel[] = []
+  if (filter.value === 'ignored') return list
   for (const group of groupsForFilter(overview.value?.groups ?? [], filter.value)) {
     const candidate = primaryCandidate(group, filter.value)
     if (!candidate) continue
@@ -64,6 +83,99 @@ const rows = computed(() => {
   }
   return list
 })
+const ignored = computed<IgnoredEntry[]>(() => (filter.value === 'ignored' ? ignoredEntries(overview.value?.groups ?? []) : []))
+
+// --- bulk update ---------------------------------------------------------------
+/** Rows whose Update action is available right now, by row key. */
+const selectableRows = computed(() => {
+  const map = new Map<string, BulkItem>()
+  for (const row of rows.value) {
+    if (updates.queuing.value === row.candidate.versionId) continue
+    if (!canQueue(updates.rowState(row.candidate.versionId))) continue
+    map.set(row.group.key, { key: row.group.key, group: row.group, candidate: row.candidate, destination: destinationFor(row.group) })
+  }
+  return map
+})
+const bulk = useBulkUpdate({
+  selectable: () => selectableRows.value,
+  queueUpdate: updates.queueUpdate,
+  afterRun: () => updates.refreshQueue(),
+})
+const autoKeys = computed(() =>
+  rows.value.filter((row) => selectableRows.value.has(row.group.key) && autoSelectable(row, updates.rowState(row.candidate.versionId))).map((row) => row.group.key),
+)
+const bulkSummary = computed(() => summarizeBulk(bulk.selected.value))
+const showBulkBar = computed(() => filter.value !== 'ignored' && (selectableRows.value.size > 0 || bulk.selected.value.length > 0 || !!bulk.result.value))
+// A type switch starts with an empty selection (the rows belong to another type).
+watch(prefix, () => {
+  bulk.clear()
+  bulk.dismissResult()
+})
+
+async function onBulkUpdate(): Promise<void> {
+  const items = bulk.selected.value
+  if (!items.length || bulk.submitting.value) return
+  const summary = summarizeBulk(items)
+  const ok = await confirm({
+    title: t('updates.bulk.confirmTitle', { count: items.length, models: items.length === 1 ? t('updates.model') : t('updates.models') }),
+    message: bulkConfirmMessage(summary),
+    confirmLabel: t('updates.bulk.confirm', { count: items.length }),
+  })
+  if (!ok) return
+  // Re-read the selection: a row may have been queued while the confirm was open.
+  const result = await bulk.run(bulk.selected.value)
+  if (!result) return
+  announcement.value = t('updates.bulk.announce', {
+    added: result.added.length,
+    duplicates: result.duplicates.length,
+    failed: result.failed.length,
+  })
+}
+
+// --- ignore / restore -------------------------------------------------------------
+function versionLabel(group: UpdateGroup, candidate: UpdateCandidate | null): { name: string; version: string } {
+  return { name: group.modelName || '', version: candidate ? candidate.name || '' : t('updates.ignored.allVersions') }
+}
+
+async function changeIgnore(change: IgnoreChange, label: { name: string; version: string }, undoable: boolean): Promise<void> {
+  const outcome = await ignore.apply(change)
+  if (!outcome.ok) {
+    if (outcome.message) toasts.error(t('updates.ignore.failed', { message: outcome.message }))
+    return
+  }
+  let text: string
+  if (!change.ignore) text = change.versionId === null ? t('updates.restoredModel', label) : t('updates.restored', label)
+  else if (change.versionId === null) text = t('updates.ignore.modelDone', label)
+  else text = t('updates.ignore.versionDone', label)
+  announcement.value = text
+  if (!undoable) {
+    toasts.success(text)
+    return
+  }
+  toasts.push(text, 'success', 10_000, {
+    label: t('updates.undo'),
+    run: () => void changeIgnore({ ...change, ignore: !change.ignore }, label, false),
+  })
+}
+
+function onIgnore(group: UpdateGroup, candidate: UpdateCandidate, scope: 'version' | 'model'): void {
+  const change: IgnoreChange = { modelId: group.modelId, versionId: scope === 'model' ? null : candidate.versionId, ignore: true }
+  bulk.toggle(group.key, false)
+  void changeIgnore(change, versionLabel(group, scope === 'model' ? null : candidate), true)
+}
+
+function onRestore(entry: IgnoredEntry): void {
+  const candidate = entry.kind === 'version' ? entry.candidate : null
+  const change: IgnoreChange = { modelId: entry.group.modelId, versionId: candidate?.versionId ?? null, ignore: false }
+  void changeIgnore(change, versionLabel(entry.group, candidate), true)
+}
+
+function restoreBusy(entry: IgnoredEntry): boolean {
+  return ignore.isBusy({ modelId: entry.group.modelId, versionId: entry.kind === 'version' ? entry.candidate.versionId : null })
+}
+function rowIgnoreBusy(group: UpdateGroup, candidate: UpdateCandidate): boolean {
+  return ignore.isBusy({ modelId: group.modelId, versionId: null }) || ignore.isBusy({ modelId: group.modelId, versionId: candidate.versionId })
+}
 const hiddenCount = computed(() => overview.value?.totals.hidden ?? 0)
 const checkedText = computed(() => checkedAgoText(overview.value?.oldestCheckedAt ?? null))
 const unchecked = computed(() => overview.value?.unchecked ?? 0)
@@ -122,9 +234,17 @@ async function onCheckNow(): Promise<void> {
   } else if (outcome === 'offline') {
     notice.value = 'offline'
     announcement.value = t('updates.backendOffline')
+  } else if (outcome === 'stopped') {
+    const text = t('updates.checkStopped')
+    toasts.push(text)
+    announcement.value = text
   } else if (outcome === 'error') {
     toasts.error(t('updates.checkFailed', { message: message || t('common.error') }))
   }
+}
+
+async function onStopCheck(): Promise<void> {
+  if (await updates.stopCheck()) announcement.value = t('updates.stopping')
 }
 
 onMounted(() => {
@@ -162,6 +282,27 @@ const segmentGroup = 'inline-flex flex-none rounded-md hairline border-field-bor
     </template>
 
     <p class="sr-only" aria-live="polite" role="status">{{ announcement }}</p>
+
+    <!-- Check now running: indeterminate (the backend reports no progress), with Stop. -->
+    <div
+      v-if="updates.checking.value"
+      class="lm-panel flex flex-wrap items-center gap-3 border-accent px-4 py-3 text-sm"
+      data-testid="check-progress"
+    >
+      <AppIcon name="refresh" :size="16" class="flex-none animate-spinner text-accent motion-reduce:animate-none" />
+      <span class="min-w-0 flex-1 text-pretty">
+        {{ updates.stopping.value ? t('updates.stopping') : t('updates.checkingLong', { type: typeLabel(prefix) }) }}
+      </span>
+      <button
+        type="button"
+        class="lm-btn lm-btn--sm phone:min-h-touch"
+        :disabled="updates.stopping.value"
+        :title="t('updates.stopHint')"
+        @click="onStopCheck"
+      >
+        <AppIcon name="pause" :size="14" />{{ t('updates.stop') }}
+      </button>
+    </div>
 
     <div class="flex flex-wrap items-center gap-3">
       <div :class="segmentGroup" role="group" :aria-label="t('updates.typeLabel')">
@@ -227,6 +368,36 @@ const segmentGroup = 'inline-flex flex-none rounded-md hairline border-field-bor
       </li>
     </ul>
 
+    <section
+      v-else-if="filter === 'ignored'"
+      class="flex flex-col gap-3"
+      aria-labelledby="updates-ignored-heading"
+      :aria-busy="loading || undefined"
+      data-testid="ignored-view"
+    >
+      <h2 id="updates-ignored-heading" class="text-lg">
+        {{ t('updates.ignoredListLabel') }}
+        <span class="text-muted tabular-nums">{{ ignored.length }}</span>
+      </h2>
+      <p class="text-sm text-muted">{{ t('updates.filterHint.ignored') }}</p>
+      <StateBlock
+        v-if="!ignored.length"
+        kind="empty"
+        icon="check"
+        :title="t('updates.ignored.emptyTitle')"
+        :message="t('updates.ignored.emptyMessage')"
+      />
+      <ul v-else class="flex flex-col gap-2">
+        <UpdateIgnoredRow
+          v-for="entry in ignored"
+          :key="entry.key"
+          :entry="entry"
+          :busy="restoreBusy(entry)"
+          @restore="onRestore(entry)"
+        />
+      </ul>
+    </section>
+
     <template v-else>
       <section class="flex flex-col gap-3" aria-labelledby="updates-list-heading" :aria-busy="loading || undefined">
         <h2 id="updates-list-heading" class="text-lg">
@@ -268,7 +439,12 @@ const segmentGroup = 'inline-flex flex-none rounded-md hairline border-field-bor
             :more-count="row.more"
             :blur-mature="blurMature"
             :civitai-host="civitaiHost"
+            :selected="bulk.isSelected(row.group.key)"
+            :locked="bulk.submitting.value"
+            :ignore-busy="rowIgnoreBusy(row.group, row.candidate)"
             @update="onUpdate(row.group, row.candidate)"
+            @select="(value) => bulk.toggle(row.group.key, value)"
+            @ignore="(scope) => onIgnore(row.group, row.candidate, scope)"
           />
         </ul>
 
@@ -279,6 +455,21 @@ const segmentGroup = 'inline-flex flex-none rounded-md hairline border-field-bor
           </button>
         </p>
       </section>
+
+      <UpdatesBulkBar
+        v-if="showBulkBar"
+        v-model:stop-on-hard-error="bulk.stopOnHardError.value"
+        :count="bulk.selected.value.length"
+        :selectable-count="autoKeys.length"
+        :size-text="bulkSizeText(bulkSummary)"
+        :submitting="bulk.submitting.value"
+        :progress="bulk.progress.value"
+        :result="bulk.result.value"
+        @select-all="bulk.selectOnly(autoKeys)"
+        @clear="bulk.clear()"
+        @submit="onBulkUpdate"
+        @dismiss="bulk.dismissResult()"
+      />
     </template>
   </PageShell>
 </template>

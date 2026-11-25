@@ -113,10 +113,14 @@ export function resetUpdatesSummaryForTesting(): void {
 // --- page state ---------------------------------------------------------------
 
 /** How "Check now" ended. */
-export type CheckOutcome = 'done' | 'rate_limited' | 'offline' | 'cooldown' | 'error'
+export type CheckOutcome = 'done' | 'rate_limited' | 'offline' | 'cooldown' | 'error' | 'stopped'
 
 /** How queueing an update ended. */
-export type QueueOutcome = { kind: 'queued' } | { kind: 'duplicate' } | { kind: 'error'; message: string }
+export type QueueOutcome =
+  | { kind: 'queued' }
+  | { kind: 'duplicate' }
+  /** `status`: HTTP status of the failure (0 = network), null when unknown. */
+  | { kind: 'error'; message: string; status: number | null }
 
 /** After a 429 the Check now button rests this long. */
 export const CHECK_COOLDOWN_MS = 60_000
@@ -186,6 +190,8 @@ export function useUpdates(prefix: Ref<ModelPrefix>) {
   // --- Check now ---------------------------------------------------------
   const online = useOnline()
   const checking = ref(false)
+  /** A stop of the running check was requested. */
+  const stopping = ref(false)
   const coolingDown = ref(false)
   const cooldown = useTimeoutFn(() => (coolingDown.value = false), CHECK_COOLDOWN_MS, { immediate: false })
   const canCheck = computed(() => !checking.value && !coolingDown.value && online.value)
@@ -199,12 +205,19 @@ export function useUpdates(prefix: Ref<ModelPrefix>) {
     if (coolingDown.value) return { outcome: 'cooldown' }
     if (checking.value) return { outcome: 'cooldown' }
     checking.value = true
+    stopping.value = false
     try {
       await updatesApi.refresh(prefix.value)
       await load()
       return { outcome: 'done' }
     } catch (err) {
       const status = err instanceof ApiError ? err.status : null
+      const payload = err instanceof ApiError ? (err.payload as { status?: string } | null) : null
+      if (payload && typeof payload === 'object' && payload.status === 'cancelled') {
+        // Stopped by the user: what was checked so far is stored.
+        await load()
+        return { outcome: 'stopped' }
+      }
       if (status === 429) {
         coolingDown.value = true
         cooldown.start()
@@ -214,6 +227,20 @@ export function useUpdates(prefix: Ref<ModelPrefix>) {
       return { outcome: 'error', message: (err as Error)?.message || 'Error' }
     } finally {
       checking.value = false
+      stopping.value = false
+    }
+  }
+
+  /** Ask the backend to stop the running check (between models). */
+  async function stopCheck(): Promise<boolean> {
+    if (!checking.value || stopping.value) return false
+    stopping.value = true
+    try {
+      await updatesApi.cancelCheck(prefix.value)
+      return true
+    } catch {
+      stopping.value = false
+      return false
     }
   }
 
@@ -259,7 +286,15 @@ export function useUpdates(prefix: Ref<ModelPrefix>) {
     },
   )
 
-  async function queueUpdate(group: UpdateGroup, candidate: UpdateCandidate): Promise<QueueOutcome> {
+  /**
+   * Queue one update into the folder of the current file. A bulk update
+   * passes `refreshQueue: false` and refreshes the shared queue once at the end.
+   */
+  async function queueUpdate(
+    group: UpdateGroup,
+    candidate: UpdateCandidate,
+    options: { refreshQueue?: boolean } = {},
+  ): Promise<QueueOutcome> {
     const destination = deriveDestination(currentCard(group), roots.value)
     queuing.value = candidate.versionId
     try {
@@ -273,10 +308,10 @@ export function useUpdates(prefix: Ref<ModelPrefix>) {
       })
       finished.delete(candidate.versionId)
       tracked.add(candidate.versionId)
-      await queue.refresh()
+      if (options.refreshQueue !== false) await queue.refresh()
       return result.duplicate ? { kind: 'duplicate' } : { kind: 'queued' }
     } catch (err) {
-      return { kind: 'error', message: (err as Error)?.message || 'Error' }
+      return { kind: 'error', message: (err as Error)?.message || 'Error', status: err instanceof ApiError ? err.status : null }
     } finally {
       queuing.value = null
     }
@@ -294,8 +329,12 @@ export function useUpdates(prefix: Ref<ModelPrefix>) {
     coolingDown,
     canCheck,
     checkNow,
+    stopping,
+    stopCheck,
     queuing,
     rowState,
     queueUpdate,
+    /** Re-read the shared download queue (after a bulk update). */
+    refreshQueue: () => queue.refresh(),
   }
 }
