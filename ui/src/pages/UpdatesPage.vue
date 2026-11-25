@@ -15,6 +15,10 @@ import StateBlock from '@/components/StateBlock.vue'
 import UpdateIgnoredRow from '@/components/UpdateIgnoredRow.vue'
 import UpdateRow from '@/components/UpdateRow.vue'
 import UpdatesBulkBar from '@/components/UpdatesBulkBar.vue'
+import UpdatesBulkConfirmDialog from '@/components/UpdatesBulkConfirmDialog.vue'
+import OldVersionsView from '@/components/OldVersionsView.vue'
+import { useReplaceChoice } from '@/composables/useReplaceChoice'
+import { fileNameOf, ownedFilesForGroup } from '@/utils/versionManagement'
 import type { ModelPrefix, UpdateCandidate, UpdateGroup } from '@/api/types'
 import { useAppSettings } from '@/composables/useAppSettings'
 import { useBulkUpdate } from '@/composables/useBulkUpdate'
@@ -25,7 +29,6 @@ import { useUpdates, useUpdatesSummary } from '@/composables/useUpdates'
 import { LIBRARIES } from '@/config/libraries'
 import {
   autoSelectable,
-  bulkConfirmMessage,
   bulkSizeText,
   canQueue,
   checkedAgoText,
@@ -58,6 +61,18 @@ const prefix = computed<ModelPrefix>({
   set: (value) => (storedType.value = value),
 })
 const filter = ref<UpdatesFilter>('likely')
+/** Update candidates, or the "Old versions" cleanup view (version management). */
+const view = ref<'updates' | 'old'>('updates')
+/** Lines with older owned versions of the active type (null until the view loaded it). */
+const oldCount = ref<number | null>(null)
+const oldView = ref<{ load(options?: { throwOnError?: boolean }): Promise<void> } | null>(null)
+watch(prefix, () => (oldCount.value = null))
+const replaceChoice = useReplaceChoice()
+
+function resetAlwaysKeep(): void {
+  replaceChoice.resetAlwaysKeep()
+  toasts.success(t('replace.alwaysKeepResetDone'))
+}
 
 const updates = useUpdates(prefix)
 /** Likely count per type (shared with the top-bar badge); missing until read. */
@@ -105,25 +120,29 @@ const autoKeys = computed(() =>
   rows.value.filter((row) => selectableRows.value.has(row.group.key) && autoSelectable(row, updates.rowState(row.candidate.versionId))).map((row) => row.group.key),
 )
 const bulkSummary = computed(() => summarizeBulk(bulk.selected.value))
-const showBulkBar = computed(() => filter.value !== 'ignored' && (selectableRows.value.size > 0 || bulk.selected.value.length > 0 || !!bulk.result.value))
+const showBulkBar = computed(() => view.value === 'updates' && filter.value !== 'ignored' && (selectableRows.value.size > 0 || bulk.selected.value.length > 0 || !!bulk.result.value))
 // A type switch starts with an empty selection (the rows belong to another type).
 watch(prefix, () => {
   bulk.clear()
   bulk.dismissResult()
 })
 
-async function onBulkUpdate(): Promise<void> {
+/** The summary confirm of Update selected (with the per-row Keep / Replace choice); null = closed. */
+const bulkConfirm = ref<BulkItem[] | null>(null)
+
+function onBulkUpdate(): void {
   const items = bulk.selected.value
   if (!items.length || bulk.submitting.value) return
-  const summary = summarizeBulk(items)
-  const ok = await confirm({
-    title: t('updates.bulk.confirmTitle', { count: items.length, models: items.length === 1 ? t('updates.model') : t('updates.models') }),
-    message: bulkConfirmMessage(summary),
-    confirmLabel: t('updates.bulk.confirm', { count: items.length }),
-  })
-  if (!ok) return
-  // Re-read the selection: a row may have been queued while the confirm was open.
-  const result = await bulk.run(bulk.selected.value)
+  bulkConfirm.value = items
+}
+
+async function onBulkConfirmed(confirmed: BulkItem[]): Promise<void> {
+  bulkConfirm.value = null
+  // Re-read the selection: a row may have been queued while the confirm was open. The replace
+  // choice made in the confirm is carried over by row key (Keep for anything not chosen).
+  const chosen = new Map(confirmed.map((item) => [item.key, item.replacePaths]))
+  const items = bulk.selected.value.map((item) => ({ ...item, replacePaths: chosen.get(item.key) }))
+  const result = await bulk.run(items)
   if (!result) return
   announcement.value = t('updates.bulk.announce', {
     added: result.added.length,
@@ -199,14 +218,20 @@ function filterLabel(value: UpdatesFilter): string {
 async function onUpdate(group: UpdateGroup, candidate: UpdateCandidate): Promise<void> {
   const name = group.modelName || ''
   const version = candidate.name || ''
-  const result = await updates.queueUpdate(group, candidate)
+  // Replace or keep the versions of this line you already own (asked before anything is queued).
+  const decision = await replaceChoice.ask({ modelName: name, versionName: version, files: ownedFilesForGroup(group, candidate) })
+  if (!decision) return
+  const replacePaths = decision.mode === 'replace' ? decision.paths : []
+  const result = await updates.queueUpdate(group, candidate, { replacePaths })
   if (result.kind === 'queued') {
-    const text = t('updates.queued', { name, version })
+    const text = replacePaths.length && result.replaceAttached
+      ? t('replace.queuedReplace', { name, version, file: replacePaths.map(fileNameOf).join(', ') })
+      : t('updates.queued', { name, version })
     toasts.success(text)
     announcement.value = text
   } else if (result.kind === 'duplicate') {
-    const text = t('updates.alreadyQueued', { name, version })
-    toasts.push(text)
+    const text = replacePaths.length ? t('replace.notAttached') : t('updates.alreadyQueued', { name, version })
+    toasts.push(text, replacePaths.length ? 'warning' : 'info')
     announcement.value = text
   } else {
     toasts.error(t('updates.queueFailed', { name, message: result.message }))
@@ -253,7 +278,9 @@ onMounted(() => {
 })
 
 // Refresh (button / `r`): re-read the overview only. No scan, no Civitai.
-useRefreshHandler({ run: () => updates.load({ throwOnError: true }) })
+useRefreshHandler({
+  run: () => (view.value === 'old' && oldView.value ? oldView.value.load({ throwOnError: true }) : updates.load({ throwOnError: true })),
+})
 
 const segment =
   'inline-flex min-h-control-sm cursor-pointer items-center gap-2 rounded-sm px-3 text-sm font-medium text-muted transition-colors hover:text-fg aria-pressed:bg-accent-soft aria-pressed:text-accent phone:min-h-touch phone:flex-1 phone:justify-center'
@@ -323,7 +350,16 @@ const segmentGroup = 'inline-flex flex-none rounded-md hairline border-field-bor
           </template>
         </button>
       </div>
-      <div :class="segmentGroup" role="group" :aria-label="t('updates.filterLabel')">
+      <div :class="segmentGroup" role="group" :aria-label="t('oldVersions.viewLabel')">
+        <button type="button" :class="segment" :aria-pressed="view === 'updates'" data-testid="view-updates" @click="view = 'updates'">
+          {{ t('oldVersions.updatesTab') }}
+        </button>
+        <button type="button" :class="segment" :aria-pressed="view === 'old'" data-testid="view-old" @click="view = 'old'">
+          {{ t('oldVersions.tab') }}
+          <span v-if="oldCount !== null" class="tabular-nums" :class="view === 'old' ? 'text-accent' : 'text-muted'">{{ oldCount }}</span>
+        </button>
+      </div>
+      <div v-if="view === 'updates'" :class="segmentGroup" role="group" :aria-label="t('updates.filterLabel')">
         <button
           v-for="value in UPDATES_FILTERS"
           :key="value"
@@ -350,12 +386,19 @@ const segmentGroup = 'inline-flex flex-none rounded-md hairline border-field-bor
       {{ t('updates.backendOffline') }}
     </p>
 
-    <p v-if="unchecked" class="lm-panel flex items-start gap-2 px-4 py-3 text-sm" data-testid="unchecked-notice">
+    <p v-if="unchecked && view === 'updates'" class="lm-panel flex items-start gap-2 px-4 py-3 text-sm" data-testid="unchecked-notice">
       <AppIcon name="alert" :size="16" class="mt-px flex-none text-warning" />
       <span>{{ t('updates.uncheckedNotice', { count: unchecked, models: unchecked === 1 ? t('updates.model') : t('updates.models') }) }}</span>
     </p>
 
-    <StateBlock v-if="error && !overview" kind="error" :title="t('updates.loadError')" :message="loadMessage" @retry="updates.load()" />
+    <p v-if="replaceChoice.alwaysKeep.value && view === 'updates'" class="lm-panel flex flex-wrap items-center gap-2 px-4 py-3 text-sm" data-testid="always-keep-notice">
+      <span class="min-w-0 flex-1">{{ t('replace.alwaysKeepNotice') }}</span>
+      <button type="button" class="lm-btn lm-btn--sm phone:min-h-touch" @click="resetAlwaysKeep">{{ t('replace.alwaysKeepReset') }}</button>
+    </p>
+
+    <OldVersionsView v-if="view === 'old'" ref="oldView" :prefix="prefix" :blur-mature="blurMature" @counts="oldCount = $event" />
+
+    <StateBlock v-else-if="error && !overview" kind="error" :title="t('updates.loadError')" :message="loadMessage" @retry="updates.load()" />
 
     <ul v-else-if="!overview" class="flex flex-col gap-2" aria-busy="true" :aria-label="t('updates.loading')">
       <li v-for="n in 4" :key="n" class="lm-panel flex gap-3 p-3" aria-hidden="true">
@@ -442,6 +485,7 @@ const segmentGroup = 'inline-flex flex-none rounded-md hairline border-field-bor
             :selected="bulk.isSelected(row.group.key)"
             :locked="bulk.submitting.value"
             :ignore-busy="rowIgnoreBusy(row.group, row.candidate)"
+            :queue-item="updates.rowItem(row.candidate.versionId)"
             @update="onUpdate(row.group, row.candidate)"
             @select="(value) => bulk.toggle(row.group.key, value)"
             @ignore="(scope) => onIgnore(row.group, row.candidate, scope)"
@@ -470,6 +514,7 @@ const segmentGroup = 'inline-flex flex-none rounded-md hairline border-field-bor
         @submit="onBulkUpdate"
         @dismiss="bulk.dismissResult()"
       />
+      <UpdatesBulkConfirmDialog v-if="bulkConfirm" :items="bulkConfirm" @confirm="onBulkConfirmed" @cancel="bulkConfirm = null" />
     </template>
   </PageShell>
 </template>

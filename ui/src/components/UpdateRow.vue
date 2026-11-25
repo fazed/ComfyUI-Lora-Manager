@@ -10,7 +10,8 @@ import { computed } from 'vue'
 import AppIcon from './AppIcon.vue'
 import LazyMedia from './LazyMedia.vue'
 import MenuButton, { type MenuEntry } from './MenuButton.vue'
-import type { ModelPrefix, UpdateCandidate, UpdateGroup } from '@/api/types'
+import ReplaceNote from './ReplaceNote.vue'
+import type { ModelPrefix, QueueItem, UpdateCandidate, UpdateGroup } from '@/api/types'
 import { civitaiModelUrl } from '@/utils/civitai'
 import { formatBytes, formatDate } from '@/utils/format'
 import { isBlurred } from '@/utils/mature'
@@ -45,8 +46,10 @@ const props = withDefaults(
     locked?: boolean
     /** An ignore of this row is being stored. */
     ignoreBusy?: boolean
+    /** The queue (or history) row of the candidate: shows its replace request. */
+    queueItem?: QueueItem | null
   }>(),
-  { selected: false, locked: false, ignoreBusy: false },
+  { selected: false, locked: false, ignoreBusy: false, queueItem: null },
 )
 
 const emit = defineEmits<{ update: []; select: [value: boolean]; ignore: [scope: 'version' | 'model'] }>()
@@ -171,6 +174,7 @@ const iconAction = 'lm-btn lm-btn--ghost lm-btn--icon phone:size-touch'
           {{ t('updates.moreVersions', { count: moreCount, versions: moreCount === 1 ? t('updates.version') : t('updates.versions') }) }}
         </p>
         <p v-if="state?.kind === 'failed' && state.error" class="lm-error-text">{{ state.error }}</p>
+        <ReplaceNote :item="queueItem" />
         <!-- Changelog: plain text from the backend (no HTML is rendered). Only when a check stored it. -->
         <details v-if="changelog || files.length" class="group/changelog text-sm" data-testid="changelog">
           <summary

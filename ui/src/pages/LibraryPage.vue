@@ -45,7 +45,7 @@ import { takeStashedItem } from '@/composables/useSearch'
 import { queryParam } from '@/config/navigation'
 import type { SuggestOption } from '@/utils/suggest'
 import { useSendToWorkflow } from '@/composables/useSendToWorkflow'
-import { useModelActions } from '@/composables/useModelActions'
+import { useModelActions, type VersionFileTarget } from '@/composables/useModelActions'
 import { useModelTools } from '@/composables/useModelTools'
 import type { TemplateScope } from '@/api/endpoints'
 import { sortBaseModels } from '@/utils/baseModelChips'
@@ -129,7 +129,7 @@ const list = useInfiniteList<ModelItem>((page, signal) =>
 )
 
 const grid = ref<VirtualGridExposed | null>(null)
-const drawer = ref<{ refresh(): Promise<void> } | null>(null)
+const drawer = ref<{ refresh(): Promise<void>; reloadVersions(): Promise<void> } | null>(null)
 const tree = shallowRef<FolderTreeData>({})
 const baseModels = ref<CountEntry[]>([])
 const topTags = ref<TagEntry[]>([])
@@ -475,6 +475,29 @@ const actions = useModelActions(api, {
     openItem.value = { ...current, file_path: move.to, folder }
   },
 })
+
+/**
+ * Drawer Versions tab: delete one local file of a version through the same
+ * delete + Undo flow as the cards. Deleting the file the drawer shows switches
+ * to a sibling file of the model (or closes the drawer); Undo reopens the
+ * restored file. Otherwise the open drawer re-reads its versions.
+ */
+async function deleteVersionFile(request: { file: VersionFileTarget; isCurrent: boolean; siblingPath: string | null }): Promise<void> {
+  const deleted = request.file.filePath
+  const ok = await actions.deleteVersionFile(request.file, {
+    onUndone: () => {
+      if (request.isCurrent) void openByPath(deleted)
+      else void drawer.value?.reloadVersions()
+    },
+  })
+  if (!ok) return
+  if (request.isCurrent) {
+    // hooks.removed already closed the drawer; continue on a sibling of this model when there is one.
+    if (request.siblingPath) void openByPath(request.siblingPath)
+  } else {
+    void drawer.value?.reloadVersions()
+  }
+}
 
 // --- Phase B1: download dialog and model tools -------------------------------
 
@@ -905,6 +928,7 @@ function bulkSend(event: MouseEvent): void {
       @updated="onUpdated"
       @action="runAction($event, openItem!)"
       @download="downloadInput = $event"
+      @delete-file="deleteVersionFile"
     />
 
     <ModelActionMenu

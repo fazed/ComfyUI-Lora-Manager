@@ -33,7 +33,7 @@ const KIND: Record<ToastKind, { border: string; icon: IconName; iconClass: strin
         :class="KIND[toast.kind].border"
       >
         <AppIcon :name="KIND[toast.kind].icon" :class="KIND[toast.kind].iconClass" />
-        <span class="flex-1">{{ toast.message }}</span>
+        <span class="flex-1 whitespace-pre-line">{{ toast.message }}</span>
         <button
           v-if="toast.action"
           type="button"

@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
+import { useTimeoutFn } from '@vueuse/core'
 import AppIcon from '@/components/AppIcon.vue'
 import LazyMedia from '@/components/LazyMedia.vue'
 import StateBlock from '@/components/StateBlock.vue'
 import DownloadDialog from '@/components/DownloadDialog.vue'
+import ReplaceNote from '@/components/ReplaceNote.vue'
 import { downloadsApi } from '@/api/endpoints'
 import type { QueueItem } from '@/api/types'
 import { useConfirm, useToasts } from '@/composables/useFeedback'
@@ -158,6 +160,22 @@ useRefreshHandler({
   },
 })
 
+// A replace runs right after its download moved to the history: re-read a few times while one is still pending.
+const { start: rereadHistoryLater } = useTimeoutFn(() => void loadHistory(), 3000, { immediate: false })
+let replaceRereads = 0
+watch(history, (items) => {
+  const running = items.some(
+    (item) => item.status === 'completed' && !!item.replace_targets && (item.replace_status === 'pending' || item.replace_status === 'running'),
+  )
+  if (!running) {
+    replaceRereads = 0
+    return
+  }
+  if (replaceRereads >= 5) return
+  replaceRereads += 1
+  rereadHistoryLater()
+})
+
 watch(finishedCount, (value) => {
   if (lastFinished !== -1 && value !== lastFinished) void loadHistory()
   lastFinished = value
@@ -240,6 +258,7 @@ watch(finishedCount, (value) => {
                 <span v-if="item.total_bytes">{{ formatBytes(item.bytes_downloaded) }} / {{ formatBytes(item.total_bytes) }}</span>
                 <span v-if="item.bytes_per_second">{{ formatSpeed(item.bytes_per_second) }}</span>
               </div>
+              <ReplaceNote :item="item" />
             </div>
           </li>
         </ul>
@@ -257,6 +276,7 @@ watch(finishedCount, (value) => {
                 <span class="lm-badge" :class="statusClass(item.status)">{{ statusLabel(item.status) }}</span>
                 <span>{{ formatDateTime(item.added_at) }}</span>
               </div>
+              <ReplaceNote :item="item" />
             </div>
             <div :class="ui.actions">
               <button
@@ -321,6 +341,7 @@ watch(finishedCount, (value) => {
               <span v-if="item.total_bytes">{{ formatBytes(item.total_bytes) }}</span>
             </div>
             <p v-if="item.error" class="lm-error-text">{{ item.error }}</p>
+            <ReplaceNote :item="item" @restored="loadHistory" />
           </div>
           <div :class="ui.actions">
             <button

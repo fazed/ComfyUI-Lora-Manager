@@ -8,7 +8,18 @@ import LazyMedia from './LazyMedia.vue'
 import ModelActionMenu, { MODEL_ITEMS, type ActionMenuItem, type ModelAction } from './ModelActionMenu.vue'
 import StateBlock from './StateBlock.vue'
 import { downloadsApi, type ModelApi } from '@/api/endpoints'
-import type { ModelItem, ModelMetadata, ModelUpdateRecord } from '@/api/types'
+import type { ModelItem, ModelMetadata, ModelUpdateRecord, ModelVersionInfo, VersionLocalFile } from '@/api/types'
+import { downloadQueueSnapshot } from '@/composables/useDownloadQueue'
+import type { VersionFileTarget } from '@/composables/useModelActions'
+import { useReplaceChoice } from '@/composables/useReplaceChoice'
+import {
+  fileNameOf,
+  isOwnedVersion,
+  isVersionDownloading,
+  localFilesOf,
+  ownedFilesForVersion,
+  queueErrorText,
+} from '@/utils/versionManagement'
 import { useDismissLayer } from '@/composables/useDismiss'
 import { useExampleImages } from '@/composables/useExampleImages'
 import { modelTypeOf } from '@/utils/exampleImages'
@@ -63,6 +74,8 @@ const emit = defineEmits<{
   download: [input: string]
   /** Step to the previous/next model of the list (the library page owns the list and the open item). */
   navigate: [direction: NavDirection]
+  /** Delete one local file of a version (Versions tab); the page confirms and runs it. */
+  'delete-file': [request: { file: VersionFileTarget; isCurrent: boolean; siblingPath: string | null }]
 }>()
 
 type Tab = DrawerTab
@@ -82,6 +95,8 @@ const touchIcon = 'phone:size-touch touch:size-touch'
 
 const toasts = useToasts()
 const { confirm } = useConfirm()
+const replaceChoice = useReplaceChoice()
+const queueSnapshot = downloadQueueSnapshot()
 const workflow = useSendToWorkflow()
 // The last selected tab is remembered across drawers and reloads (plain string, validated on read).
 // A model without that tab (Versions needs a Civitai model id) shows Overview without touching the preference.
@@ -334,7 +349,12 @@ async function refresh(): Promise<void> {
   await Promise.all([loadMetadata(true), versionsLoaded.value && !versionsLoading.value ? loadVersions(true) : undefined])
 }
 
-defineExpose({ refresh })
+/** After a version file was deleted or restored elsewhere: re-read the versions (quietly when shown). */
+async function reloadVersions(): Promise<void> {
+  if (versionsLoaded.value && !versionsLoading.value) await loadVersions(true)
+}
+
+defineExpose({ refresh, reloadVersions })
 
 // Warm the neighbours' preview images only (no metadata requests while stepping).
 const prefetched = new Set<string>()
@@ -404,6 +424,16 @@ async function toggleFavorite(): Promise<void> {
  * root + path template when the root cannot be determined.
  */
 async function queueVersion(versionId: number): Promise<void> {
+  // Replace or keep the owned versions of the same base model (asked before anything is queued).
+  const target = versions.value?.versions.find((version) => version.versionId === versionId)
+  const files = target ? ownedFilesForVersion(versions.value, target) : []
+  const decision = await replaceChoice.ask({
+    modelName: displayName.value,
+    versionName: target?.name || t('updates.unknownVersion'),
+    files,
+  })
+  if (!decision) return
+  const replacePaths = decision.mode === 'replace' ? decision.paths : []
   try {
     if (roots.value === null) {
       try {
@@ -413,13 +443,74 @@ async function queueVersion(versionId: number): Promise<void> {
       }
     }
     const destination = destinationForFile(props.item.file_path, roots.value)
-    const result = await downloadsApi.add({ modelId: modelId.value, versionId, destination: destination.params })
-    if (result.duplicate) toasts.success(t('detail.alreadyQueued'))
-    else toasts.success(destination.known ? t('detail.queuedTo', { path: destination.display }) : t('detail.queuedDefault'))
+    const result = await downloadsApi.add({
+      modelId: modelId.value,
+      versionId,
+      destination: destination.params,
+      replaceFilePaths: replacePaths.length ? replacePaths : undefined,
+    })
+    if (result.duplicate) toasts.push(replacePaths.length ? t('replace.notAttached') : t('detail.alreadyQueued'), replacePaths.length ? 'warning' : 'success')
+    else {
+      toasts.success(destination.known ? t('detail.queuedTo', { path: destination.display }) : t('detail.queuedDefault'))
+      if (replacePaths.length && result.replace_attached) {
+        toasts.push(
+          t('replace.queuedReplace', {
+            name: displayName.value,
+            version: target?.name || '',
+            file: replacePaths.map(fileNameOf).join(', '),
+          }),
+        )
+      }
+    }
   } catch (error) {
-    toasts.error((error as Error).message)
+    toasts.error(queueErrorText(error))
   }
 }
+
+// --- Versions tab: local files and "Delete this version" -------------------------
+
+/** Each version with its local files (scanner at read time; the old single `filePath` on older backends). */
+const versionRows = computed(() => {
+  const queue = queueSnapshot.value
+  return (versions.value?.versions ?? []).map((version) => {
+    const owned = isOwnedVersion(version)
+    let files: VersionLocalFile[] = localFilesOf(version)
+    if (!Array.isArray(version.localFiles) && owned && version.filePath) {
+      files = [{ filePath: version.filePath, fileName: version.fileName || fileNameOf(version.filePath), folder: '' }]
+    }
+    return { version, owned, files, downloading: isVersionDownloading(version.versionId, queue) }
+  })
+})
+
+/**
+ * The page runs the delete (same flow as the card delete: confirm, staged
+ * delete, Undo). `isCurrent`: the drawer shows this file; `siblingPath` is
+ * another owned file of this model to switch to afterwards (same version
+ * first, then the newest owned version of the same base), or null.
+ */
+function requestDeleteFile(version: ModelVersionInfo, file: VersionLocalFile): void {
+  const isCurrent = sameFilePath(file.filePath, props.item.file_path)
+  let sibling: string | null = null
+  if (isCurrent) {
+    const sameVersion = versionRows.value
+      .find((row) => row.version.versionId === version.versionId)
+      ?.files.find((entry) => !sameFilePath(entry.filePath, file.filePath))
+    sibling = sameVersion?.filePath ?? ownedFilesForVersion(versions.value, version)[0]?.filePath ?? null
+  }
+  emit('delete-file', {
+    file: {
+      filePath: file.filePath,
+      fileName: fileNameOf(file.filePath),
+      folder: file.folder ?? '',
+      sizeBytes: file.sizeBytes ?? null,
+      versionName: version.name ?? null,
+    },
+    isCurrent,
+    siblingPath: sibling,
+  })
+}
+
+const sameFilePath = (a: string, b: string) => a.replace(/\\/g, '/').toLowerCase() === b.replace(/\\/g, '/').toLowerCase()
 
 function openMenu(event: MouseEvent): void {
   const button = event.currentTarget as HTMLElement
@@ -997,43 +1088,77 @@ useEventListener(document, 'keydown', onKey)
           <StateBlock v-else-if="!versions?.versions?.length" kind="empty" :title="t('detail.noVersions')" />
           <ul v-else class="flex flex-col gap-2">
             <li
-              v-for="version in versions.versions"
-              :key="version.versionId"
+              v-for="row in versionRows"
+              :key="row.version.versionId"
               class="flex items-center gap-3 rounded-md hairline p-2 phone:flex-wrap"
-              :class="version.versionId === currentVersion ? 'border-accent' : 'border-border'"
-              :aria-current="version.versionId === currentVersion ? 'true' : undefined"
+              :class="row.version.versionId === currentVersion ? 'border-accent' : 'border-border'"
+              :aria-current="row.version.versionId === currentVersion ? 'true' : undefined"
+              :data-testid="`version-${row.version.versionId}`"
             >
               <LazyMedia
                 class="lm-thumb h-[72px] w-[56px]"
                 media-class="size-full object-cover"
-                :src="version.previewUrl ? withMountPrefix(version.previewUrl) : ''"
+                :src="row.version.previewUrl ? withMountPrefix(row.version.previewUrl) : ''"
                 :icon-size="18"
               />
               <div class="flex min-w-0 flex-1 flex-col gap-[2px]">
-                <strong class="wrap-anywhere">{{ version.name }}</strong>
+                <strong class="wrap-anywhere">{{ row.version.name }}</strong>
                 <div class="flex flex-wrap gap-2 text-xs text-muted">
-                  <span v-if="version.baseModel">{{ version.baseModel }}</span>
-                  <span v-if="version.releasedAt">{{ formatDate(version.releasedAt) }}</span>
-                  <span v-if="version.sizeBytes">{{ formatBytes(version.sizeBytes) }}</span>
+                  <span v-if="row.version.baseModel">{{ row.version.baseModel }}</span>
+                  <span v-if="row.version.releasedAt">{{ formatDate(row.version.releasedAt) }}</span>
+                  <span v-if="row.version.sizeBytes">{{ formatBytes(row.version.sizeBytes) }}</span>
                 </div>
                 <div class="flex flex-wrap gap-1">
-                  <span v-if="version.versionId === currentVersion" class="lm-badge lm-badge--accent">{{ t('detail.current') }}</span>
-                  <span v-if="version.isInLibrary" class="lm-badge lm-badge--success">{{ t('detail.inLibrary') }}</span>
-                  <span v-else-if="version.hasBeenDownloaded" class="lm-badge">{{ t('detail.downloaded') }}</span>
-                  <span v-if="version.isEarlyAccess" class="lm-badge lm-badge--warning">{{ t('detail.earlyAccess') }}</span>
+                  <span v-if="row.version.versionId === currentVersion" class="lm-badge lm-badge--accent">{{ t('detail.current') }}</span>
+                  <span v-if="row.owned" class="lm-badge lm-badge--success">{{ t('detail.inLibrary') }}</span>
+                  <span v-else-if="row.version.hasBeenDownloaded" class="lm-badge">{{ t('detail.downloaded') }}</span>
+                  <span v-if="row.version.isEarlyAccess" class="lm-badge lm-badge--warning">{{ t('detail.earlyAccess') }}</span>
                   <span
-                    v-if="!version.isInLibrary && classificationChip(version.versionId)"
+                    v-if="!row.owned && classificationChip(row.version.versionId)"
                     class="lm-badge"
-                    :class="classificationChip(version.versionId)!.tone"
+                    :class="classificationChip(row.version.versionId)!.tone"
                     :title="t('detail.updateChipHint')"
                     data-testid="update-chip"
-                  >{{ classificationChip(version.versionId)!.label }}</span>
+                  >{{ classificationChip(row.version.versionId)!.label }}</span>
                 </div>
+                <!-- Which local file(s) this version is; several files (variants) each get their own Delete. -->
+                <ul v-if="row.files.length" class="mt-1 flex flex-col gap-1" :aria-label="t('detail.inLibrary')">
+                  <li v-for="file in row.files" :key="file.filePath" class="flex flex-wrap items-center gap-x-2 text-xs text-muted" data-testid="local-file">
+                    <span class="min-w-0 wrap-anywhere" :title="file.filePath">
+                      {{ t('versions.inLibraryAs', { file: fileNameOf(file.filePath) }) }}
+                      {{ t('versions.inFolder', { folder: file.folder || t('versions.rootFolder') }) }}<template v-if="file.sizeBytes"> · {{ formatBytes(file.sizeBytes) }}</template>
+                    </span>
+                    <button
+                      v-if="row.files.length > 1 && !row.downloading"
+                      type="button"
+                      class="lm-btn lm-btn--ghost lm-btn--sm text-danger"
+                      :class="touchHit"
+                      :aria-label="t('versions.deleteFileLabel', { version: row.version.name || '', file: fileNameOf(file.filePath) })"
+                      data-testid="delete-file"
+                      @click="requestDeleteFile(row.version, file)"
+                    >
+                      <AppIcon name="trash" :size="14" />{{ t('versions.deleteFile') }}
+                    </button>
+                  </li>
+                </ul>
+                <p v-if="row.owned && row.downloading" class="text-xs text-muted">{{ t('versions.downloadingNoDelete') }}</p>
               </div>
-              <!-- Fixed-width actions column so every row lines up; a version already in the library keeps the space empty. -->
-              <div class="flex w-[168px] flex-none items-center justify-end gap-1 phone:w-full" :class="version.isInLibrary && 'phone:hidden'">
-                <template v-if="!version.isInLibrary">
-                  <button type="button" class="lm-btn lm-btn--sm" :class="touchHit" @click="queueVersion(version.versionId)">
+              <!-- Fixed-width actions column so every row lines up: Queue download for versions you do not
+                   have, Delete for a version you own as one file (several files: Delete per file above). -->
+              <div class="flex w-[168px] flex-none items-center justify-end gap-1 phone:w-full">
+                <button
+                  v-if="row.owned && row.files.length === 1 && !row.downloading"
+                  type="button"
+                  class="lm-btn lm-btn--sm text-danger"
+                  :class="touchHit"
+                  :aria-label="t('versions.deleteFileLabel', { version: row.version.name || '', file: fileNameOf(row.files[0].filePath) })"
+                  data-testid="delete-version"
+                  @click="requestDeleteFile(row.version, row.files[0])"
+                >
+                  <AppIcon name="trash" :size="14" />{{ t('versions.deleteFile') }}
+                </button>
+                <template v-if="!row.owned">
+                  <button type="button" class="lm-btn lm-btn--sm" :class="touchHit" @click="queueVersion(row.version.versionId)">
                     <AppIcon name="download" :size="14" />{{ t('detail.queueVersion') }}
                   </button>
                   <button
@@ -1042,7 +1167,7 @@ useEventListener(document, 'keydown', onKey)
                     :class="touchIcon"
                     :aria-label="t('download.fromVersion')"
                     :title="t('download.title')"
-                    @click="emit('download', `https://civitai.com/models/${modelId}?modelVersionId=${version.versionId}`)"
+                    @click="emit('download', `https://civitai.com/models/${modelId}?modelVersionId=${row.version.versionId}`)"
                   >
                     <AppIcon name="folder" :size="14" />
                   </button>

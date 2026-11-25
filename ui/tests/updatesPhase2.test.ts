@@ -30,6 +30,10 @@ import {
 } from '@/utils/updates'
 import { useConfirm, useToasts } from '@/composables/useFeedback'
 import { resetUpdatesSummaryForTesting } from '@/composables/useUpdates'
+import { ALWAYS_KEEP_KEY, resetReplaceChoiceForTesting } from '@/composables/useReplaceChoice'
+import { installDialogStub } from './dialogStub'
+
+installDialogStub()
 import UpdatesPage from '@/pages/UpdatesPage.vue'
 import UpdateRow from '@/components/UpdateRow.vue'
 import ModelDrawer from '@/components/ModelDrawer.vue'
@@ -189,6 +193,16 @@ async function answerConfirm(value: boolean) {
   confirmState().value!.resolve(value)
   await flushPromises()
 }
+/** Update selected opens its own summary dialog (with the per-row Keep / Replace choice; Keep by default). */
+async function answerBulk(value: boolean) {
+  const dialog = document.querySelector('[data-testid="bulk-confirm"]')
+  expect(dialog).not.toBeNull()
+  const target = value
+    ? (dialog!.querySelector('[data-testid="bulk-confirm-submit"]') as HTMLButtonElement)
+    : ([...dialog!.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Cancel') as HTMLButtonElement)
+  target.click()
+  await flushPromises()
+}
 
 const filterButton = (wrapper: VueWrapper, label: string) =>
   wrapper.findAll('[role="group"] button').find((b) => b.text().startsWith(label))!
@@ -205,6 +219,10 @@ function deferred<T>() {
 beforeEach(() => {
   setBasePathsForTesting({ appBase: 'http://host/lm-ui/', appPath: '/lm-ui/', mountPrefix: '' })
   localStorage.clear()
+  // Queueing is covered here with "always keep both" remembered (no replace prompt);
+  // the prompt and the bulk Keep / Replace choice are covered in versionManagement.test.ts.
+  localStorage.setItem(ALWAYS_KEEP_KEY, 'true')
+  resetReplaceChoiceForTesting()
   resetUpdatesSummaryForTesting()
   useToasts().toasts.value = []
   confirmState().value = null
@@ -467,14 +485,15 @@ describe('bulk update on the Updates page', () => {
     await button(wrapper, 'Select all visible').trigger('click')
     await wrapper.get('[data-testid="bulk-update"]').trigger('click')
     await flushPromises()
-    const request = confirmState().value!
-    expect(request.title).toBe('Update 3 models?')
-    expect(request.message).toContain('3 updates will be added to the download queue (at least 200.0 MB (1 without a size))')
-    expect(request.message).toContain('- D:/Models/Loras/styles\n- D:/Models/Loras/sketch')
-    expect(request.message).toContain('1 without a known library folder: saved to the default folder')
-    expect(request.confirmLabel).toBe('Update 3')
+    expect(document.getElementById('bulk-update-confirm-title')?.textContent).toBe('Update 3 models?')
+    const message = document.querySelector('[data-testid="bulk-confirm-message"]')!.textContent!
+    expect(message).toContain('3 updates will be added to the download queue (at least 200.0 MB (1 without a size))')
+    expect(message).toContain('- D:/Models/Loras/styles\n- D:/Models/Loras/sketch')
+    expect(message).toContain('1 without a known library folder: saved to the default folder')
+    expect(message).toContain('Nothing is deleted')
+    expect(document.querySelector('[data-testid="bulk-confirm-submit"]')!.textContent!.trim()).toBe('Update 3')
     expect(adds(calls)).toEqual([])
-    await answerConfirm(true)
+    await answerBulk(true)
 
     const status = () => wrapper!.get('[data-testid="bulk-status"]')
     expect(status().attributes('aria-live')).toBe('polite')
@@ -498,7 +517,9 @@ describe('bulk update on the Updates page', () => {
     expect(params[2].get('model_root')).toBeNull()
     expect(status().text()).toContain('3 added to the queue')
     expect(status().get('a').attributes('href')).toContain('/downloads')
-    expect(confirmState().value).toBeNull()
+    expect(document.querySelector('[data-testid="bulk-confirm"]')).toBeNull()
+    // Nothing was asked to be replaced.
+    expect(params.every((p) => p.getAll('replace_file_path').length === 0)).toBe(true)
     // Added rows leave the selection.
     expect(wrapper.get('[data-testid="bulk-bar"]').text()).toContain('0 selected')
   })
@@ -508,7 +529,7 @@ describe('bulk update on the Updates page', () => {
     wrapper = await mountPage()
     await button(wrapper, 'Select all visible').trigger('click')
     await wrapper.get('[data-testid="bulk-update"]').trigger('click')
-    await answerConfirm(false)
+    await answerBulk(false)
     expect(adds(calls)).toEqual([])
   })
 
@@ -523,7 +544,7 @@ describe('bulk update on the Updates page', () => {
     wrapper = await mountPage()
     await button(wrapper, 'Select all visible').trigger('click')
     await wrapper.get('[data-testid="bulk-update"]').trigger('click')
-    await answerConfirm(true)
+    await answerBulk(true)
     const status = wrapper.get('[data-testid="bulk-status"]').text()
     expect(n).toBe(3)
     expect(status).toContain('2 already queued')
@@ -540,7 +561,7 @@ describe('bulk update on the Updates page', () => {
     wrapper = await mountPage()
     await button(wrapper, 'Select all visible').trigger('click')
     await wrapper.get('[data-testid="bulk-update"]').trigger('click')
-    await answerConfirm(true)
+    await answerBulk(true)
     expect(adds(calls)).toEqual([11])
     const status = wrapper.get('[data-testid="bulk-status"]').text()
     expect(status).toContain('1 failed')
@@ -557,7 +578,7 @@ describe('bulk update on the Updates page', () => {
     await button(wrapper, 'Select all visible').trigger('click')
     await wrapper.get('[data-testid="bulk-bar"] input[type="checkbox"]').setValue(false)
     await wrapper.get('[data-testid="bulk-update"]').trigger('click')
-    await answerConfirm(true)
+    await answerBulk(true)
     expect(adds(calls)).toEqual([11, 21, 31])
     expect(wrapper.get('[data-testid="bulk-status"]').text()).toContain('3 failed')
   })
