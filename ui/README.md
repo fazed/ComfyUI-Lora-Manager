@@ -360,6 +360,26 @@ Fork-only files of phase B1: `tests/config/test_preview_unc_path_safety.py`,
 `tests/utils/test_{absolute_and_template,example_images_hash}_path_safety.py`,
 `tests/frontend/components/modelVersionsTab.rootMatch.test.js`.
 
+**Request guard for state-changing GET routes (7, in addition to the above)**
+
+See [Request guard for state-changing GET routes](#request-guard-for-state-changing-get-routes). Keep every change when re-applying.
+
+| File | Change / behaviour to preserve |
+| --- | --- |
+| `py/lora_manager.py` | Imports `install_request_guard` from `.utils.request_guard` and calls `install_request_guard(app)` in `LoraManager.add_routes`, right after the `api_json_error` insertion (guard runs directly after the JSON error middleware). |
+| `standalone.py` | Imports `request_guard` and builds the app with `middlewares=[api_json_error, request_guard, cache_control]`. |
+| `py/routes/handlers/model_handlers.py` | `complete_download_in_queue`: an optional `file_path` must pass `require_within_any(file_path, configured_download_roots())` (400 otherwise, nothing moved to history). |
+| `py/routes/handlers/misc_handlers.py` | `set_model_version_download_status`: an optional `filePath` with `downloaded=true` must pass the same check (400 otherwise). |
+| `templates/base.html` | `{% include 'components/request_guard_bootstrap.html' %}` directly after the base-path bootstrap include. |
+| `tests/routes/test_download_queue_handlers.py` | `file_path` outside / inside the library roots on `queue/complete`. |
+| `tests/routes/test_misc_routes.py` | `test_model_version_download_status_endpoints` registers `/tmp` as a library root; new rejection test for `filePath` outside the roots. |
+
+Fork-only files of the guard: `py/utils/request_guard.py`,
+`templates/components/request_guard_bootstrap.html`,
+`tests/security/test_request_guard_{decision,middleware,routes}.py`,
+`tests/frontend/utils/requestGuardBootstrap.test.js`; the modern UI sends the
+header from `ui/src/api/http.ts` (tested in `ui/tests/api.test.ts`).
+
 No upstream docs were changed. A "Modern UI" link inside the classic UI
 pages would require more template edits, so it was left out; use `/lm-ui/`
 directly (the new UI links back to the classic one).
@@ -486,6 +506,146 @@ Decisions (phase B1):
 (`match_configured_root`). Why: Python 3.13 made `os.path.isabs('/x')` False
 on Windows, `os.path.join(base, '/x')` lands on the drive root, and plain
 cross-site GETs reach the API without an `Origin` header.
+
+## Request guard for state-changing GET routes
+
+Some routes change state on `GET`, because the browser extension can only
+use `GET` against ComfyUI (ComfyUI's origin middleware rejects its other
+methods). `py/utils/request_guard.py` guards those routes with an aiohttp
+middleware (registered right after `api_json_error` in both
+`py/lora_manager.py` and `standalone.py`).
+
+**Threat model.** Current ComfyUI already blocks the classic attack:
+its `origin_only_middleware` (`ComfyUI/server.py`, about lines 204-242)
+returns 403 on **every method** for any request with
+`Sec-Fetch-Site: cross-site`, and for a loopback `Host` whose `Origin` host
+differs. With current ComfyUI and a modern browser, a cross-site
+`<img src="http://127.0.0.1:8188/api/lm/...">` never reaches LoRA Manager.
+That middleware is only installed when ComfyUI runs *without*
+`--enable-cors-header` (the flag swaps it for a CORS middleware). The guard
+is defence in depth for:
+
+* older ComfyUI versions without `origin_only_middleware`, and ComfyUI
+  started with `--enable-cors-header`;
+* standalone mode, which has no ComfyUI middleware at all;
+* `same-site` requests (a page on another local port, e.g.
+  `http://127.0.0.1:3000`): ComfyUI lets them through when a plain GET
+  carries no `Origin`;
+* future changes to ComfyUI's middleware.
+
+DNS rebinding stays uncovered (see the end of this section).
+
+### Protocol
+
+For a `GET` or `HEAD` request to a **guarded route** the backend decides, in
+this order:
+
+1. `Sec-Fetch-Site` is `same-origin` or `none` (case-insensitive): **allow**.
+   Browsers set this header; page script cannot forge it. `none` is a
+   user-initiated request or an extension fetch.
+2. `Origin` has the scheme `chrome-extension`, `moz-extension` or
+   `safari-web-extension`: **allow**. No web page can send such an `Origin`,
+   so it proves an extension context. This is how the browser extension is
+   admitted; it sends no custom header (see below).
+3. The request carries `X-LM-Client: <client id>` and `Origin` is **absent**
+   or names the **request's own host** (host and port, scheme ignored so a
+   TLS-terminating proxy works; `Origin: null` never matches): **allow**.
+4. Neither `Sec-Fetch-Site` nor `Origin` is present (curl, scripts, other
+   non-browser clients): **allow**. Not a CSRF vector; there is no setting to
+   turn this off.
+5. Anything else: **reject** with HTTP 403 and
+   `{"success": false, "error": "Cross-site request blocked by LoRA Manager: ...", "code": "csrf_blocked"}`.
+   Clients must rely on `code`, not on the message text. The first block per
+   `Origin`/`Sec-Fetch-Site` pair is logged as a warning
+   (`py.utils.request_guard`) with the `Origin` and `Sec-Fetch-Site` seen;
+   repeats, and a hint that same-origin web clients should send
+   `X-LM-Client`, go to debug level.
+
+`X-LM-Client` values: a short token (`[A-Za-z0-9][A-Za-z0-9._-]{0,63}`); an
+empty or malformed value counts as absent. The ids in use:
+
+| Client | `X-LM-Client` | Where it is set |
+| --- | --- | --- |
+| Modern UI (`/lm-ui/`) | `lm-ui` | `ui/src/api/http.ts` (`request` and `requestBlob`) |
+| Classic UI pages | `lm-classic` | `templates/components/request_guard_bootstrap.html`: wraps `window.fetch` once and adds the header to every same-origin request (cross-origin requests such as Civitai are untouched, so no CORS preflight) |
+| ComfyUI-side code (`web/comfyui`, `vue-widgets`) | `lm-comfyui` (reserved) | Not sent today: these files call no guarded route (pinned by `test_comfyui_side_clients_do_not_call_guarded_get_routes`); they run same-origin and pass on rule 1. Add the header if one starts calling a guarded route. |
+
+The header is for the in-repo same-origin web clients above, and for a
+future client that is itself a web page served from the backend's origin.
+The browser extension does **not** send it (`lm-extension` stays an
+accepted value, but no client uses it).
+
+Why the rules are safe with `--enable-cors-header`: that flag makes ComfyUI
+answer CORS for any origin, so a malicious page *could* get a custom header
+through a preflight. It still cannot choose its `Origin`: with the header,
+rule 3 only accepts an absent or same-host `Origin`, and a cross-origin
+`fetch` with a custom header always sends the page's own `Origin`. The guard
+never relies on a preflight failing.
+
+Why same-origin clients must still send the header: when `Sec-Fetch-Site` is
+missing (browsers before 2023, or a proxy that strips it) but the request
+has a same-host `Origin`, only rule 3 can allow it.
+
+Requests the guard does not touch: every method other than `GET`/`HEAD`
+(ComfyUI's origin middleware covers those in ComfyUI mode), read-only `GET`
+routes, unknown paths (404 as before), and everything outside `/api/lm/`.
+
+### What the browser extension does
+
+* It sends **no** custom header. It is admitted by rule 2 (its
+  `chrome-extension://` / `moz-extension://` / `safari-web-extension://`
+  `Origin`) or, in Chrome, by rule 1 (`Sec-Fetch-Site: none` on extension
+  fetches). A custom header on a `GET` can trigger a CORS preflight in some
+  browser contexts, and ComfyUI only answers preflights with
+  `--enable-cors-header`, so adding one would break downloads and queue
+  actions. This holds for already-installed builds too: nothing changes on
+  the extension side.
+* It recognises HTTP 403 with `code: "csrf_blocked"` as "the backend rejected
+  the request as cross-site" (distinct from ComfyUI's own 403 origin check,
+  which has no JSON body). Seeing it means the request carried neither an
+  extension `Origin` nor a trusted `Sec-Fetch-Site`, e.g. a browser that
+  sends a cross-site `Sec-Fetch-Site` without any `Origin` on extension
+  fetches.
+
+### Guarded GET routes
+
+`{prefix}` is any model-type prefix (`loras`, `checkpoints`, `embeddings`,
+`other`, `wildcards`, `workflows`, and `recipes` for `scan`).
+
+| Route | Why |
+| --- | --- |
+| `/api/lm/download-model-get` | starts a download |
+| `/api/lm/cancel-download-get`, `/api/lm/skip-download`, `/api/lm/pause-download`, `/api/lm/resume-download` | control a running download |
+| `/api/lm/downloads/queue/add` | queues a download (the worker starts it) |
+| `/api/lm/downloads/queue/{remove,move-to-top,move-to-end,clear,pause-all,resume-all,status}` | change the queue or the worker |
+| `/api/lm/downloads/queue/complete` | moves an item to history with a client-supplied status and `file_path` (the path must also lie inside a library root) |
+| `/api/lm/downloads/history/{clear,delete,retry,retry-all}` | change history, re-queue downloads |
+| `/api/lm/set-model-version-download-status` | marks a version downloaded/deleted (`filePath` must lie inside a library root) |
+| `/api/lm/delete-model-version` | deletes files |
+| `/api/lm/{prefix}/scan`, `/api/lm/recipes/scan` | rescan a library |
+| `/api/lm/{prefix}/forget-folder`, `/api/lm/{prefix}/auto-organize`, `/api/lm/{prefix}/apply-filename-template` | change library state or move/rename files |
+| `/api/lm/first-scan/start`, `/api/lm/sidecars/migrate` | start a scan or a migration |
+| `/api/lm/recipes/import-remote`, `/api/lm/recipes/import-from-url`, `/api/lm/recipe/{recipe_id}/reimport`, `/api/lm/recipe/{recipe_id}/share` | create, re-import or stage recipe data |
+| `/api/lm/workflows/send-to-comfy`, `/api/lm/update-lora-code`, `/api/lm/update-node-widget` | change the open ComfyUI graph |
+
+Every other `GET` route is listed in `READ_ONLY_GET_ROUTES` with a one-line
+reason (pages, static files, websockets, list/read endpoints, progress
+polls, and cache-refreshing reads such as `model-versions-status`,
+`updates/status` and `updates/versions` with `refresh=1`, which only
+re-fetch Civitai data). `tests/security/test_request_guard_routes.py`
+builds the real route table and **fails for a GET route that is in neither
+list**, for a route in both, and for a stale entry: a new GET route has to
+be classified explicitly.
+
+Tests: `tests/security/test_request_guard_decision.py` (the full
+`Sec-Fetch-Site` x header x `Origin` matrix), `..._middleware.py` (in-process
+aiohttp app with spy handlers: blocked requests have no side effect),
+`..._routes.py` (classification, registration in both entry points),
+`tests/frontend/utils/requestGuardBootstrap.test.js`, `ui/tests/api.test.ts`.
+
+Not covered: DNS rebinding (the attacker's page is then same-origin, so rule
+1 allows it; ComfyUI does not check `Host` either), and `POST`/`PUT`/`DELETE`
+in standalone mode, which has no ComfyUI origin middleware.
 
 ## Theming
 

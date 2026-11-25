@@ -2334,7 +2334,11 @@ async def test_check_model_exists_downloaded_files_without_remote_metadata():
 
 
 @pytest.mark.asyncio
-async def test_model_version_download_status_endpoints():
+async def test_model_version_download_status_endpoints(monkeypatch):
+    # filePath must lie inside a library root (fork: request-guard change).
+    monkeypatch.setattr(
+        misc_handlers.library_roots, "configured_download_roots", lambda: ["/tmp"]
+    )
     history_service = FakeDownloadHistoryService({"lora": {123}})
 
     async def history_factory():
@@ -2401,6 +2405,44 @@ async def test_model_version_download_status_endpoints():
         "modelVersionId": 789,
         "hasBeenDownloaded": False,
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "file_path", ["/etc/passwd", "//evil-host/share/x.safetensors", "/tmp-sibling/x"]
+)
+async def test_set_download_status_rejects_file_path_outside_roots(monkeypatch, file_path):
+    monkeypatch.setattr(
+        misc_handlers.library_roots, "configured_download_roots", lambda: ["/tmp"]
+    )
+    history_service = FakeDownloadHistoryService({})
+
+    async def history_factory():
+        return history_service
+
+    handler = ModelLibraryHandler(
+        ServiceRegistryAdapter(
+            get_lora_scanner=fake_scanner_factory,
+            get_checkpoint_scanner=fake_scanner_factory,
+            get_embedding_scanner=fake_scanner_factory,
+            get_downloaded_version_history_service=history_factory,
+        ),
+        metadata_provider_factory=fake_metadata_provider_factory,
+    )
+    response = await handler.set_model_version_download_status(
+        FakeRequest(  # pyright: ignore[reportArgumentType]
+            method="GET",
+            query={
+                "modelType": "lora",
+                "modelVersionId": "1",
+                "downloaded": "true",
+                "filePath": file_path,
+            },
+        )
+    )
+    assert response.status == 400
+    assert _json_payload(response)["success"] is False
+    assert history_service.marked_downloaded == []
 
 
 class OtherRecordingScanner:

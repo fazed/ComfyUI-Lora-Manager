@@ -743,3 +743,59 @@ async def test_download_model_get_returns_409_when_running_elsewhere(
     assert response.status == 409
     assert json.loads(response.text)["reason"] == "already_running"
     handler._download_use_case.execute.assert_not_called()  # pyright: ignore[reportAttributeAccessIssue]
+
+
+def _complete_request(query: dict[str, str]) -> web.Request:
+    from urllib.parse import urlencode
+
+    return make_mocked_request(
+        "GET", f"/api/lm/downloads/queue/complete?{urlencode(query)}"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "file_path",
+    ["/etc/passwd", "//evil-host/share/model.safetensors", "/library-sibling/x.safetensors"],
+)
+async def test_complete_rejects_file_path_outside_library_roots(
+    queue_service: DownloadQueueService,
+    monkeypatch: pytest.MonkeyPatch,
+    file_path: str,
+) -> None:
+    """Fork: the stored history path must lie inside a configured root."""
+    from py.utils import library_roots
+
+    monkeypatch.setattr(library_roots, "configured_download_roots", lambda: ["/library"])
+    await queue_service.add_to_queue(download_id="dl-p", model_id=1)
+    response = await _make_handler().complete_download_in_queue(
+        _complete_request({"download_id": "dl-p", "status": "completed", "file_path": file_path})
+    )
+    assert response.status == 400
+    assert json.loads(response.text or "{}")["success"] is False
+    # Nothing moved to history; the item is still queued.
+    assert len(await queue_service.get_queue()) == 1
+    assert (await queue_service.get_history())["items"] == []
+
+
+@pytest.mark.asyncio
+async def test_complete_accepts_file_path_inside_library_roots(
+    queue_service: DownloadQueueService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from py.utils import library_roots
+
+    monkeypatch.setattr(library_roots, "configured_download_roots", lambda: ["/library"])
+    await queue_service.add_to_queue(download_id="dl-q", model_id=1)
+    response = await _make_handler().complete_download_in_queue(
+        _complete_request(
+            {
+                "download_id": "dl-q",
+                "status": "completed",
+                "file_path": "/library/loras/model.safetensors",
+            }
+        )
+    )
+    assert response.status == 200
+    history = await queue_service.get_history()
+    assert len(history["items"]) == 1
