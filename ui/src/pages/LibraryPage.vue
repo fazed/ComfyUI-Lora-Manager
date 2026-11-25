@@ -765,7 +765,8 @@ function bulkSend(event: MouseEvent): void {
         <template #filters>
           <LibraryFilterPanel :groups="filterGroups" :selected="state" :id-prefix="prefix" @toggle="filters.toggle">
             <label><input v-model="state.favoritesOnly" class="accent-accent" type="checkbox" /> {{ t('library.favoritesOnly') }}</label>
-            <span v-if="config.supportsUpdates" class="flex flex-col gap-1" data-testid="updates-flag-filter">
+            <!-- `contents`: the label stays on the checkbox row, the help text takes its own line below. -->
+            <span v-if="config.supportsUpdates" class="contents" data-testid="updates-flag-filter">
               <label :title="t('library.updatesFlagHint')">
                 <input
                   v-model="state.updatesOnly"
@@ -775,7 +776,7 @@ function bulkSend(event: MouseEvent): void {
                 />
                 {{ t('library.updatesOnly') }}
               </label>
-              <span :id="`${prefix}-updates-flag-hint`" class="max-w-[46ch] text-xs text-muted">
+              <span :id="`${prefix}-updates-flag-hint`" class="-mt-2 basis-full text-xs text-muted">
                 {{ t('library.updatesFlagHint') }}
                 <RouterLink to="/updates" class="font-medium text-accent underline underline-offset-2 hover:no-underline">{{ t('library.openUpdates') }}</RouterLink>
               </span>
