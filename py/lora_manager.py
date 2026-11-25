@@ -41,6 +41,7 @@ from .services.example_images_cleanup_service import ExampleImagesCleanupService
 from .middleware.csp_middleware import relax_csp_for_remote_media
 from .middleware.error_middleware import api_json_error
 from .utils.request_guard import install_request_guard
+from .utils.host_guard import install_host_guard, register_lm_routes
 from .utils.gc_utils import freeze_long_lived_objects
 
 logger = logging.getLogger(__name__)
@@ -84,6 +85,9 @@ class LoraManager:
     def add_routes(cls):
         """Initialize and register all routes using the new refactored architecture"""
         app = PromptServer.instance.app
+        # Fork: resources present before ours belong to ComfyUI; the host check
+        # (py/utils/host_guard.py) is scoped to the ones registered below.
+        resources_before = set(app.router.resources())
 
         # Register JSON error middleware for /api/* routes as the outermost
         # middleware so it catches errors from all other middlewares.
@@ -94,6 +98,10 @@ class LoraManager:
         # (CSRF guard, see py/utils/request_guard.py). Runs right after the
         # JSON error middleware, before any handler.
         install_request_guard(app)
+        # Fork: reject LM requests whose Host is an unknown domain name (DNS
+        # rebinding, see py/utils/host_guard.py). Inserted after the JSON error
+        # middleware, so it runs before the request guard.
+        install_host_guard(app)
 
         if relax_csp_for_remote_media not in app.middlewares:
             # Ensure CSP relaxer executes after ComfyUI's block_external_middleware so it can
@@ -195,6 +203,11 @@ class LoraManager:
             "/ws/download-progress", ws_manager.handle_download_connection
         )
         app.router.add_get("/ws/init-progress", ws_manager.handle_init_connection)
+
+        # Fork: scope the host check to every route registered above.
+        register_lm_routes(
+            r for r in app.router.resources() if r not in resources_before
+        )
 
         # Schedule service initialization
         app.on_startup.append(lambda app: cls._initialize_services())

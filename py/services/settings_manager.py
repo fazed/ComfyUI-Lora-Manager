@@ -228,6 +228,10 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
     "llm_api_key": "",
     "llm_api_base": "",  # empty = provider default
     "llm_model": "",  # e.g. "gpt-4o-mini"
+    # Fork: hostnames (besides IP addresses and localhost) accepted in the Host
+    # header of LoRA Manager requests (DNS-rebinding check, py/utils/host_guard.py).
+    # Entries: "name", "name:port" (port ignored), "*.domain" (subdomains).
+    "allowed_hosts": [],
 }
 
 
@@ -2092,6 +2096,10 @@ class SettingsManager:
             value = self._normalize_unknown_base_model_routing(value)
         elif key == "sidecar_storage_path":
             value = self._normalize_recipes_path_value(value)
+        elif key == "allowed_hosts":  # fork: host check (py/utils/host_guard.py)
+            from ..utils.host_guard import normalize_allowed_hosts
+
+            value = normalize_allowed_hosts(value)
         self.settings[key] = value
         portable_switch_pending = False
         if key == "use_portable_settings" and isinstance(value, bool):
