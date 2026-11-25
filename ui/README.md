@@ -474,9 +474,12 @@ this order:
    non-browser clients): **allow**. Not a CSRF vector; there is no setting to
    turn this off.
 5. Anything else: **reject** with HTTP 403 and
-   `{"success": false, "error": "Cross-site request blocked: ...", "code": "csrf_blocked"}`.
-   The first block per `Origin`/`Sec-Fetch-Site` pair is logged as a
-   warning (`py.utils.request_guard`), repeats at debug level.
+   `{"success": false, "error": "Cross-site request blocked by LoRA Manager: ...", "code": "csrf_blocked"}`.
+   Clients must rely on `code`, not on the message text. The first block per
+   `Origin`/`Sec-Fetch-Site` pair is logged as a warning
+   (`py.utils.request_guard`) with the `Origin` and `Sec-Fetch-Site` seen;
+   repeats, and a hint that same-origin web clients should send
+   `X-LM-Client`, go to debug level.
 
 `X-LM-Client` values: a short token (`[A-Za-z0-9][A-Za-z0-9._-]{0,63}`); an
 empty or malformed value counts as absent. The ids in use:

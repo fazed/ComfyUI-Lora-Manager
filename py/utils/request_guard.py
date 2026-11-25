@@ -63,8 +63,9 @@ CLIENT_HEADER = "X-LM-Client"
 BLOCKED_CODE = "csrf_blocked"
 BLOCKED_STATUS = 403
 BLOCKED_ERROR = (
-    "Cross-site request blocked: this endpoint changes state. Same-origin "
-    "pages and LoRA Manager clients must send the X-LM-Client header."
+    "Cross-site request blocked by LoRA Manager: state-changing requests must "
+    "come from the LoRA Manager web interface or from a browser extension or "
+    "tool that is not a web page on another site."
 )
 
 #: Documented client ids. Any short token is accepted (see ``_CLIENT_ID_RE``);
@@ -405,19 +406,24 @@ def _log_block_once(request: web.Request, decision: GuardDecision) -> None:
     origin = request.headers.get("Origin") or "<no origin>"
     site = request.headers.get("Sec-Fetch-Site") or "<missing>"
     key = f"{origin}|{site}"
+    # Hint for web clients served from the backend's own origin only; the
+    # browser extension must not send a custom header (it is admitted by its
+    # extension-scheme Origin or Sec-Fetch-Site: none).
+    logger.debug(
+        "Request guard blocked %s %s (origin=%s, sec-fetch-site=%s, reason=%s). "
+        "A web client served from the backend's own origin should send the %s "
+        "header.",
+        request.method, request.path, origin, site, decision.reason, CLIENT_HEADER,
+    )
     if key in _LOGGED_KEYS:
-        logger.debug(
-            "Request guard blocked %s %s (origin=%s, sec-fetch-site=%s)",
-            request.method, request.path, origin, site,
-        )
         return
     if len(_LOGGED_KEYS) < _LOGGED_KEYS_LIMIT:
         _LOGGED_KEYS.add(key)
     logger.warning(
-        "LoRA Manager blocked a cross-site %s %s (origin=%s, sec-fetch-site=%s, "
-        "reason=%s). Clients must send the %s header; further blocks from this "
-        "origin are logged at debug level.",
-        request.method, request.path, origin, site, decision.reason, CLIENT_HEADER,
+        "LoRA Manager blocked a cross-site %s %s as a possible cross-site request "
+        "forgery (origin=%s, sec-fetch-site=%s, reason=%s); further blocks from "
+        "this origin are logged at debug level.",
+        request.method, request.path, origin, site, decision.reason,
     )
 
 

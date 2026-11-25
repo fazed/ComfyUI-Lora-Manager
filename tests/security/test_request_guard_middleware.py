@@ -91,7 +91,11 @@ async def _assert_blocked(response) -> None:
     body = await response.json()
     assert body["success"] is False
     assert body["code"] == BLOCKED_CODE
-    assert isinstance(body["error"], str) and body["error"]
+    assert isinstance(body["error"], str)
+    assert "Cross-site request blocked" in body["error"]
+    # The extension must not send a custom header: the message does not
+    # prescribe X-LM-Client to every client.
+    assert "X-LM-Client" not in body["error"]
 
 
 @pytest.mark.parametrize("path,name,registry", GUARDED_CASES)
@@ -245,3 +249,7 @@ async def test_block_is_logged_once_per_origin(guarded_app, caplog):
     assert len(warnings) == 2
     assert "evil.example" in warnings[0].getMessage()
     assert "other.example" in warnings[1].getMessage()
+    assert all("blocked" in w.getMessage() for w in warnings)
+    assert all("X-LM-Client" not in w.getMessage() for w in warnings)
+    hints = [r for r in caplog.records if r.levelno == logging.DEBUG and "X-LM-Client" in r.getMessage()]
+    assert hints, "the X-LM-Client hint for same-origin web clients is logged at debug level"
