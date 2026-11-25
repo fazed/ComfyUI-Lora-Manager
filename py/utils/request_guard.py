@@ -11,7 +11,7 @@ is blocked before it reaches LoRA Manager. This guard is defence in depth
 for older ComfyUI versions without that middleware (or ComfyUI started with
 ``--enable-cors-header``, which replaces it), standalone mode (no ComfyUI
 middleware), ``same-site`` requests from another local port, and future
-changes. DNS rebinding is not covered.
+changes. DNS rebinding is handled by ``py/utils/host_guard.py``.
 
 This module holds:
 
@@ -21,11 +21,15 @@ This module holds:
   enumerates every registered GET route and fails for one that is in neither
   list, so a new route cannot silently be unsafe;
 * the pure decision function :func:`evaluate_request`;
-* the aiohttp middleware :func:`request_guard`, registered in
-  ``py/lora_manager.py`` (ComfyUI mode) and ``standalone.py``.
+* the aiohttp middlewares :data:`request_guard` (ComfyUI mode, registered in
+  ``py/lora_manager.py``) and :data:`standalone_request_guard` (``standalone.py``).
+  The standalone one also applies :func:`evaluate_request` to every non-safe
+  method (``POST``, ``PUT``, ``PATCH``, ``DELETE`` ...) on every route,
+  because standalone mode has no ComfyUI origin middleware.
 
 Protocol (documented in ``ui/README.md``, "Request guard for state-changing
-GET routes"). For a ``GET``/``HEAD`` request to a guarded route:
+GET routes"). For a ``GET``/``HEAD`` request to a guarded route (and, in
+standalone mode, any non-safe request):
 
 1. ``Sec-Fetch-Site`` is ``same-origin`` or ``none``: allow (a same-origin
    page, or a user-initiated / extension request). Browsers set this header;
@@ -78,6 +82,9 @@ EXTENSION_ORIGIN_SCHEMES = frozenset(
 
 _ALLOWED_FETCH_SITES = frozenset({"same-origin", "none"})
 _GUARDED_METHODS = frozenset({"GET", "HEAD"})
+#: Methods never guarded. Every other method is "non-safe" and guarded in
+#: standalone mode (POST, PUT, PATCH, DELETE, and anything unusual).
+_SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS", "TRACE"})
 _CLIENT_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
@@ -268,6 +275,13 @@ READ_ONLY_GET_ROUTES: Mapping[str, str] = {
 }
 
 
+#: Standalone mode guards every non-safe method on every route. Templates
+#: listed here (same syntax as above) would stay open for non-safe methods;
+#: none are needed today. ``tests/security/test_request_guard_routes.py``
+#: enumerates the non-GET routes and fails on a stale entry.
+UNSAFE_METHOD_EXEMPTIONS: Mapping[str, str] = {}
+
+
 def _template_regex(template: str) -> re.Pattern[str]:
     pattern = re.escape(template).replace(re.escape("{prefix}"), "[^/]+")
     return re.compile(f"^{pattern}$")
@@ -444,30 +458,74 @@ def blocked_response() -> web.Response:
     )
 
 
-@web.middleware
-async def request_guard(
-    request: web.Request,
-    handler: Callable[[web.Request], Awaitable[web.StreamResponse]],
-) -> web.StreamResponse:
-    """Reject cross-site requests to guarded GET routes (see module docs)."""
+Handler = Callable[[web.Request], Awaitable[web.StreamResponse]]
 
-    if request.method not in _GUARDED_METHODS or not request.path.startswith("/api/lm/"):
-        return await handler(request)
-    canonical = _route_canonical(request)
-    if canonical is None or not is_guarded_route(canonical):
-        return await handler(request)
 
-    decision = evaluate_request(
-        sec_fetch_site=request.headers.get("Sec-Fetch-Site"),
-        origin=request.headers.get("Origin"),
-        client_header=request.headers.get(CLIENT_HEADER),
-        host=request.host,
-        scheme=request.scheme,
-    )
-    if decision.allowed:
-        return await handler(request)
-    _log_block_once(request, decision)
-    return blocked_response()
+def is_guarded_request(
+    method: str, canonical: Optional[str], *, guard_unsafe_methods: bool
+) -> bool:
+    """True when a request with *method* to the route template *canonical*
+    must pass :func:`evaluate_request`.
+
+    ``GET``/``HEAD``: only routes in :data:`GUARDED_GET_ROUTES`. Non-safe
+    methods (anything but ``GET``, ``HEAD``, ``OPTIONS``, ``TRACE``): every
+    route when *guard_unsafe_methods* (standalone mode), except the templates
+    in :data:`UNSAFE_METHOD_EXEMPTIONS`; never otherwise (ComfyUI mode, where
+    ComfyUI's origin middleware covers them).
+    """
+
+    method = method.upper()
+    if method in _GUARDED_METHODS:
+        return canonical is not None and is_guarded_route(canonical)
+    if method in _SAFE_METHODS or not guard_unsafe_methods:
+        return False
+    if canonical is not None and matching_templates(canonical, UNSAFE_METHOD_EXEMPTIONS):
+        return False
+    return True
+
+
+def create_request_guard(*, guard_unsafe_methods: bool = False):
+    """Build the request-guard middleware.
+
+    ``guard_unsafe_methods=False`` (ComfyUI mode): only guarded GET routes.
+    ``guard_unsafe_methods=True`` (standalone mode): also every ``POST``,
+    ``PUT``, ``PATCH``, ``DELETE`` (any non-safe method) on any path.
+    """
+
+    @web.middleware
+    async def middleware(request: web.Request, handler: Handler) -> web.StreamResponse:
+        method = request.method.upper()
+        if method in _GUARDED_METHODS:
+            if not request.path.startswith("/api/lm/"):
+                return await handler(request)
+        elif method in _SAFE_METHODS or not guard_unsafe_methods:
+            return await handler(request)
+        canonical = _route_canonical(request)
+        if not is_guarded_request(method, canonical, guard_unsafe_methods=guard_unsafe_methods):
+            return await handler(request)
+
+        decision = evaluate_request(
+            sec_fetch_site=request.headers.get("Sec-Fetch-Site"),
+            origin=request.headers.get("Origin"),
+            client_header=request.headers.get(CLIENT_HEADER),
+            host=request.host,
+            scheme=request.scheme,
+        )
+        if decision.allowed:
+            return await handler(request)
+        _log_block_once(request, decision)
+        return blocked_response()
+
+    return middleware
+
+
+#: ComfyUI mode: guarded GET routes only (see module docs).
+request_guard = create_request_guard(guard_unsafe_methods=False)
+request_guard.__name__ = "request_guard"
+
+#: Standalone mode: guarded GET routes plus every non-safe method.
+standalone_request_guard = create_request_guard(guard_unsafe_methods=True)
+standalone_request_guard.__name__ = "standalone_request_guard"
 
 
 def install_request_guard(app: web.Application) -> None:

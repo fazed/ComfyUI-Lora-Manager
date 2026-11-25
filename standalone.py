@@ -8,7 +8,8 @@ from typing import Any, cast
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from py.middleware.cache_middleware import cache_control
 from py.middleware.error_middleware import api_json_error
-from py.utils.request_guard import request_guard
+from py.utils.host_guard import standalone_host_guard
+from py.utils.request_guard import standalone_request_guard
 from py.utils.settings_paths import SETTINGS_DIR_ENV, ensure_settings_file
 
 # Set environment variable to indicate standalone mode
@@ -194,9 +195,18 @@ class StandaloneServer:
     client_id: Any = None
 
     def __init__(self):
-        # request_guard: fork CSRF guard for state-changing GET routes
-        # (py/utils/request_guard.py); keep it right after api_json_error.
-        middlewares: list[Any] = [api_json_error, request_guard, cache_control]
+        # Fork guards, right after api_json_error:
+        # standalone_host_guard rejects unknown Host names on every path (DNS
+        # rebinding, py/utils/host_guard.py); standalone_request_guard is the
+        # CSRF guard for state-changing GET routes plus, because standalone has
+        # no ComfyUI origin middleware, every non-safe method
+        # (py/utils/request_guard.py).
+        middlewares: list[Any] = [
+            api_json_error,
+            standalone_host_guard,
+            standalone_request_guard,
+            cache_control,
+        ]
         self.app = web.Application(
             logger=logger,
             middlewares=middlewares,
