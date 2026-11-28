@@ -12,6 +12,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useEventListener } from '@vueuse/core'
 import AppIcon from './AppIcon.vue'
 import AppMenu from './AppMenu.vue'
+import BrandMark from './BrandMark.vue'
 import SearchCombobox from './SearchCombobox.vue'
 import { useDownloadQueue } from '@/composables/useDownloadQueue'
 import { useLikelyCountsTriggers, useUpdatesSummary } from '@/composables/useUpdates'
@@ -122,7 +123,7 @@ const iconButton = 'lm-btn lm-btn--ghost relative px-2'
       :title="t('app.title')"
     >
       <span class="inline-grid size-[32px] place-items-center rounded-sm bg-accent text-on-accent" aria-hidden="true">
-        <AppIcon name="layers" :size="20" />
+        <BrandMark :size="28" />
       </span>
       <span class="whitespace-nowrap narrow:hidden">{{ t('app.title') }}</span>
     </RouterLink>
