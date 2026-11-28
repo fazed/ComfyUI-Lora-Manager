@@ -1052,6 +1052,31 @@ they live in `base.css` (and the compact block) only, never in a theme file.
 The grid wrapper no longer sets a permanent `will-change: transform` (it is
 re-positioned only when the rendered row window changes, not animated).
 
+### Branding
+
+The logo is the MooBox LM mark, designed for the companion browser
+extension (repo `lora-manager-browser-extension`, `assets/logo-mark.svg`,
+`src/lib/logo.ts`): a cow face in a box - ears and horns on a rounded square
+head, with the eyes and a muzzle with nostrils cut out of it (even-odd fill).
+It is drawn on a 12x12 pixel grid so it stays crisp at 16, 32 and 48 px; the
+32x32 viewBox holds the glyph at 2..30. This UI uses it in two places:
+
+* `public/favicon.svg` - the app tile: the mark in `#ffffff` filling 24 of 32
+  units (75%, glyph at 4..28) on a `#4f46e5` square with `rx="6"` (the
+  default-light `--lm-color-accent`, `--lm-color-on-accent` and
+  `--lm-radius-sm`). A favicon cannot read CSS tokens, so it is a static
+  asset; the indigo tile reads on light and dark tab strips.
+* `src/components/BrandMark.vue` - the header brand tile in `TopBar.vue`
+  (a 28px mark in the 32px `bg-accent text-on-accent` tile: the glyph is
+  24.5px, about 75% like the favicon, with a whole-pixel 2px inset).
+
+Rule: the mark stays a single monochrome `currentColor` glyph (no fill or
+stroke colours of its own, `fill-rule="evenodd"`, decorative, `aria-hidden`),
+so every theme's accent / on-accent colours it. `tests/branding.test.ts` pins the path in
+`BrandMark.vue` and the favicon to the extension's source. The `layers`
+icon (the former brand glyph) stays in the icon set: it still means LoRAs,
+"send / replace" and duplicates elsewhere.
+
 ## Navigation and layout
 
 There is no sidebar: the content area uses the full width.
