@@ -10,7 +10,8 @@
       /* Pre-paint theme bootstrap (kept tiny; mirrors src/themes/registry.ts).
          Applies the stored theme/density before the first paint so there is
          no light/dark flash. Storage keys: lm-ui.theme, lm-ui.theme.user,
-         lm-ui.density. */
+         lm-ui.density, lm-ui.scale, lm-ui.highlight.vars (written by
+         src/composables/useAppearance.ts from lm-ui.highlight). */
       (function () {
         var root = document.documentElement
         function read(key) {
@@ -33,10 +34,24 @@
         root.setAttribute('data-theme', theme)
         var density = read('lm-ui.density')
         root.setAttribute('data-density', density === 'compact' ? 'compact' : 'comfortable')
+        var scale = read('lm-ui.scale')
+        root.setAttribute('data-scale', /^(s|m|l|xl)$/.test(scale || '') ? scale : 'm')
+        // Highlight colour: pre-resolved accent tokens, built-in themes only.
+        if (theme === 'default-light' || theme === 'default-dark') {
+          var vars = null
+          try { vars = JSON.parse(read('lm-ui.highlight.vars') || 'null') } catch (e) {}
+          var set = vars && vars[theme === 'default-dark' ? 'dark' : 'light']
+          var props = { accent: '--lm-color-accent', accentHover: '--lm-color-accent-hover', accentSoft: '--lm-color-accent-soft', onAccent: '--lm-color-on-accent' }
+          var valid = !!set
+          for (var key in props) {
+            if (valid && !(typeof set[key] === 'string' && /^(#[0-9a-f]{3,8}|rgba?\([\d\s.,%/]+\))$/i.test(set[key]))) valid = false
+          }
+          if (valid) for (key in props) root.style.setProperty(props[key], set[key])
+        }
       })()
     </script>
-    <script type="module" crossorigin src="./assets/index-Co7O-Ycy.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-DW8ZOTZz.css">
+    <script type="module" crossorigin src="./assets/index-Blywb-C-.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-pTopB_uO.css">
   </head>
   <body>
     <div id="app"></div>
