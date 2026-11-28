@@ -8,7 +8,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { defineComponent, h, nextTick } from 'vue'
-import { flushPromises, mount } from '@vue/test-utils'
+import { DOMWrapper, flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter, RouterView } from 'vue-router'
 import { setFetch } from '@/api/http'
 import type { ModelItem } from '@/api/types'
@@ -122,7 +122,9 @@ describe('library filter "Updates available"', () => {
     document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', bubbles: true }))
     await flushPromises()
 
-    const filter = wrapper.get('[data-testid="updates-flag-filter"]')
+    // `f` opens the Filters flyout (a popover teleported to the body).
+    const flyout = new DOMWrapper(document.body).get('[role="dialog"][aria-label="Filters"]')
+    const filter = flyout.get('[data-testid="updates-flag-filter"]')
     const checkbox = filter.get('input[type="checkbox"]')
     const hintId = checkbox.attributes('aria-describedby')!
     const hint = filter.get(`#${hintId}`)

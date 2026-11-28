@@ -402,7 +402,7 @@ const segmentGroup = 'inline-flex flex-none rounded-md hairline border-field-bor
 
     <ul v-else-if="!overview" class="flex flex-col gap-2" aria-busy="true" :aria-label="t('updates.loading')">
       <li v-for="n in 4" :key="n" class="lm-panel flex gap-3 p-3" aria-hidden="true">
-        <span class="lm-skeleton h-[88px] w-[66px] flex-none rounded-sm"></span>
+        <span class="lm-skeleton h-[5.5rem] w-[4.125rem] flex-none rounded-sm"></span>
         <span class="flex flex-1 flex-col gap-2">
           <span class="lm-skeleton h-[16px] w-[40%] rounded-sm"></span>
           <span class="lm-skeleton h-[12px] w-[70%] rounded-sm"></span>

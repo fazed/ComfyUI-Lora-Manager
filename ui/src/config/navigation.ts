@@ -1,12 +1,12 @@
-/** Top-bar navigation: the library tabs and their active-state logic. */
+/** Icon-rail navigation (components/AppRail.vue): the library tabs, the other pages and their active-state logic. */
 
+import type { IconName } from '@/components/icons'
 import type { MessageKey } from '@/i18n'
 
 export interface NavTab {
   to: string
   label: MessageKey
-  /** AppIcon name (kept as literals: .ts files cannot import types from .vue files). */
-  icon: 'layers' | 'box' | 'type' | 'book'
+  icon: IconName
 }
 
 export const NAV_TABS: NavTab[] = [
@@ -14,6 +14,19 @@ export const NAV_TABS: NavTab[] = [
   { to: '/checkpoints', label: 'nav.checkpoints', icon: 'box' },
   { to: '/embeddings', label: 'nav.embeddings', icon: 'type' },
   { to: '/recipes', label: 'nav.recipes', icon: 'book' },
+]
+
+/** Pages under the libraries in the rail (Updates and Downloads carry live badges). */
+export const RAIL_PAGES: NavTab[] = [
+  { to: '/updates', label: 'topbar.updates', icon: 'update' },
+  { to: '/downloads', label: 'nav.downloads', icon: 'download' },
+  { to: '/stats', label: 'nav.stats', icon: 'chart' },
+]
+
+/** Pages at the bottom of the rail, next to Search and Appearance. */
+export const RAIL_TOOLS: NavTab[] = [
+  { to: '/settings', label: 'nav.settings', icon: 'settings' },
+  { to: '/doctor', label: 'nav.doctor', icon: 'pulse' },
 ]
 
 function normalise(path: string): string {

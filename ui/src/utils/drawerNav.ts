@@ -83,10 +83,11 @@ export interface NavKeyContext {
 const EDITABLE_TAGS = new Set(['INPUT', 'TEXTAREA', 'SELECT'])
 
 /**
- * Which direction a key press asks for, or null. Alt+ArrowLeft/Right and plain
- * k (previous) / j (next). Nothing happens while typing in a field (Alt+Arrow is
- * word movement with Option on macOS), while a dialog or menu is open, or when
- * another layer is on top of the drawer.
+ * Which direction a key press asks for, or null. ArrowLeft/Right (plain or with
+ * Alt) and plain k (previous) / j (next). Nothing happens while typing in a field
+ * (Alt+Arrow is word movement with Option on macOS), when the arrow was already
+ * handled (the tab list moves between tabs), while a dialog or menu is open, or
+ * when another layer is on top of the drawer.
  */
 export function shouldHandleNavKey(event: NavKeyEvent, context: NavKeyContext): NavDirection | null {
   if (!context.topmost || context.dialogOpen || context.menuOpen) return null
@@ -95,35 +96,46 @@ export function shouldHandleNavKey(event: NavKeyEvent, context: NavKeyContext): 
   const tag = target?.tagName?.toUpperCase()
   if ((tag && EDITABLE_TAGS.has(tag)) || target?.isContentEditable) return null
   if (event.ctrlKey || event.metaKey || event.shiftKey) return null
-  if (event.altKey) {
-    if (event.key === 'ArrowLeft') return 'prev'
-    if (event.key === 'ArrowRight') return 'next'
-    return null
-  }
+  if (event.key === 'ArrowLeft') return 'prev'
+  if (event.key === 'ArrowRight') return 'next'
+  if (event.altKey) return null
   const letter = event.key.toLowerCase()
   if (letter === 'k') return 'prev'
   if (letter === 'j') return 'next'
   return null
 }
 
+/** Plain Delete outside text fields, under the same conditions as the navigation keys: delete the shown model. */
+export function shouldHandleDeleteKey(event: NavKeyEvent, context: NavKeyContext): boolean {
+  if (!context.topmost || context.dialogOpen || context.menuOpen) return false
+  if (event.defaultPrevented || event.isComposing) return false
+  const target = event.target as { tagName?: string; isContentEditable?: boolean } | null
+  const tag = target?.tagName?.toUpperCase()
+  if ((tag && EDITABLE_TAGS.has(tag)) || target?.isContentEditable) return false
+  return event.key === 'Delete' && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey
+}
+
 // --- persisted tab ----------------------------------------------------------
 
-export const DRAWER_TABS = ['overview', 'description', 'versions'] as const
+export const DRAWER_TABS = ['examples', 'description', 'versions', 'recipes'] as const
 export type DrawerTab = (typeof DRAWER_TABS)[number]
 
-/** A stored value (localStorage, any type) as a known tab; anything else is Overview. */
+/**
+ * A stored value (localStorage, any type) as a known tab; anything else is
+ * Examples. The former Overview tab (its examples moved to Examples) maps there.
+ */
 export function parseStoredTab(value: unknown): DrawerTab {
-  return (DRAWER_TABS as readonly unknown[]).includes(value) ? (value as DrawerTab) : 'overview'
+  return (DRAWER_TABS as readonly unknown[]).includes(value) ? (value as DrawerTab) : 'examples'
 }
 
-/** Tabs that make sense for a model: Versions needs the Civitai model id. */
-export function availableTabs(item: { civitai?: { modelId?: number | null } | null }): DrawerTab[] {
-  return item.civitai?.modelId ? [...DRAWER_TABS] : DRAWER_TABS.filter((tab) => tab !== 'versions')
+/** Tabs that make sense for a model: Versions needs the Civitai model id, Recipes are listed for LoRAs only. */
+export function availableTabs(item: { civitai?: { modelId?: number | null } | null }, isLora = false): DrawerTab[] {
+  return DRAWER_TABS.filter((tab) => (tab !== 'versions' || !!item.civitai?.modelId) && (tab !== 'recipes' || isLora))
 }
 
-/** The tab to show: the remembered one when this model has it, else Overview. The preference itself is never rewritten here. */
+/** The tab to show: the remembered one when this model has it, else Examples. The preference itself is never rewritten here. */
 export function resolveTab(preferred: DrawerTab, available: readonly DrawerTab[]): DrawerTab {
-  return available.includes(preferred) ? preferred : 'overview'
+  return available.includes(preferred) ? preferred : 'examples'
 }
 
 // --- stale responses --------------------------------------------------------

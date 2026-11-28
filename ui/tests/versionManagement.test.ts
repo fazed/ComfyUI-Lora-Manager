@@ -5,7 +5,7 @@
  * Every backend call is mocked; nothing here can reach a real backend.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
+import { DOMWrapper, flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { setFetch } from '@/api/http'
 import { createModelApi, downloadsApi } from '@/api/endpoints'
@@ -33,9 +33,6 @@ import ModelDrawer from '@/components/ModelDrawer.vue'
 import OldVersionsView from '@/components/OldVersionsView.vue'
 import UpdatesPage from '@/pages/UpdatesPage.vue'
 import { routes } from '@/router'
-import { installDialogStub } from './dialogStub'
-
-installDialogStub()
 
 // --- fixtures -----------------------------------------------------------------
 
@@ -545,12 +542,13 @@ describe('drawer Versions tab: local files and delete', () => {
       { global: { plugins: [router] }, attachTo: document.body, attrs: { item, api: createModelApi('loras'), classicUrl: '/loras' } },
     )
     await flushPromises()
-    return { wrapper, drawer: wrapper.findComponent(ModelDrawer), ...env }
+    // The flyout is teleported to <body> by the Reka UI Sheet: query the document.
+    return { wrapper, body: new DOMWrapper(document.body), drawer: wrapper.findComponent(ModelDrawer), ...env }
   }
 
   it('marks in-library versions with their file and offers Delete on every one, the current row included', async () => {
-    const { wrapper } = await mountDrawer()
-    const row = (id: number) => wrapper.get(`[data-testid="version-${id}"]`)
+    const { wrapper, body } = await mountDrawer()
+    const row = (id: number) => body.get(`[data-testid="version-${id}"]`)
     expect(row(7001).text()).toContain('Current')
     expect(row(7001).text()).toContain('In your library as eldreda_v1_anima.safetensors in chars')
     expect(row(7001).find('[data-testid="delete-version"]').exists()).toBe(true)
@@ -570,9 +568,9 @@ describe('drawer Versions tab: local files and delete', () => {
   })
 
   it('emits the exact file, whether it is the open one and a sibling to switch to', async () => {
-    const { wrapper, drawer, calls } = await mountDrawer()
-    await wrapper.get('[data-testid="version-7001"] [data-testid="delete-version"]').trigger('click')
-    await wrapper.get('[data-testid="version-7003"] [data-testid="delete-file"]').trigger('click')
+    const { wrapper, body, drawer, calls } = await mountDrawer()
+    await body.get('[data-testid="version-7001"] [data-testid="delete-version"]').trigger('click')
+    await body.get('[data-testid="version-7003"] [data-testid="delete-file"]').trigger('click')
     const events = drawer.emitted('delete-file') as Array<[{ file: { filePath: string }; isCurrent: boolean; siblingPath: string | null }]>
     expect(events[0][0]).toEqual({
       file: { filePath: 'D:/Models/Loras/chars/eldreda_v1_anima.safetensors', fileName: 'eldreda_v1_anima.safetensors', folder: 'chars', sizeBytes: 2097152, versionName: 'v1.0 Anima' },
@@ -586,15 +584,15 @@ describe('drawer Versions tab: local files and delete', () => {
   })
 
   it('offers no delete while the version is being downloaded', async () => {
-    const { wrapper } = await mountDrawer([{ download_id: 'd', model_version_id: 7002, status: 'downloading' } as QueueItem])
-    expect(wrapper.get('[data-testid="version-7002"]').find('[data-testid="delete-version"]').exists()).toBe(false)
-    expect(wrapper.get('[data-testid="version-7002"]').text()).toContain('Being downloaded')
+    const { wrapper, body } = await mountDrawer([{ download_id: 'd', model_version_id: 7002, status: 'downloading' } as QueueItem])
+    expect(body.get('[data-testid="version-7002"]').find('[data-testid="delete-version"]').exists()).toBe(false)
+    expect(body.get('[data-testid="version-7002"]').text()).toContain('Being downloaded')
     wrapper.unmount()
   })
 
   it('Queue download asks about the owned versions of the same base only', async () => {
-    const { wrapper, calls } = await mountDrawer()
-    const queueButton = wrapper.get('[data-testid="version-7005"]').findAll('button').find((b) => b.text().includes('Queue download'))!
+    const { wrapper, body, calls } = await mountDrawer()
+    const queueButton = body.get('[data-testid="version-7005"]').findAll('button').find((b) => b.text().includes('Queue download'))!
     await queueButton.trigger('click')
     await flushPromises()
     // Anima 2.9B: no owned version on that base -> no prompt, queued with Keep.

@@ -56,7 +56,7 @@ async function onSubmit(): Promise<void> {
 
 <template>
   <ModalShell :title="title" :title-id="`${id}-title`" :busy="busy" @close="emit('close')">
-    <form class="flex flex-col gap-4 px-5 pb-5" novalidate @submit.prevent="onSubmit">
+    <form class="flex min-h-0 flex-col gap-4 overflow-y-auto px-5 pb-5" novalidate @submit.prevent="onSubmit">
       <div class="flex flex-col gap-1">
         <label class="lm-label" :for="id">{{ label }}</label>
         <input
@@ -74,7 +74,7 @@ async function onSubmit(): Promise<void> {
         <p v-if="hint" :id="`${id}-hint`" class="lm-hint">{{ hint }}</p>
         <p :id="`${id}-error`" class="lm-error-text min-h-[1.2em]" role="alert">{{ shownError ?? '' }}</p>
       </div>
-      <div class="flex justify-end gap-2">
+      <div class="lm-dialog-footer">
         <button type="button" class="lm-btn" :disabled="busy" @click="emit('close')">{{ t('common.cancel') }}</button>
         <button type="submit" class="lm-btn lm-btn--primary" :disabled="busy || !!localError">
           {{ busy ? t('common.loading') : confirmLabel }}

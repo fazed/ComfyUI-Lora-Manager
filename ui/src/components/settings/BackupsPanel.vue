@@ -72,7 +72,7 @@ onMounted(() => void backups.load())
     </template>
 
     <ModalShell v-if="restoreOpen" :title="t('backups.restoreTitle')" title-id="restore-title" :busy="busy === 'restore'" wide @close="restoreOpen = false">
-      <form class="flex flex-col gap-3 overflow-y-auto px-5 pb-5" @submit.prevent="doRestore">
+      <form class="flex min-h-0 flex-col gap-3 overflow-y-auto px-5 pb-5" @submit.prevent="doRestore">
         <div class="flex gap-2 rounded-md border-l-4 border-l-danger bg-danger-soft p-3 text-sm" role="note">
           <AppIcon name="alert" :size="18" class="flex-none text-danger" />
           <div class="flex flex-col gap-2">
@@ -95,10 +95,10 @@ onMounted(() => void backups.load())
         </div>
         <div>
           <label class="lm-label" for="restore-word">{{ t('backups.typeLabel') }}</label>
-          <input id="restore-word" v-model="typed" class="lm-input max-w-[240px] font-mono" autocomplete="off" spellcheck="false" :placeholder="RESTORE_CONFIRM_WORD" />
+          <input id="restore-word" v-model="typed" class="lm-input max-w-[15rem] font-mono" autocomplete="off" spellcheck="false" :placeholder="RESTORE_CONFIRM_WORD" />
         </div>
         <p v-if="error" class="lm-error-text" role="alert">{{ error }}</p>
-        <div class="flex justify-end gap-2">
+        <div class="lm-dialog-footer">
           <button type="button" class="lm-btn" :disabled="busy === 'restore'" @click="restoreOpen = false">{{ t('common.cancel') }}</button>
           <button type="submit" class="lm-btn lm-btn--danger" :disabled="!canRestore" :aria-busy="busy === 'restore'">{{ t('backups.restoreConfirm') }}</button>
         </div>

@@ -1,32 +1,45 @@
 <script setup lang="ts">
 /**
- * Chrome above a card grid, shared by the model libraries and the recipes:
- * title and count, search, sort, filters, folders, selection and one Tools
- * menu, then the quick-filter row, the filter panel and the active-filter
- * chips. In selection mode the page's selection bar replaces the toolbar row
- * at the same height.
+ * Chrome above a card grid, shared by the model libraries and the recipes.
+ * At most three rows: the toolbar (folders, search with "Search in", the
+ * Filters flyout, then View, Sort, Select, Refresh, Tools and the page's
+ * primary action), the context row (breadcrumb and alphabet bar, `context`
+ * slot) and the active-view strip: the result count, every active scope and
+ * filter as a removable chip and one "Clear all" (reserved height on
+ * desktop). The
+ * optional base-model row (`quick` slot) only shows when the page turns it
+ * on in the View options. Selection mode keeps the toolbar: the page's
+ * selection bar floats at the bottom of the grid (LibrarySelectionBar.vue).
+ * Model libraries also bind the Quick view toggle (`v-model:quick-view`,
+ * from 1280px on devices with a mouse).
  *
- * Layout: one fixed 68px row from 901px up (search shrinks instead of
- * wrapping), search drops to its own row at 900px and below, and on phones
- * (<= 720px) a "Filters and sort" button opens a bottom sheet holding sort,
- * folders, selection, tools and the filter groups. Bare `f` / `s` toggle the
- * filters and selection mode outside text fields, menus and dialogs. The
- * page's Refresh button (composables/useRefresh.ts) sits before Tools on
- * desktop and is a row of the phone sheet; `r` is handled by the app shell.
+ * The page name is the breadcrumb root; the toolbar's h1 is for screen
+ * readers, the result count sits in the breadcrumb and the status bar.
+ * Phones (<= 720px) keep one row with the search and a "Filters and sort"
+ * button that opens a bottom sheet holding sort, view, folders, selection,
+ * tools and the filter groups. Bare `f` toggles the filters, bare `b` the
+ * selection (bulk bar) and Ctrl/Cmd+F focuses the search, outside text fields,
+ * menus and dialogs; `r` is handled by the app shell.
  */
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useEventListener, useMediaQuery } from '@vueuse/core'
 import AppIcon from './AppIcon.vue'
 import BottomSheet from './BottomSheet.vue'
+import FilterFlyout from './FilterFlyout.vue'
 import type { IconName } from './icons'
 import MenuButton, { type MenuEntry } from './MenuButton.vue'
 import RefreshButton from './RefreshButton.vue'
 import SearchCombobox from './SearchCombobox.vue'
-import type { FilterChip, ViewMode } from '@/composables/useLibraryFilters'
+import SearchOptions from './SearchOptions.vue'
+import ViewPopover from './ViewPopover.vue'
+import type { SearchIn } from '@/api/endpoints'
+import type { CardFit, CardShape, CardShow, FilterChip, ViewMode } from '@/composables/useLibraryFilters'
 import { CARD_SIZE_MAX, CARD_SIZE_MIN } from '@/composables/useLibraryFilters'
 import type { SortOption } from '@/config/libraries'
+import { SHORTCUTS } from '@/config/shortcuts'
 import { LOCAL_PER_GROUP, MAX_TAGS } from '@/api/suggestSource'
 import { shouldHandleShortcut } from '@/utils/browse'
+import { rekaLayerOpen } from '@/utils/dismiss'
 import type { SuggestOption } from '@/utils/suggest'
 import { t, type MessageKey } from '@/i18n'
 
@@ -39,13 +52,11 @@ const props = withDefaults(
     searchLabel: string
     searchPlaceholder: string
     activeTags: string[]
-    /** Prefix of the sort select and filter panel ids. */
+    /** Prefix of the sort, view and filter flyout ids. */
     idPrefix: string
     sortOptions: SortOption[]
     foldersId: string
     foldersOpen: boolean
-    /** A folder is selected while the panel is hidden: show a dot on the button. */
-    folderActive: boolean
     filterCount: number
     chips: FilterChip[]
     selectionMode: boolean
@@ -54,14 +65,28 @@ const props = withDefaults(
     shortcuts?: boolean
     /** Offer the grid / list view switch (model libraries; bind `v-model:view`). */
     viewToggle?: boolean
+    /** The page has a base-model chip row (`quick` slot) that the View options can turn on. */
+    quickRowOption?: boolean
+    /** Offer the Quick view toggle (model libraries; bind `v-model:quick-view`). */
+    quickViewOption?: boolean
   }>(),
-  { shortcuts: true, viewToggle: false },
+  { shortcuts: true, viewToggle: false, quickRowOption: false, quickViewOption: false },
 )
 
 const search = defineModel<string>('search', { required: true })
 const sort = defineModel<string>('sort', { required: true })
 const cardSize = defineModel<number>('cardSize', { required: true })
 const view = defineModel<ViewMode>('view', { default: 'grid' })
+const quickRow = defineModel<boolean>('quickRow', { default: false })
+/** "Search in" fields (model libraries); absent = no Search in button. */
+const searchIn = defineModel<SearchIn>('searchIn')
+const recursive = defineModel<boolean>('recursive', { default: true })
+const shape = defineModel<CardShape>('shape', { default: 'portrait' })
+const fit = defineModel<CardFit>('fit', { default: 'cover' })
+/** "Show on cards" (model libraries); absent = no such group in the View popover. */
+const show = defineModel<CardShow>('show')
+/** Quick view panel (model libraries, with `quickViewOption`). */
+const quickView = defineModel<boolean>('quickView', { default: false })
 
 const VIEW_BUTTONS: { mode: ViewMode; icon: IconName; label: MessageKey }[] = [
   { mode: 'grid', icon: 'grid', label: 'library.view.grid' },
@@ -74,28 +99,40 @@ const emit = defineEmits<{
   'toggle-folders': []
   'toggle-select': []
   tool: [id: string]
+  /** Every scope and filter (chips row, phone sheet). */
   'clear-filters': []
+  /** The Filters flyout's groups only. */
+  'clear-panel': []
 }>()
 
 defineSlots<{
-  /** Primary page action (Import on recipes). */
+  /** Primary page action (Download on model libraries, Import on recipes). */
   leading?(): unknown
-  /** Quick-filter row under the toolbar. */
+  /** Optional base-model chip row under the toolbar. */
   quick?(): unknown
-  /** Filter panel content (inline panel, or inside the phone sheet). */
+  /** Breadcrumb and alphabet bar (one row). */
+  context?(): unknown
+  /** Filter groups (Filters flyout, or inside the phone sheet). */
   filters?(): unknown
-  selection?(): unknown
 }>()
 
 const isPhone = useMediaQuery('(max-width: 720px)')
-const panelOpen = ref(false)
+const flyoutOpen = ref(false)
 const sheetOpen = ref(false)
 const foldersToggle = ref<HTMLButtonElement | null>(null)
 const filtersId = `${props.idPrefix}-filters`
 
+const sortLabel = computed(() => {
+  const current = props.sortOptions.find((option) => option.value === sort.value)
+  return current ? t(current.label) : t('library.sort')
+})
+const sortItems = computed<MenuEntry[]>(() =>
+  props.sortOptions.map((option) => ({ id: option.value, label: t(option.label), checked: option.value === sort.value })),
+)
+
 function toggleFilters(): void {
   if (isPhone.value) sheetOpen.value = !sheetOpen.value
-  else panelOpen.value = !panelOpen.value
+  else flyoutOpen.value = !flyoutOpen.value
 }
 
 function fromSheet(action: () => void): void {
@@ -103,17 +140,21 @@ function fromSheet(action: () => void): void {
   action()
 }
 
-const SEARCH_PANEL = 'left-0 top-[calc(100%+var(--lm-space-1))] w-[min(420px,calc(100vw-24px))] phone:right-0 phone:w-auto'
+const SEARCH_PANEL = 'left-0 top-[calc(100%+var(--lm-space-1))] w-[min(26.25rem,calc(100vw-1.5rem))] phone:right-0 phone:w-auto'
 
 useEventListener(document, 'keydown', (event: KeyboardEvent) => {
   if (!props.shortcuts) return
-  const overlay = !!document.querySelector('dialog[open], [role="menu"]') && !sheetOpen.value
+  // The open flyout / sheet answers its own `f` (closing it); other dialogs and menus own their keys.
+  const overlay = (rekaLayerOpen() || !!document.querySelector('[role="menu"]')) && !sheetOpen.value && !flyoutOpen.value
   if (shouldHandleShortcut(event, 'f', overlay)) {
     event.preventDefault()
     toggleFilters()
-  } else if (shouldHandleShortcut(event, 's', overlay || sheetOpen.value)) {
+  } else if (shouldHandleShortcut(event, 'b', overlay || sheetOpen.value || flyoutOpen.value)) {
     event.preventDefault()
     emit('toggle-select')
+  } else if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'f' && !overlay && !sheetOpen.value) {
+    event.preventDefault()
+    document.getElementById(props.searchId)?.focus()
   }
 })
 
@@ -121,14 +162,9 @@ defineExpose({ foldersToggle })
 </script>
 
 <template>
-  <!-- Selection mode: the bar takes the place of the toolbar row. -->
-  <div v-if="selectionMode" class="px-6 pt-5 pb-3 phone:px-3 phone:pt-4 phone:pb-2">
-    <slot name="selection" />
-  </div>
-
-  <!-- Phone: one row with the search and a single "Filters and sort" button. The tabs above already name
-       the page, so the title is read by screen readers only; the count shows in the chips row while filtered. -->
-  <div v-else-if="isPhone" class="px-3 pt-3 pb-2" role="toolbar" :aria-label="t('library.toolbar', { section: title })">
+  <!-- Phone: one row with the search and a single "Filters and sort" button. The bottom bar names the
+       library, so the title is read by screen readers only; the count shows in the chips row while filtered. -->
+  <div v-if="isPhone" class="px-3 pt-3 pb-2" role="toolbar" :aria-label="t('library.toolbar', { section: title })">
     <h1 class="sr-only">{{ title }}</h1>
     <span class="sr-only" aria-live="polite">{{ countText }}</span>
     <div class="flex items-center gap-2">
@@ -153,7 +189,7 @@ defineExpose({ foldersToggle })
         class="lm-btn min-h-touch flex-none"
         aria-haspopup="dialog"
         :aria-label="t('library.filtersAndSort')"
-        aria-keyshortcuts="F"
+        :aria-keyshortcuts="SHORTCUTS.filters.aria"
         @click="toggleFilters"
       >
         <AppIcon name="filter" :size="16" />{{ t('library.filters') }}
@@ -162,121 +198,104 @@ defineExpose({ foldersToggle })
     </div>
   </div>
 
-  <!-- Desktop / tablet. -->
+  <!-- Desktop / tablet: one row; the search shrinks first and the row wraps when the folder panel and quick view leave little room. -->
   <div
     v-else
-    class="flex flex-wrap items-center gap-2 px-6 pt-5 pb-3 min-[901px]:flex-nowrap"
+    class="flex flex-wrap items-center gap-2 hairline-b border-border px-4 py-3"
     role="toolbar"
     :aria-label="t('library.toolbar', { section: title })"
   >
-    <div class="lm-toolbar-title mr-auto min-w-0 shrink">
-      <h1 class="flex-none">{{ title }}</h1>
-      <span class="min-w-0 truncate text-sm text-muted tabular-nums" aria-live="polite" :title="countText">{{ countText }}</span>
-    </div>
-    <slot name="leading" />
-    <SearchCombobox
-      :id="searchId"
-      v-model="search"
-      :scope="searchScope"
-      class="w-[320px] min-w-[120px] shrink-[4] max-[900px]:order-last max-[900px]:w-full"
-      :label="searchLabel"
-      :placeholder="searchPlaceholder"
-      :max-per-group="LOCAL_PER_GROUP"
-      :max-tags="MAX_TAGS"
-      :active-tags="activeTags"
-      :panel-class="SEARCH_PANEL"
-      @commit="emit('commit', $event)"
-      @choose="emit('choose', $event)"
-    />
-    <label class="sr-only" :for="`sort-${idPrefix}`">{{ t('library.sort') }}</label>
-    <select :id="`sort-${idPrefix}`" v-model="sort" class="lm-select w-auto min-w-[130px] flex-none">
-      <option v-for="option in sortOptions" :key="option.value" :value="option.value">{{ t(option.label) }}</option>
-    </select>
-    <button
-      type="button"
-      class="lm-btn flex-none"
-      :aria-expanded="panelOpen"
-      :aria-controls="panelOpen ? filtersId : undefined"
-      aria-keyshortcuts="F"
-      :title="`${t('library.filters')} (F)`"
-      @click="toggleFilters"
-    >
-      <AppIcon name="filter" :size="16" />{{ t('library.filters') }}
-      <span v-if="filterCount" class="lm-badge lm-badge--accent">{{ filterCount }}</span>
-    </button>
-    <div
-      v-if="viewToggle"
-      class="inline-flex flex-none rounded-md hairline border-field-border bg-field p-px"
-      role="group"
-      :aria-label="t('library.view')"
-    >
-      <button
-        v-for="entry in VIEW_BUTTONS"
-        :key="entry.mode"
-        type="button"
-        class="inline-grid h-[34px] min-w-[36px] cursor-pointer place-items-center rounded-sm px-2 text-muted transition-colors hover:text-fg aria-pressed:bg-accent-soft aria-pressed:text-accent"
-        :aria-label="t(entry.label)"
-        :aria-pressed="view === entry.mode"
-        :title="t(entry.label)"
-        @click="view = entry.mode"
-      >
-        <AppIcon :name="entry.icon" :size="16" />
-      </button>
-    </div>
-    <label v-if="view !== 'list'" class="inline-flex flex-none items-center px-1 text-muted">
-      <span class="sr-only">{{ t('library.cardSize') }}</span>
-      <input
-        v-model.number="cardSize"
-        class="w-[72px] accent-accent min-[1280px]:w-[96px]"
-        type="range"
-        :min="CARD_SIZE_MIN"
-        :max="CARD_SIZE_MAX"
-        step="10"
-        :aria-label="t('library.cardSize')"
-        :title="t('library.cardSize')"
-      />
-    </label>
+    <h1 class="sr-only">{{ title }}</h1>
     <button
       ref="foldersToggle"
       type="button"
-      class="lm-btn flex-none"
+      class="lm-btn lm-btn--icon flex-none"
       :class="{ 'lm-chip--active': foldersOpen }"
       :aria-expanded="foldersOpen"
       :aria-controls="foldersId"
+      :aria-label="t('library.folders')"
       :title="t(foldersOpen ? 'library.hideFolders' : 'library.showFolders')"
       @click="emit('toggle-folders')"
     >
-      <AppIcon name="folder" :size="16" /><span class="max-[1279px]:sr-only">{{ t('library.folders') }}</span>
-      <span v-if="folderActive && !foldersOpen" class="size-[6px] rounded-pill bg-accent" aria-hidden="true"></span>
+      <AppIcon name="folder" :size="16" />
+    </button>
+    <div class="flex max-w-[34rem] min-w-[12rem] flex-[1_1_16rem] items-center gap-1">
+      <SearchCombobox
+        :id="searchId"
+        v-model="search"
+        :scope="searchScope"
+        class="min-w-0 flex-1"
+        :label="searchLabel"
+        :placeholder="searchPlaceholder"
+        :max-per-group="LOCAL_PER_GROUP"
+        :max-tags="MAX_TAGS"
+        :active-tags="activeTags"
+        :panel-class="SEARCH_PANEL"
+        @commit="emit('commit', $event)"
+        @choose="emit('choose', $event)"
+      />
+      <SearchOptions v-if="searchIn" v-model:search-in="searchIn" v-model:recursive="recursive" />
+    </div>
+    <FilterFlyout :id="filtersId" v-model:open="flyoutOpen" :count="filterCount" @clear="emit('clear-panel')">
+      <slot name="filters" />
+    </FilterFlyout>
+    <span class="flex-1" aria-hidden="true"></span>
+    <ViewPopover
+      v-model:view="view"
+      v-model:card-size="cardSize"
+      v-model:quick-row="quickRow"
+      v-model:shape="shape"
+      v-model:fit="fit"
+      v-model:show="show"
+      :id-prefix="idPrefix"
+      :view-toggle="viewToggle"
+      :quick-row-option="quickRowOption"
+    />
+    <MenuButton :label="sortLabel" :hint="t('library.sortBy', { sort: sortLabel })" icon="sort" align="right" button-class="lm-btn flex-none max-[1279px]:[&>span]:sr-only" :items="sortItems" @select="sort = $event" />
+    <button
+      v-if="quickViewOption"
+      type="button"
+      class="lm-btn lm-btn--icon flex-none max-[1279px]:hidden touch:hidden"
+      :class="{ 'lm-chip--active': quickView }"
+      :aria-pressed="quickView"
+      :aria-label="t('inspector.toggle')"
+      :title="t('inspector.toggle')"
+      @click="quickView = !quickView"
+    >
+      <AppIcon name="panelRight" :size="16" />
     </button>
     <button
       type="button"
       class="lm-btn flex-none"
-      aria-keyshortcuts="S"
-      :title="`${t('library.select')} (S)`"
+      :class="{ 'lm-chip--active': selectionMode }"
+      :aria-pressed="selectionMode"
+      :aria-keyshortcuts="SHORTCUTS.select.aria"
+      :title="`${t('library.select')} (B)`"
       @click="emit('toggle-select')"
     >
       <AppIcon name="checkSquare" :size="16" /><span class="max-[1279px]:sr-only">{{ t('library.select') }}</span>
     </button>
     <RefreshButton :hint="t('refresh.scanTooltip')" />
-    <MenuButton :label="t('library.toolsMenu')" icon="wrench" align="right" :items="toolItems" @select="emit('tool', $event)" />
+    <MenuButton :label="t('library.toolsMenu')" icon="wrench" compact align="right" button-class="lm-btn lm-btn--icon flex-none" :items="toolItems" @select="emit('tool', $event)" />
+    <slot name="leading" />
   </div>
 
-  <slot name="quick" />
-
-  <div v-if="panelOpen && !isPhone" :id="filtersId" class="lm-panel mx-6 mb-3 p-4">
-    <slot name="filters" />
+  <div v-if="$slots.context && !isPhone" class="flex min-h-[2.5rem] flex-wrap items-center gap-x-4 gap-y-1 hairline-b border-border px-4 py-1">
+    <slot name="context" />
   </div>
 
-  <!-- Reserved height on desktop: a chip appearing does not push the grid down. -->
+  <slot v-if="quickRow" name="quick" />
+
+  <!-- Active-view strip. Reserved height on desktop: a chip appearing does not push the grid down. -->
   <div
     v-if="chips.length || !isPhone"
-    class="flex min-h-[32px] flex-wrap items-center gap-2 px-6 pb-2 phone:min-h-0 phone:px-3"
+    class="flex min-h-[2.5rem] flex-wrap items-center gap-2 px-4 py-1 phone:min-h-0 phone:px-3"
     role="group"
-    :aria-label="t('library.filters')"
+    :aria-label="t('library.activeView')"
+    data-testid="active-view"
   >
+    <span class="text-sm text-muted tabular-nums phone:text-xs" aria-hidden="true">{{ countText }}</span>
     <template v-if="chips.length">
-      <span v-if="isPhone" class="text-xs text-muted tabular-nums" aria-hidden="true">{{ countText }}</span>
       <span v-for="chip in chips" :key="chip.key" class="lm-chip lm-chip--active">
         {{ chip.label }}
         <button type="button" class="lm-icon-btn phone:min-h-touch phone:min-w-touch" :aria-label="t('library.removeFilter', { name: chip.label })" @click="chip.remove()">

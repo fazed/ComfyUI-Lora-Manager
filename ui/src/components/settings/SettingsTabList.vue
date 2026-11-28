@@ -5,7 +5,8 @@
  * (automatic activation), aria-selected + aria-controls on the selected tab.
  * Vertical on wide screens, a horizontally scrolling strip below the
  * `tablet:` breakpoint (the parent passes the orientation). Each tab shows
- * an unsaved-changes count and, while searching, its number of matches.
+ * an unsaved-changes count and, while searching, its number of matches. The
+ * selected tab is filled with the highlight colour (like the rail).
  */
 import { nextTick, ref, watch } from 'vue'
 import AppIcon from '@/components/AppIcon.vue'
@@ -63,7 +64,7 @@ watch(
       :aria-controls="tab.id === active ? `settings-panel-${tab.id}` : undefined"
       :tabindex="tab.id === active ? 0 : -1"
       class="lm-row lm-row--nav flex min-h-control flex-none cursor-pointer items-center gap-2 px-3 text-left text-sm"
-      :class="[tab.id === active ? 'is-selected font-medium' : '', matches && !matches[tab.id] ? 'opacity-60' : '', orientation === 'horizontal' ? 'whitespace-nowrap' : 'w-full']"
+      :class="[tab.id === active ? 'bg-accent font-medium text-on-accent hover:bg-accent-hover' : 'text-muted hover:text-fg', orientation === 'horizontal' ? 'whitespace-nowrap' : 'w-full']"
       @click="emit('select', tab.id)"
       @keydown="onKey($event, index)"
     >
@@ -72,7 +73,7 @@ watch(
       <span v-if="matches && matches[tab.id]" class="lm-badge tabular-nums">
         {{ matches[tab.id] }}<span class="sr-only"> {{ t('set.tabMatches', { count: matches[tab.id] }) }}</span>
       </span>
-      <span v-if="changes[tab.id]" class="lm-badge lm-badge--accent tabular-nums" :title="t('set.tabChanges', { count: changes[tab.id] })">
+      <span v-if="changes[tab.id]" class="lm-badge lm-badge--accent tabular-nums" :class="{ 'bg-on-accent': tab.id === active }" :title="t('set.tabChanges', { count: changes[tab.id] })">
         <span class="size-[6px] rounded-pill bg-accent" aria-hidden="true"></span>{{ changes[tab.id] }}<span class="sr-only"> {{ t('set.tabChanges', { count: changes[tab.id] }) }}</span>
       </span>
     </button>

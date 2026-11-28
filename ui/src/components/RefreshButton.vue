@@ -15,6 +15,7 @@
 import { computed } from 'vue'
 import AppIcon from './AppIcon.vue'
 import { useRefresh } from '@/composables/useRefresh'
+import { SHORTCUTS } from '@/config/shortcuts'
 import { t } from '@/i18n'
 
 const props = withDefaults(defineProps<{ variant?: 'icon' | 'row'; hint?: string }>(), { variant: 'icon', hint: '' })
@@ -37,7 +38,7 @@ function onClick(): void {
     :aria-label="variant === 'icon' ? (busy ? busyLabel : t('refresh.label')) : undefined"
     :aria-busy="busy || undefined"
     :aria-disabled="busy || undefined"
-    aria-keyshortcuts="R"
+    :aria-keyshortcuts="SHORTCUTS.refresh.aria"
     :title="tooltip"
     data-refresh
     @click="onClick"

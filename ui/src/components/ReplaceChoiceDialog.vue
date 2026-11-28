@@ -97,7 +97,7 @@ function replace(): void {
 
       <p v-if="!count" class="text-sm text-warning" role="status">{{ t('replace.noneSelected') }}</p>
 
-      <div class="flex flex-wrap justify-end gap-2 phone:flex-col phone:items-stretch">
+      <div class="lm-dialog-footer phone:flex-col phone:items-stretch">
         <button type="button" class="lm-btn phone:min-h-touch" data-testid="replace-cancel" @click="choice.answer(null)">{{ t('replace.cancel') }}</button>
         <button type="button" class="lm-btn phone:min-h-touch" data-testid="replace-keep" autofocus @click="choice.answer({ mode: 'keep' }, remember)">
           {{ t('replace.keep') }}

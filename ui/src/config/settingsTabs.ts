@@ -62,7 +62,7 @@ export const SETTINGS_TABS: TabDef[] = [
     description: 'setTab.interface.desc',
     icon: 'palette',
     cards: [
-      { id: 'appearance', title: 'setCard.appearance', description: 'setCard.appearance.desc', fields: [], panels: ['appearance'], keywords: 'theme dark light midnight density compact custom' },
+      { id: 'appearance', title: 'setCard.appearance', description: 'setCard.appearance.desc', fields: [], panels: ['appearance'], keywords: 'theme dark light density compact custom highlight colour color text size scale' },
       {
         id: 'prompts',
         title: 'setCard.prompts',

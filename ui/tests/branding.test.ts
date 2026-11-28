@@ -2,9 +2,9 @@
  * Branding: the MooBox LM mark (designed for the companion browser extension,
  * `lora-manager-browser-extension`: assets/logo-mark.svg, src/lib/logo.ts).
  *
- * The header tile renders it through BrandMark (a monochrome currentColor
- * glyph, so every theme's accent/on-accent colours it); the favicon is the
- * static tile SVG in the default-light accent.
+ * The icon rail renders it through BrandMark (a monochrome currentColor
+ * glyph in the text colour, no tile); the favicon is the static tile SVG in
+ * the default-light accent (near-black, monochrome).
  */
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import BrandMark from '@/components/BrandMark.vue'
-import TopBar from '@/components/TopBar.vue'
+import AppRail from '@/components/AppRail.vue'
 import { routes } from '@/router'
 
 /** The mark on a 32x32 grid, copied verbatim from the extension's src/lib/logo.ts. */
@@ -55,11 +55,11 @@ describe('BrandMark', () => {
 })
 
 describe('favicon', () => {
-  it('is the MooBox LM tile: indigo rounded square with the white mark filling 24 of 32 units', () => {
+  it('is the MooBox LM tile: near-black rounded square with the white mark filling 24 of 32 units', () => {
     const svg = read('public/favicon.svg').trim()
     expect(svg).toBe(
       '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
-        '<rect width="32" height="32" rx="6" fill="#4f46e5"/>' +
+        '<rect width="32" height="32" rx="6" fill="#111111"/>' +
         '<path transform="translate(2.2857 2.2857) scale(0.8571)" fill="#ffffff" fill-rule="evenodd" ' +
         `d="${MARK_PATH}"/>` +
         '</svg>',
@@ -75,7 +75,7 @@ describe('favicon', () => {
 
   it('matches the default-light accent and on-accent tokens', () => {
     const theme = read('src/themes/default-light.css')
-    expect(theme).toMatch(/--lm-color-accent:\s*#4f46e5;/i)
+    expect(theme).toMatch(/--lm-color-accent:\s*#111111;/i)
     expect(theme).toMatch(/--lm-color-on-accent:\s*#ffffff;/i)
   })
 
@@ -84,30 +84,26 @@ describe('favicon', () => {
   })
 })
 
-describe('top bar brand tile', () => {
+describe('rail brand mark', () => {
   afterEach(() => {
     vi.useRealTimers()
   })
 
-  it('shows the mark (not the layers icon) in the accent tile and keeps the labels', async () => {
+  it('shows the mark in currentColor (no accent tile) as the labelled home link', async () => {
     vi.useFakeTimers()
     const router = createRouter({ history: createMemoryHistory(), routes })
     await router.push('/loras')
-    const bar = mount(TopBar, { global: { plugins: [router] } })
-    const home = bar.get('a[href="/loras"][aria-label]')
-    expect(home.attributes('aria-label')).toBe('LoRA Manager home')
-    expect(home.attributes('title')).toBe('LoRA Manager')
-    expect(home.text()).toContain('LoRA Manager')
-    const tile = home.get('span.bg-accent.text-on-accent')
-    expect(tile.attributes('aria-hidden')).toBe('true')
-    const svg = tile.get('svg')
+    const rail = mount(AppRail, { global: { plugins: [router] } })
+    const home = rail.get('a[href="/loras"][aria-label="LoRA Manager home"]')
+    expect(home.classes()).toContain('text-fg')
+    expect(home.find('.bg-accent').exists()).toBe(false)
+    const svg = home.get('svg')
     expect(svg.attributes('viewBox')).toBe('0 0 32 32')
-    // A 28px mark draws its 2..30 glyph 24.5px wide in the 32px tile (~75%),
-    // centred on whole pixels (2px inset on each side).
-    expect(svg.attributes('width')).toBe('28')
+    expect(svg.attributes('width')).toBe('26')
     expect(svg.attributes('fill')).toBe('currentColor')
-    expect(tile.get('path').attributes('d')).toBe(MARK_PATH)
-    expect(tile.findAll('svg')).toHaveLength(1)
-    bar.unmount()
+    expect(svg.attributes('aria-hidden')).toBe('true')
+    expect(home.get('path').attributes('d')).toBe(MARK_PATH)
+    expect(home.findAll('svg')).toHaveLength(1)
+    rail.unmount()
   })
 })

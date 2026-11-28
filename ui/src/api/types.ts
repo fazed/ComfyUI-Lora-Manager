@@ -35,6 +35,12 @@ export interface ModelItem {
   usage_tips?: string
   favorite?: boolean
   update_available?: boolean
+  /** Excluded from the library (the default list leaves these out). */
+  exclude?: boolean
+  /** Skipped by the bulk metadata refresh. */
+  skip_metadata_refresh?: boolean
+  /** Detected quantization ("FP8", "Q4_K_M", ...); '' or null = none. */
+  quantization?: string | null
   sub_type?: string
   civitai?: ModelCivitaiSummary | null
   version_count?: number | null
@@ -87,6 +93,9 @@ export interface ModelMetadata {
     type?: string
     description?: string
     tags?: string[]
+    /** Civitai licence fields (present once fetched from Civitai). */
+    allowNoCredit?: boolean
+    allowCommercialUse?: string[] | string
   }
   images?: CivitaiImage[]
   /** Imported example images (`custom_<id>` files in the example folder). */

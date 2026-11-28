@@ -39,7 +39,7 @@ import { resetUpdatesSummaryForTesting, useUpdatesSummary } from '@/composables/
 import { ALWAYS_KEEP_KEY, resetReplaceChoiceForTesting } from '@/composables/useReplaceChoice'
 import UpdatesPage from '@/pages/UpdatesPage.vue'
 import UpdateRow from '@/components/UpdateRow.vue'
-import TopBar from '@/components/TopBar.vue'
+import AppRail from '@/components/AppRail.vue'
 import { routes } from '@/router'
 import { messages } from '@/i18n'
 
@@ -732,7 +732,7 @@ describe('UpdatesPage', () => {
   })
 })
 
-// --- top bar and likely counts ------------------------------------------------
+// --- rail and likely counts ------------------------------------------------
 
 /** A backend whose overview per type reports the given likely count. */
 function countsBackend(likely: Partial<Record<'loras' | 'checkpoints' | 'embeddings', number>>) {
@@ -746,10 +746,10 @@ function countsBackend(likely: Partial<Record<'loras' | 'checkpoints' | 'embeddi
 
 const overviewCalls = (calls: Call[]) => calls.filter((call) => call.url.endsWith('/updates/overview'))
 
-async function mountTopBar(path = '/loras') {
+async function mountRail(path = '/loras') {
   const router = createRouter({ history: createMemoryHistory(), routes })
   await router.push(path)
-  return mount(TopBar, { global: { plugins: [router] } })
+  return mount(AppRail, { global: { plugins: [router] } })
 }
 
 function setVisibility(state: 'visible' | 'hidden') {
@@ -757,7 +757,7 @@ function setVisibility(state: 'visible' | 'hidden') {
   document.dispatchEvent(new Event('visibilitychange'))
 }
 
-describe('top bar Updates link', () => {
+describe('rail Updates link', () => {
   afterEach(() => {
     vi.useRealTimers()
     setVisibility('visible')
@@ -766,7 +766,7 @@ describe('top bar Updates link', () => {
   it('links to /updates; the badge sums the types and names the split (GET only, lazily)', async () => {
     vi.useFakeTimers()
     const { calls } = countsBackend({ loras: 3, checkpoints: 1, embeddings: 0 })
-    const bar = await mountTopBar()
+    const bar = await mountRail()
     await flushPromises()
     expect(overviewCalls(calls)).toEqual([])
     await vi.advanceTimersByTimeAsync(1600)
@@ -777,10 +777,11 @@ describe('top bar Updates link', () => {
       '/api/lm/embeddings/updates/overview',
     ])
     expect(calls.every((call) => call.method === 'GET')).toBe(true)
-    const link = bar.get('[data-testid="topbar-updates"]')
+    const link = bar.get('[data-testid="rail-updates"]')
     expect(link.attributes('href')).toBe('/updates')
     expect(link.attributes('aria-label')).toBe('Updates: 4 likely updates (LoRAs 3, Checkpoints 1)')
-    expect(link.attributes('title')).toBe(link.attributes('aria-label'))
+    // The rail shows the name in a tooltip (hover and focus), not a native title.
+    expect(link.attributes('title')).toBeUndefined()
     expect(link.text()).toContain('4')
     bar.unmount()
   })
@@ -788,8 +789,8 @@ describe('top bar Updates link', () => {
   it('uses the singular for one update', async () => {
     countsBackend({ loras: 0, checkpoints: 1, embeddings: 0 })
     await useUpdatesSummary().refreshLikelyCounts()
-    const bar = await mountTopBar()
-    expect(bar.get('[data-testid="topbar-updates"]').attributes('aria-label')).toBe(
+    const bar = await mountRail()
+    expect(bar.get('[data-testid="rail-updates"]').attributes('aria-label')).toBe(
       'Updates: 1 likely update (Checkpoints 1)',
     )
     bar.unmount()
@@ -804,8 +805,8 @@ describe('top bar Updates link', () => {
     await useUpdatesSummary().refreshLikelyCounts()
     expect(useUpdatesSummary().total.value).toBe(0)
     expect(useToasts().toasts.value).toEqual([])
-    const bar = await mountTopBar()
-    expect(bar.get('[data-testid="topbar-updates"]').attributes('aria-label')).toBe('Updates')
+    const bar = await mountRail()
+    expect(bar.get('[data-testid="rail-updates"]').attributes('aria-label')).toBe('Updates')
     bar.unmount()
   })
 
@@ -839,7 +840,7 @@ describe('top bar Updates link', () => {
   it('re-reads when the tab becomes visible again, at most every 5 minutes', async () => {
     vi.useFakeTimers()
     const { calls } = countsBackend({ loras: 1 })
-    const bar = await mountTopBar()
+    const bar = await mountRail()
     await vi.advanceTimersByTimeAsync(1600)
     await flushPromises()
     expect(overviewCalls(calls)).toHaveLength(3)

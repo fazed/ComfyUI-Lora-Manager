@@ -1,18 +1,25 @@
 /*
  * Base (non-color) design tokens shared by every theme.
  *
- * Themes (default-light.css, default-dark.css, midnight.css, user themes)
- * set the color tokens and MAY override any token below. Components consume
- * tokens only; see ui/README.md "Theming" for the full reference.
+ * Themes (default-light.css, default-dark.css, user themes) set the color
+ * tokens and MAY override any token below. Components consume tokens only;
+ * see ui/README.md "Theming" for the full reference.
+ *
+ * Sizes are in rem so the text-size setting (data-scale on <html>) scales
+ * text, controls, cards and panels together; at the default scale (M, 16px
+ * root) they equal the former px values. Border and focus-ring widths and the
+ * touch target stay in px.
  */
 :root {
-  /* Typography */
-  --lm-font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  --lm-font-mono: ui-monospace, SFMono-Regular, 'Cascadia Mono', Consolas, 'Liberation Mono', monospace;
-  --lm-font-size-xs: 0.75rem;
-  --lm-font-size-sm: 0.8125rem;
-  --lm-font-size-md: 0.875rem;
-  --lm-font-size-lg: 1rem;
+  --lm-text-scale: 1;
+
+  /* Typography (Geist is bundled, see fonts.css; the system stack is the fallback) */
+  --lm-font-sans: 'Geist', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --lm-font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, 'Cascadia Mono', Consolas, 'Liberation Mono', monospace;
+  --lm-font-size-xs: 0.8125rem;
+  --lm-font-size-sm: 0.875rem;
+  --lm-font-size-md: 0.9375rem;
+  --lm-font-size-lg: 1.0625rem;
   --lm-font-size-xl: 1.25rem;
   --lm-font-size-2xl: 1.5rem;
   --lm-font-weight-regular: 400;
@@ -22,40 +29,46 @@
   --lm-line-height-tight: 1.25;
 
   /* Radii */
-  --lm-radius-sm: 6px;
-  --lm-radius-md: 10px;
-  --lm-radius-lg: 14px;
+  --lm-radius-sm: 0.25rem;
+  --lm-radius-md: 0.375rem;
+  --lm-radius-lg: 0.5rem;
   --lm-radius-pill: 999px;
 
   /* Spacing scale (comfortable density) */
-  --lm-space-1: 4px;
-  --lm-space-2: 8px;
-  --lm-space-3: 12px;
-  --lm-space-4: 16px;
-  --lm-space-5: 20px;
-  --lm-space-6: 24px;
-  --lm-space-8: 32px;
+  --lm-space-1: 0.25rem;
+  --lm-space-2: 0.5rem;
+  --lm-space-3: 0.75rem;
+  --lm-space-4: 1rem;
+  --lm-space-5: 1.25rem;
+  --lm-space-6: 1.5rem;
+  --lm-space-8: 2rem;
 
   /* Controls and layout */
-  --lm-control-height: 36px;
+  --lm-control-height: 2.25rem;
   /* Minimum hit area of controls on touch / phone layouts (drawer). */
   --lm-touch-target: 44px;
   --lm-border-width: 1px;
   --lm-focus-ring-width: 2px;
-  --lm-topbar-height: 60px;
-  --lm-drawer-width: 560px;
+  /* App shell: icon rail and the library folder panel. */
+  --lm-rail-width: 4rem;
+  --lm-folders-width: 18.5rem;
+  /* Quick-view panel beside the library grid (shown from 1280px). */
+  --lm-inspector-width: 26rem;
+  /* Details flyouts (right-hand Sheet, capped at the viewport width): two-column model flyout, one-column recipe drawer. */
+  --lm-drawer-width: 76rem;
+  --lm-recipe-drawer-width: 35rem;
   /* Outer width (including the page gutter) of the centered content pages: PageShell. */
-  --lm-page-max-width: 1180px;
+  --lm-page-max-width: 73.75rem;
   --lm-card-aspect: 2 / 3;
-  --lm-card-gap: 14px;
+  --lm-card-gap: 0.875rem;
   /* Hover/focus zoom of card media (1 disables it); the card itself never moves. */
   --lm-card-zoom: 1.05;
   /* Compact list ("Rows") view of the model libraries: row height (>= --lm-touch-target), thumbnail, row gap. */
-  --lm-row-height: 56px;
-  --lm-row-thumb: 40px;
-  --lm-row-gap: 6px;
+  --lm-row-height: 3.5rem;
+  --lm-row-thumb: 2.5rem;
+  --lm-row-gap: 0.375rem;
   /* Base-model column of a row; longer names end in an ellipsis (full name in the row tooltip). */
-  --lm-row-badge-max-width: 140px;
+  --lm-row-badge-max-width: 8.75rem;
 
   /* Motion */
   --lm-motion-fast: 120ms;
@@ -70,28 +83,64 @@
   --lm-shadow-lg: 0 18px 48px var(--lm-color-shadow);
 }
 
-:root[data-density='compact'] {
-  --lm-space-1: 3px;
-  --lm-space-2: 6px;
-  --lm-space-3: 8px;
-  --lm-space-4: 12px;
-  --lm-space-5: 14px;
-  --lm-space-6: 18px;
-  --lm-space-8: 24px;
-  --lm-control-height: 30px;
-  --lm-topbar-height: 52px;
-  --lm-card-gap: 10px;
-  --lm-row-height: 46px;
-  --lm-row-thumb: 34px;
-  --lm-row-gap: 4px;
-  --lm-font-size-md: 0.8125rem;
+/* Text size setting (S / M / L / XL); M is the default 16px root. */
+:root[data-scale='s'] {
+  --lm-text-scale: 0.875;
 }
 
+:root[data-scale='l'] {
+  --lm-text-scale: 1.125;
+}
+
+:root[data-scale='xl'] {
+  --lm-text-scale: 1.25;
+}
+
+html {
+  font-size: calc(16px * var(--lm-text-scale));
+}
+
+:root[data-density='compact'] {
+  --lm-space-1: 0.1875rem;
+  --lm-space-2: 0.375rem;
+  --lm-space-3: 0.5rem;
+  --lm-space-4: 0.75rem;
+  --lm-space-5: 0.875rem;
+  --lm-space-6: 1.125rem;
+  --lm-space-8: 1.5rem;
+  --lm-control-height: 1.875rem;
+  --lm-card-gap: 0.625rem;
+  --lm-row-height: 2.875rem;
+  --lm-row-thumb: 2.125rem;
+  --lm-row-gap: 0.25rem;
+  --lm-font-size-md: 0.875rem;
+}
+
+/*
+ * Reduced motion: the motion tokens drop to zero (transitions, fades, the
+ * flyout and dialog entrances, hover zoom), and every remaining animation or
+ * transition (skeleton pulse, library primitives, smooth scrolling) stops too.
+ * Spinners keep turning: they are the only sign that work is in progress.
+ */
 @media (prefers-reduced-motion: reduce) {
   :root {
     --lm-motion-fast: 0ms;
     --lm-motion-normal: 0ms;
     --lm-fade-duration: 0ms;
     --lm-card-zoom: 1;
+  }
+
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .animate-spinner {
+    animation-duration: 0.8s !important;
+    animation-iteration-count: infinite !important;
   }
 }

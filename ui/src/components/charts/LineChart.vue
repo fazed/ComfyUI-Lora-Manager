@@ -18,7 +18,7 @@ const innerH = H - PAD.top - PAD.bottom
   <div class="flex flex-col gap-2">
     <ul class="flex flex-wrap gap-3 text-xs text-muted" aria-hidden="true">
       <li v-for="s in chart.series" :key="s.name" class="flex items-center gap-1">
-        <span class="h-[3px] w-[14px] rounded-sm" :class="seriesBg(s.series)"></span>{{ s.name }}
+        <span class="h-[0.1875rem] w-[0.875rem] rounded-sm" :class="seriesBg(s.series)"></span>{{ s.name }}
       </li>
     </ul>
     <svg :viewBox="`0 0 ${W} ${H}`" class="h-auto w-full" aria-hidden="true">

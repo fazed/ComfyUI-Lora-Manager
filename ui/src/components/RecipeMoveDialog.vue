@@ -143,7 +143,7 @@ const rowClass = 'lm-row flex min-h-[30px] cursor-pointer items-center gap-2 px-
         </ul>
       </div>
 
-      <div class="flex justify-end gap-2">
+      <div class="lm-dialog-footer">
         <button type="button" class="lm-btn" :disabled="busy" @click="emit('close')">{{ t('common.cancel') }}</button>
         <button type="submit" class="lm-btn lm-btn--primary" :disabled="!canMove">
           <AppIcon name="folderMove" :size="16" />

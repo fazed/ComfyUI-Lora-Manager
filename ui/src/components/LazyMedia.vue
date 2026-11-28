@@ -7,7 +7,8 @@
  *   caller sizes (classes on this component), so nothing shifts on load.
  * - Loaded: the media fades in (--lm-fade-duration); media that is already
  *   complete when shown (cache) appears at once, without a fade.
- * - Error / no src: the `fallback` slot (default: an image icon); with `retry`
+ * - Error / no src: the `fallback` slot (default: an image icon; `broken` tells
+ *   a failed load from a missing preview); with `retry`
  *   the fallback is a button that loads the media again.
  * - A new `src` (recycled card, next lightbox image) resets the state.
  *
@@ -178,7 +179,8 @@ defineExpose({ element, state })
         <AppIcon name="image" :size="iconSize" />
         <span>{{ t('common.retry') }}</span>
       </button>
-      <slot v-else name="fallback">
+      <!-- `broken`: the media failed to load (as opposed to having no preview at all). -->
+      <slot v-else name="fallback" :broken="state.status === 'error'">
         <AppIcon name="image" :size="iconSize" />
       </slot>
     </span>

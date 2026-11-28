@@ -67,9 +67,11 @@ export function useSendToWorkflow() {
   async function copyLora(item: LoraLike, options: LoraActionOptions = {}): Promise<boolean> {
     await load()
     const words = options.trainedWords ?? item.civitai?.trainedWords ?? []
-    const text = buildLoraCopyText(syntaxFor(item, options.strength), words, !!settings.value?.include_trigger_words)
+    const syntax = syntaxFor(item, options.strength)
+    const text = buildLoraCopyText(syntax, words, !!settings.value?.include_trigger_words)
     const ok = await copyText(text)
-    if (ok) toasts.success(t('workflow.syntaxCopied'))
+    // The include_trigger_words setting adds the words: say so, the copy icon alone means "syntax".
+    if (ok) toasts.success(t(text === syntax ? 'workflow.syntaxCopied' : 'workflow.syntaxWordsCopied'))
     else toasts.error(t('common.copyFailed'))
     return ok
   }

@@ -25,6 +25,10 @@ export interface ActionMenuItem {
   disabled?: boolean
   /** Display-only hint on the right, e.g. "Enter". */
   shortcut?: string
+  /** Caption drawn above the entry; starts a labelled group (with `divider`, below the line). */
+  group?: string
+  /** Opens a submenu with these entries instead of selecting; the entry's own action is never emitted. */
+  children?: ActionMenuItem[]
 }
 
 /** The model actions of the card menu and the drawer's "More actions" menu, in this order. */
@@ -40,9 +44,14 @@ export const MODEL_ITEMS: { action: ModelAction; label: MessageKey; icon: IconNa
   { action: 'delete', label: 'actions.delete', icon: 'trash', danger: true },
 ]
 
-/** The model actions as menu entries; `divider` puts a line above the first one. */
+/** The model actions as menu entries; `divider` puts a line and the "Manage" caption above the first one. */
 export function modelActionItems(divider = false): ActionMenuItem[] {
-  return MODEL_ITEMS.map((entry, index) => ({ ...entry, label: t(entry.label), divider: divider && index === 0 }))
+  return MODEL_ITEMS.map((entry, index) => ({
+    ...entry,
+    label: t(entry.label),
+    divider: divider && index === 0,
+    group: divider && index === 0 ? t('menu.groupManage') : undefined,
+  }))
 }
 
 export interface ItemMenuContext {
@@ -54,15 +63,22 @@ export interface ItemMenuContext {
 }
 
 /**
- * One model: Open, Send / Replace in ComfyUI (when sending is possible), Copy
- * LoRA syntax (LoRAs), Favorite, View on Civitai (with a model id), then the
- * model actions.
+ * One model: Open, a "Send to ComfyUI" submenu with Append / Replace (when
+ * sending is possible), Copy LoRA syntax (LoRAs), Favorite, View on Civitai
+ * (with a model id), then the model actions under a "Manage" caption.
  */
 export function itemMenu(item: ModelItem, ctx: ItemMenuContext): ActionMenuItem[] {
   const entries: ActionMenuItem[] = [{ action: 'open', label: t('menu.open'), icon: 'eye' }]
   if (ctx.canSend) {
-    entries.push({ action: 'send', label: t('detail.sendAppend'), icon: 'send' })
-    entries.push({ action: 'replace', label: t('detail.sendReplace'), icon: 'layers' })
+    entries.push({
+      action: 'sendMenu',
+      label: t('detail.sendAppend'),
+      icon: 'send',
+      children: [
+        { action: 'send', label: t('menu.sendAppend'), icon: 'send' },
+        { action: 'replace', label: t('menu.sendReplace'), icon: 'layers' },
+      ],
+    })
   }
   if (ctx.isLora) entries.push({ action: 'copySyntax', label: t('detail.copySyntax'), icon: 'copy' })
   entries.push({ action: 'favorite', label: t(item.favorite ? 'menu.favoriteRemove' : 'menu.favoriteAdd'), icon: 'star' })
@@ -71,18 +87,31 @@ export function itemMenu(item: ModelItem, ctx: ItemMenuContext): ActionMenuItem[
   return [...entries, ...modelActionItems(true)]
 }
 
-/** The selection: the same bulk actions as the selection bar, delete last. */
+/** The selection: the bulk actions of the selection bar and its "More" menu, delete last. */
 export function selectionMenu(count: number, ctx: { canSend: boolean }): ActionMenuItem[] {
   const disabled = count === 0
   const entries: ActionMenuItem[] = [
     { action: 'move', label: t('selection.move'), icon: 'folderMove' },
     { action: 'tags', label: t('selection.tags'), icon: 'tag' },
+    { action: 'favorite', label: t('selection.favorite'), icon: 'star' },
     { action: 'template', label: t('selection.template'), icon: 'type' },
   ]
-  if (ctx.canSend) entries.push({ action: 'send', label: t('selection.send'), icon: 'send' })
+  if (ctx.canSend) {
+    entries.push({ action: 'send', label: t('selection.send'), icon: 'send' })
+    entries.push({ action: 'copySyntax', label: t('selection.copySyntax'), icon: 'copy' })
+  }
   entries.push({ action: 'copyNames', label: t('selection.copyNames'), icon: 'copy' })
   entries.push({ action: 'delete', label: t('selection.delete'), icon: 'trash', danger: true, divider: true })
   return entries.map((entry) => ({ ...entry, disabled }))
+}
+
+/** Right-click on the grid background: Download, Select all, then the page's Tools entries. */
+export function pageMenu(tools: { id: string; label: string; icon?: IconName }[]): ActionMenuItem[] {
+  return [
+    { action: 'download', label: t('download.open'), icon: 'download' },
+    { action: 'selectAll', label: t('selection.all'), icon: 'checkSquare' },
+    ...tools.map((tool, index) => ({ action: tool.id, label: tool.label, icon: tool.icon ?? ('wrench' as IconName), divider: index === 0 })),
+  ]
 }
 
 /** A folder of the tree ('' = the library root: only a new folder is possible). */
@@ -135,8 +164,10 @@ export function runItemMenuAction(action: string, item: ModelItem, deps: ItemMen
 export interface SelectionMenuDeps {
   move: (items: ModelItem[]) => void
   tags: (items: ModelItem[]) => void
+  favorite: (items: ModelItem[]) => void
   template: (items: ModelItem[]) => void
   send: (items: ModelItem[]) => void
+  copySyntax: (items: ModelItem[]) => void
   copyNames: (items: ModelItem[]) => void
   delete: (items: ModelItem[]) => void
 }

@@ -205,7 +205,7 @@ useRefreshHandler({ run: () => Promise.all([load(true), reloadUsageLists()]).the
 const tagSize: Record<number, string> = { 1: 'text-xs', 2: 'text-sm', 3: 'text-md', 4: 'text-lg', 5: 'text-xl' }
 const insightClass: Record<string, string> = {
   warning: 'border-l-warning bg-warning-soft',
-  info: 'border-l-accent bg-accent-soft',
+  info: 'border-l-info bg-info-soft',
   success: 'border-l-success bg-success-soft',
 }
 const tableClass = 'w-full text-left text-sm [&_th]:py-1 [&_th]:pr-3 [&_th]:font-medium [&_th]:text-muted [&_td]:py-1 [&_td]:pr-3 [&_td]:tabular-nums'
@@ -218,10 +218,10 @@ const tableClass = 'w-full text-left text-sm [&_th]:py-1 [&_th]:pr-3 [&_th]:font
       <StateBlock v-if="loading" kind="loading" />
       <StateBlock v-else-if="error" kind="error" :title="t('stats.loadError')" :message="error" @retry="load" />
       <template v-else>
-        <ul class="grid grid-cols-[repeat(auto-fit,minmax(150px,1fr))] gap-3" :aria-label="t('stats.title')">
-          <li v-for="tile in tiles" :key="tile.label" class="lm-panel flex flex-col gap-1 p-4">
-            <span class="text-xs text-muted">{{ tile.label }}</span>
-            <span class="text-xl font-bold tabular-nums">{{ tile.value }}</span>
+        <ul class="grid grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] gap-3" :aria-label="t('stats.title')">
+          <li v-for="tile in tiles" :key="tile.label" class="lm-panel flex flex-col gap-1 px-4 py-3">
+            <span class="text-sm text-muted">{{ tile.label }}</span>
+            <span class="text-2xl font-bold tracking-tight tabular-nums">{{ tile.value }}</span>
           </li>
         </ul>
 
@@ -279,12 +279,12 @@ const tableClass = 'w-full text-left text-sm [&_th]:py-1 [&_th]:pr-3 [&_th]:font
         <div v-else-if="tab === 'usage'" id="stats-panel-usage" role="tabpanel" aria-labelledby="stats-tab-usage" class="flex flex-col gap-4">
           <ChartCard id="chart-top" :title="t('stats.usageDistribution')" :summary="topAcross.map((i) => `${i.name} ${i.usageCount}`).join(', ')" :table="false">
             <ol v-if="topAcross.length" class="flex flex-col gap-2">
-              <li v-for="item in topAcross" :key="`${item.type}-${item.name}`" class="grid grid-cols-[minmax(120px,35%)_1fr_auto] items-center gap-2 text-sm phone:grid-cols-[minmax(90px,40%)_1fr_auto]">
+              <li v-for="item in topAcross" :key="`${item.type}-${item.name}`" class="grid grid-cols-[minmax(7.5rem,35%)_1fr_4rem] items-center gap-3 text-sm phone:grid-cols-[minmax(5.5rem,40%)_1fr_3rem]">
                 <span class="truncate" :title="item.name">{{ item.name }}</span>
-                <span class="h-[12px] rounded-sm bg-sunken" aria-hidden="true">
+                <span class="h-[0.75rem] rounded-sm bg-sunken" aria-hidden="true">
                   <span class="block h-full rounded-sm" :class="seriesBg(seriesClass(['loras', 'checkpoints', 'embeddings'].indexOf(item.type ?? '')))" :style="{ width: `${barPercent(item.usageCount, topMax)}%` }"></span>
                 </span>
-                <span class="tabular-nums text-muted">{{ item.usageCount }}</span>
+                <span class="text-right tabular-nums text-muted">{{ item.usageCount }}</span>
               </li>
             </ol>
             <p v-else class="text-muted">{{ t('stats.noData') }}</p>
@@ -294,9 +294,9 @@ const tableClass = 'w-full text-left text-sm [&_th]:py-1 [&_th]:pr-3 [&_th]:font
               <h2 :id="`usage-${u.type}`" class="text-md">{{ t(u.title) }}</h2>
               <StateBlock v-if="!lists[u.type].loaded" kind="loading" />
               <p v-else-if="!lists[u.type].items.length" class="text-muted">{{ t('stats.noData') }}</p>
-              <ol v-else class="flex max-h-[480px] flex-col gap-1 overflow-y-auto">
+              <ol v-else class="flex max-h-[30rem] flex-col gap-1 overflow-y-auto">
                 <li v-for="(item, i) in lists[u.type].items" :key="`${item.name}-${i}`" class="flex items-center gap-2 rounded-sm px-1 py-1 hover:bg-sunken">
-                  <LazyMedia :src="item.previewUrl ? withMountPrefix(item.previewUrl) : ''" class="size-[36px] flex-none overflow-hidden rounded-sm bg-sunken" media-class="size-full object-cover" :alt="''" />
+                  <LazyMedia :src="item.previewUrl ? withMountPrefix(item.previewUrl) : ''" class="size-[2.25rem] flex-none overflow-hidden rounded-sm bg-sunken" media-class="size-full object-cover" :alt="''" />
                   <div class="min-w-0 flex-1">
                     <p class="truncate text-sm font-medium" :title="item.name">{{ item.name }}</p>
                     <p class="truncate text-xs text-muted">{{ item.baseModel }} · {{ item.folder || t('stats.root') }}</p>
@@ -364,7 +364,7 @@ const tableClass = 'w-full text-left text-sm [&_th]:py-1 [&_th]:pr-3 [&_th]:font
             <h2 id="largest-title" class="text-md">{{ t('stats.largest') }}</h2>
             <ol v-if="biggest.length" class="flex flex-col gap-1">
               <li v-for="item in biggest" :key="`${item.type}-${item.name}`" class="flex items-center gap-2 text-sm">
-                <span class="size-[10px] flex-none rounded-sm" :class="seriesBg(seriesClass(['loras', 'checkpoints', 'embeddings'].indexOf(item.type)))" aria-hidden="true"></span>
+                <span class="size-[0.625rem] flex-none rounded-sm" :class="seriesBg(seriesClass(['loras', 'checkpoints', 'embeddings'].indexOf(item.type)))" aria-hidden="true"></span>
                 <span class="min-w-0 flex-1 truncate" :title="item.name">{{ item.name }}</span>
                 <span class="max-w-[30%] truncate text-xs text-muted phone:hidden">{{ item.baseModel }}</span>
                 <span class="tabular-nums text-muted">{{ formatBytes(item.size) }}</span>

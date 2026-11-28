@@ -1,18 +1,23 @@
-/* Default dark theme. */
+/*
+ * Default dark theme: black / grey / white with one highlight (accent, white
+ * by default; the user's highlight colour overrides the four accent tokens
+ * inline, see themes/highlight.ts). Hue only where it means something:
+ * danger, success, warning, info.
+ */
 [data-theme='default-dark'] {
   color-scheme: dark;
-  --lm-color-bg: #0f1115;
-  --lm-color-surface: #161a20;
-  --lm-color-elevated: #1d222a;
-  --lm-color-sunken: #0b0d10;
-  --lm-color-border: #272d36;
-  --lm-color-border-strong: #363e4b;
-  --lm-color-text: #e8ebef;
-  --lm-color-muted: #9aa3b0;
-  --lm-color-accent: #8b93ff;
-  --lm-color-accent-hover: #a7adff;
-  --lm-color-accent-soft: rgba(139, 147, 255, 0.16);
-  --lm-color-on-accent: #0c0e14;
+  --lm-color-bg: #0b0b0b;
+  --lm-color-surface: #141414;
+  --lm-color-elevated: #1b1b1b;
+  --lm-color-sunken: #222222;
+  --lm-color-border: #262626;
+  --lm-color-border-strong: #363636;
+  --lm-color-text: #ededed;
+  --lm-color-muted: #a8a8a8;
+  --lm-color-accent: #ffffff;
+  --lm-color-accent-hover: #dcdcdc;
+  --lm-color-accent-soft: rgba(255, 255, 255, 0.16);
+  --lm-color-on-accent: #0b0b0b;
   --lm-color-danger: #f87171;
   --lm-color-danger-soft: rgba(248, 113, 113, 0.14);
   --lm-color-on-danger: #1a0b0b;
@@ -20,24 +25,26 @@
   --lm-color-success-soft: rgba(74, 222, 128, 0.14);
   --lm-color-warning: #fbbf24;
   --lm-color-warning-soft: rgba(251, 191, 36, 0.14);
-  --lm-color-focus: #a7adff;
+  --lm-color-info: #7ab8f5;
+  --lm-color-info-soft: rgba(122, 184, 245, 0.14);
+  --lm-color-focus: #ededed;
   /* Form fields: background, outline (>= 3:1 on every surface), hover, disabled, placeholder. */
-  --lm-color-field: #1f242c;
-  --lm-color-field-hover: #252b34;
-  --lm-color-field-border: #6b7586;
-  --lm-color-field-border-hover: #8a94a5;
-  --lm-color-field-disabled: #191d23;
-  --lm-color-placeholder: #959eab;
+  --lm-color-field: #1c1c1c;
+  --lm-color-field-hover: #232323;
+  --lm-color-field-border: #707070;
+  --lm-color-field-border-hover: #8a8a8a;
+  --lm-color-field-disabled: #181818;
+  --lm-color-placeholder: #9a9a9a;
   --lm-color-overlay: rgba(0, 0, 0, 0.6);
   --lm-color-scrim: rgba(0, 0, 0, 0.72);
   --lm-color-on-scrim: #ffffff;
-  --lm-color-skeleton: #20252d;
-  /* Chart series (Okabe-Ito based, colorblind-safe order). */
-  --lm-color-series-1: #56b4e9;
-  --lm-color-series-2: #e69f00;
-  --lm-color-series-3: #34c39a;
-  --lm-color-series-4: #e3a3cc;
-  --lm-color-series-5: #f0e442;
-  --lm-color-series-6: #f2834a;
-  --lm-color-shadow: rgba(0, 0, 0, 0.45);
+  --lm-color-skeleton: #1f1f1f;
+  /* Chart series: the highlight, then a grey ramp (each >= 3:1 on the panel). */
+  --lm-color-series-1: var(--lm-color-accent);
+  --lm-color-series-2: #d4d4d4;
+  --lm-color-series-3: #b4b4b4;
+  --lm-color-series-4: #969696;
+  --lm-color-series-5: #7c7c7c;
+  --lm-color-series-6: #666666;
+  --lm-color-shadow: rgba(0, 0, 0, 0.5);
 }

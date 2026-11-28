@@ -151,6 +151,35 @@ describe('the token lint itself', () => {
   })
 })
 
+describe('no gradients (flat monochrome surfaces)', () => {
+  /** The lm-switch knob is a circle drawn with radial-gradient: a shape, not a colour gradient. */
+  const ALLOWED = [
+    'radial-gradient(circle, var(--lm-color-muted) 0 7px, transparent 7.5px)',
+    'radial-gradient(circle, var(--lm-color-on-accent) 0 7px, transparent 7.5px)',
+  ]
+  const allFiles = (dir: string): string[] =>
+    readdirSync(dir).flatMap((name) => {
+      const path = join(dir, name)
+      if (statSync(path).isDirectory()) return allFiles(path)
+      return /\.(vue|css|ts)$/.test(name) ? [path] : []
+    })
+
+  it('uses no linear, radial or conic gradient anywhere in src except the switch knob', () => {
+    const found: string[] = []
+    for (const file of allFiles(SRC)) {
+      const text = stripScriptComments(readFileSync(file, 'utf8'))
+      for (const match of text.matchAll(/(?:repeating-)?(?:linear|radial|conic)-gradient\([^;"'`]*?\)(?:[^;"'`]*?\))?/g)) {
+        if (!ALLOWED.includes(match[0])) found.push(`${relative(SRC, file)}: ${match[0]}`)
+      }
+    }
+    expect(found).toEqual([])
+  })
+
+  it('still finds the allow-listed knob', () => {
+    expect(readFileSync(join(SRC, 'styles/app.css'), 'utf8')).toContain(ALLOWED[0])
+  })
+})
+
 describe('card hover never moves the card', () => {
   const read = (path: string) => readFileSync(join(SRC, path), 'utf8')
 

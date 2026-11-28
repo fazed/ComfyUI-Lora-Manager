@@ -44,6 +44,13 @@ import type {
   WorkflowRegistry,
 } from './types'
 import type { UpdateLoraCodeBody } from '@/utils/workflow'
+import type { OpenFolderResult } from './maintenance'
+
+/** Fields the model list's text search looks in (backend `search_<field>`); file and model name are on by default. */
+export const SEARCH_FIELDS = ['filename', 'modelname', 'tags', 'creator', 'triggerWords'] as const
+export type SearchField = (typeof SEARCH_FIELDS)[number]
+export type SearchIn = Record<SearchField, boolean>
+export const DEFAULT_SEARCH_IN: SearchIn = { filename: true, modelname: true, tags: false, creator: false, triggerWords: false }
 
 export interface ModelListQuery {
   page: number
@@ -52,24 +59,49 @@ export interface ModelListQuery {
   search?: string
   folder?: string
   recursive?: boolean
+  /** Fields the text search looks in; absent = the backend default (file and model name). */
+  searchIn?: SearchIn
   baseModels?: string[]
   tags?: string[]
+  tagLogic?: 'any' | 'all'
+  /** Sub-types (LoRA / LoCon / DoRA, checkpoint / diffusion model, ...), from `/model-types`. */
+  modelTypes?: string[]
+  /** Licence flags: null / absent = no filter. */
+  creditRequired?: boolean | null
+  allowSelling?: boolean | null
   favoritesOnly?: boolean
   updateAvailableOnly?: boolean
+  /** First character of the model name (LoRAs only: `first_letter` is parsed by the LoRA routes). */
+  firstLetter?: string
 }
 
+/** Backend parameter names; a parameter is only sent when it differs from the backend default. */
 export function modelListParams(query: ModelListQuery) {
+  const search = query.search?.trim() || undefined
+  const searchIn = search ? query.searchIn : undefined
+  const field = (name: SearchField) => (searchIn && searchIn[name] !== DEFAULT_SEARCH_IN[name] ? String(searchIn[name]) : undefined)
+  const flag = (value: boolean | null | undefined) => (value === null || value === undefined ? undefined : String(value))
   return {
     page: query.page,
     page_size: query.pageSize,
     sort_by: query.sortBy,
-    search: query.search?.trim() || undefined,
+    search,
+    search_filename: field('filename'),
+    search_modelname: field('modelname'),
+    search_tags: field('tags'),
+    search_creator: field('creator'),
+    search_trigger_words: field('triggerWords'),
     folder: query.folder || undefined,
     recursive: query.folder ? String(query.recursive ?? true) : undefined,
     base_model: query.baseModels ?? [],
     tag_include: query.tags ?? [],
+    tag_logic: query.tagLogic === 'all' && (query.tags?.length ?? 0) > 1 ? 'all' : undefined,
+    model_type: query.modelTypes ?? [],
+    credit_required: flag(query.creditRequired),
+    allow_selling_generated_content: flag(query.allowSelling),
     favorites_only: query.favoritesOnly ? 'true' : undefined,
     update_available_only: query.updateAvailableOnly ? 'true' : undefined,
+    first_letter: query.firstLetter || undefined,
   }
 }
 
@@ -90,6 +122,11 @@ export function createModelApi(prefix: ModelPrefix) {
       request<{ base_models: CountEntry[] }>(`${prefix}/base-models`, { query: { limit } }).then((r) => r.base_models ?? []),
     topTags: (limit = 40) =>
       request<{ tags: TagEntry[] }>(`${prefix}/top-tags`, { query: { limit } }).then((r) => r.tags ?? []),
+    /** Sub-types present in the library with their counts (the Model type filter group). */
+    modelTypes: (limit = 20) =>
+      request<{ model_types: { type: string; count: number }[] }>(`${prefix}/model-types`, { query: { limit } }).then(
+        (r) => r.model_types ?? [],
+      ),
     /** Tag autocomplete: case-insensitive substring match, sorted by count. */
     searchTags: (q: string, limit = 8, signal?: AbortSignal) =>
       request<{ tags: TagEntry[] }>(`${prefix}/search-tags`, { query: { q, limit }, signal }).then((r) => r.tags ?? []),
@@ -101,6 +138,8 @@ export function createModelApi(prefix: ModelPrefix) {
      * never sent with `full_rebuild`. Answers the reconcile counts.
      */
     scan: () => request<LibraryScanResponse>(`${prefix}/scan`),
+    /** Full rebuild of the model cache (the classic UI's "Rebuild cache"): walks every root again; answers no counts. */
+    rebuildCache: () => request<LibraryScanResponse>(`${prefix}/scan`, { query: { full_rebuild: 'true' } }),
     folderTree: () =>
       // Empty folders included: a folder created in the panel must be visible to rename or delete it.
       request<{ tree: FolderTree }>(`${prefix}/unified-folder-tree`, { query: { include_empty: 'true' } }).then(
@@ -125,6 +164,12 @@ export function createModelApi(prefix: ModelPrefix) {
       ),
     versions: (modelId: number, signal?: AbortSignal) =>
       request<{ record: ModelUpdateRecord | null }>(`${prefix}/updates/versions/${modelId}`, { signal }).then((r) => r.record ?? null),
+    /** SHA256 of a model scanned without one (checkpoints hash lazily); may take a while for large files. */
+    calculateHash: (filePath: string) =>
+      request<{ sha256?: string }>(`${prefix}/calculate-hash`, { method: 'POST', body: { file_path: filePath } }),
+    /** Shows the file in the file manager of the computer running LoRA Manager (or hands back its path). */
+    openLocation: (filePath: string) =>
+      request<OpenFolderResult>('open-file-location', { method: 'POST', body: { file_path: filePath } }),
     /** Partial metadata update (notes, tags, favorite, ...). */
     saveMetadata: (filePath: string, updates: Record<string, unknown>) =>
       request<{ success: boolean }>(`${prefix}/save-metadata`, {

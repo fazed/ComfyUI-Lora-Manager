@@ -131,7 +131,7 @@ const iconAction = 'lm-btn lm-btn--ghost lm-btn--icon phone:size-touch'
       </label>
       <span v-else class="w-[16px] flex-none phone:hidden" aria-hidden="true"></span>
       <LazyMedia
-        class="lm-thumb h-[88px] w-[66px] overflow-hidden phone:h-[72px] phone:w-[54px]"
+        class="lm-thumb h-[5.5rem] w-[4.125rem] overflow-hidden phone:h-[4.5rem] phone:w-[3.375rem]"
         :media-class="['size-full object-cover', blurred && 'scale-110 blur-[12px]']"
         :src="thumb"
         :alt="t('updates.thumbAlt', { name })"
@@ -185,7 +185,7 @@ const iconAction = 'lm-btn lm-btn--ghost lm-btn--icon phone:size-touch'
             {{ t('updates.whatsNew') }}
           </summary>
           <div class="mt-1 flex flex-col gap-2 rounded-sm bg-sunken p-3">
-            <p v-if="changelog" class="max-h-[240px] overflow-y-auto text-pretty whitespace-pre-line wrap-anywhere">{{ changelog }}</p>
+            <p v-if="changelog" class="max-h-[15rem] overflow-y-auto text-pretty whitespace-pre-line wrap-anywhere">{{ changelog }}</p>
             <div v-if="files.length">
               <p class="text-xs font-medium text-muted">{{ t('updates.files') }}</p>
               <ul class="flex flex-col gap-[2px] text-xs tabular-nums">

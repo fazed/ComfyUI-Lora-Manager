@@ -24,13 +24,18 @@ export const SYSTEM_THEME = 'system'
 export const THEME_STORAGE_KEY = 'lm-ui.theme'
 export const USER_THEME_STORAGE_KEY = 'lm-ui.theme.user'
 export const DENSITY_STORAGE_KEY = 'lm-ui.density'
+/** Highlight choice: a preset id or `#rrggbb` (themes/highlight.ts). */
+export const HIGHLIGHT_STORAGE_KEY = 'lm-ui.highlight'
+/** The resolved accent tokens for both schemes, so the pre-paint script needs no colour maths. */
+export const HIGHLIGHT_VARS_STORAGE_KEY = 'lm-ui.highlight.vars'
+/** Text size: s | m | l | xl (data-scale on <html>). */
+export const SCALE_STORAGE_KEY = 'lm-ui.scale'
 export const DEFAULT_LIGHT_THEME = 'default-light'
 export const DEFAULT_DARK_THEME = 'default-dark'
 
 export const BUILTIN_THEMES: readonly ThemeDefinition[] = [
   { id: DEFAULT_LIGHT_THEME, label: 'Light', scheme: 'light', source: 'builtin', description: 'Default light theme' },
   { id: DEFAULT_DARK_THEME, label: 'Dark', scheme: 'dark', source: 'builtin', description: 'Default dark theme' },
-  { id: 'midnight', label: 'Midnight', scheme: 'dark', source: 'builtin', description: 'Navy surfaces with an amber accent' },
 ]
 
 const USER_THEME_HREF_RE = /^user-themes\/[\w.-]+\.css$/

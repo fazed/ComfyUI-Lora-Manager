@@ -183,6 +183,9 @@ export const recipesApi = {
     request<RematchResponse>(`${recipePath(id)}/rematch`, { method: 'POST', body: { relaxed } }),
 
   // --- Use ------------------------------------------------------------------
+  /** Recipes that use the LoRA with this SHA256 (the model flyout's Recipes tab). */
+  forLora: (hash: string, signal?: AbortSignal) =>
+    request<{ recipes?: RecipeItem[] }>('recipes/for-lora', { query: { hash }, signal }).then((r) => r.recipes ?? []),
   syntax: (id: string) => request<{ syntax?: string }>(`${recipePath(id)}/syntax`).then((r) => r.syntax ?? ''),
   sendWorkflow: (id: string) => request<{ success: boolean; sent?: boolean }>(`${recipePath(id)}/send-workflow`, { method: 'POST' }),
   /** Fire-and-forget "recently opened" stamp (writes the open-stats file only). */

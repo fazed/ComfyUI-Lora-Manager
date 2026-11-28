@@ -14,6 +14,7 @@ import {
   LONG_PRESS_CLICK_SUPPRESS_MS,
   LONG_PRESS_DELAY_MS,
   LONG_PRESS_DISTANCE_PX,
+  cardActivation,
   createPressMenuGuard,
 } from '@/composables/useCardInteractions'
 import ModelRow from '@/components/ModelRow.vue'
@@ -125,6 +126,27 @@ describe('press menu guard', () => {
   })
 })
 
+describe('card activation (quick view)', () => {
+  const click = (detail: number, extra: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean } = {}) => ({ ctrlKey: false, metaKey: false, detail, ...extra })
+
+  it('opens on any click while the quick view is hidden (as before)', () => {
+    for (const detail of [0, 1, 2]) expect(cardActivation(click(detail), false)).toBe('open')
+  })
+
+  it('focuses on a single click and opens on a double-click or Enter while the quick view shows', () => {
+    expect(cardActivation(click(1), false, true)).toBe('focus')
+    expect(cardActivation(click(2), false, true)).toBe('open')
+    expect(cardActivation(click(0), false, true)).toBe('open')
+  })
+
+  it('toggles the selection while one exists or with Ctrl/Cmd or Shift (no mode switch), quick view or not', () => {
+    expect(cardActivation(click(1), true, true)).toBe('toggle')
+    expect(cardActivation(click(1, { ctrlKey: true }), false, true)).toBe('toggle')
+    expect(cardActivation(click(2, { metaKey: true }), false, false)).toBe('toggle')
+    expect(cardActivation(click(1, { shiftKey: true }), false, false)).toBe('toggle')
+  })
+})
+
 function item(overrides: Partial<ModelItem> = {}): ModelItem {
   return { model_name: 'Model A', file_name: 'model-a', file_path: 'D:/loras/model-a.safetensors', folder: '', preview_url: '', base_model: 'SDXL 1.0', tags: [], ...overrides }
 }
@@ -148,6 +170,22 @@ async function touchPress(wrapper: Mounted, ms: number, target = wrapper.get('ar
   ;(target as HTMLElement).click()
   await wrapper.vm.$nextTick()
 }
+
+describe.each([
+  ['ModelRow', ModelRow],
+  ['ModelCard', ModelCard],
+] as const)('%s with the quick view', (_name, component) => {
+  it('emits focus on a single click and open on the double-click', async () => {
+    const wrapper = mount(component as never, { props: { ...modelProps, quickView: true } as never })
+    const primary = wrapper.get('article > button').element
+    primary.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }))
+    expect(wrapper.emitted('focus')).toEqual([[modelProps.item]])
+    expect(wrapper.emitted('open')).toBeUndefined()
+    primary.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 }))
+    expect(wrapper.emitted('open')).toEqual([[modelProps.item]])
+    wrapper.unmount()
+  })
+})
 
 describe.each([
   ['ModelRow', ModelRow, modelProps],

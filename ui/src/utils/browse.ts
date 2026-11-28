@@ -12,8 +12,20 @@ export function unfilteredTotal(count: number, known: number | null, filtered: b
   return filtered && known !== null && known > count ? known : null
 }
 
+/** Which empty state a library shows for zero results, from the keys of its active-view chips. */
+export type EmptyStateKind = 'library' | 'folder' | 'favorites' | 'noMatch'
+
+export function emptyStateKind(chipKeys: string[]): EmptyStateKind {
+  if (!chipKeys.length) return 'library'
+  if (chipKeys.every((key) => key === 'folder' || key === 'recursive')) return 'folder'
+  if (chipKeys.length === 1 && chipKeys[0] === 'fav') return 'favorites'
+  return 'noMatch'
+}
+
 export interface ShortcutEventLike {
   key: string
+  /** Physical key (`KeyA`): Alt+letter on macOS types a symbol in `key`. */
+  code?: string
   ctrlKey?: boolean
   metaKey?: boolean
   altKey?: boolean
@@ -30,23 +42,40 @@ const BLOCKING_TARGETS =
   'input, textarea, select, [contenteditable="true"], dialog[open], [role="dialog"], [role="menu"], [role="listbox"], [role="combobox"]'
 
 /**
- * Whether a bare single-letter shortcut (`f`, `s`) may act: no modifier, not
- * typing in a field, not inside a dialog or menu, and no overlay open.
+ * Whether a bare single-key shortcut (`f`, `b`, `?`) may act: no modifier (Shift
+ * only where it is part of the character, as in `?`), not typing in a field,
+ * not inside a dialog or menu, and no overlay open.
  */
 export function shouldHandleShortcut(event: ShortcutEventLike, key: string, overlayOpen: boolean): boolean {
   if (overlayOpen || event.defaultPrevented || event.isComposing || event.repeat) return false
-  if (event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return false
+  if (event.ctrlKey || event.metaKey || event.altKey || (event.shiftKey && /^[a-z]$/.test(key))) return false
   if (event.key.toLowerCase() !== key) return false
   const target = event.target as { closest?: (selector: string) => unknown } | null | undefined
   return !target?.closest?.(BLOCKING_TARGETS)
+}
+
+/** Alt+A to Alt+Z (alphabet bar): the upper-case letter, or null when the event is not one or may not act. */
+export function altLetter(event: ShortcutEventLike, overlayOpen: boolean): string | null {
+  if (overlayOpen || event.defaultPrevented || event.isComposing || event.repeat) return null
+  if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return null
+  const letter = /^Key([A-Z])$/.exec(event.code ?? '')?.[1]
+  const target = event.target as { closest?: (selector: string) => unknown } | null | undefined
+  return letter && !target?.closest?.(BLOCKING_TARGETS) ? letter : null
 }
 
 /** What a browse page remembers while another tab is shown. */
 export interface BrowseViewState {
   search: string
   folder: string
+  /** Alphabet bar letter ('' = all). */
+  letter: string
   baseModels: string[]
   tags: string[]
+  tagLogic: 'any' | 'all'
+  modelTypes: string[]
+  /** Licence filters: null = any. */
+  creditRequired: boolean | null
+  allowSelling: boolean | null
   favoritesOnly: boolean
   updatesOnly: boolean
   /** Recipes: the "missing LoRAs only" toggle. */
@@ -61,7 +90,7 @@ export interface BrowseViewState {
 const views = new Map<string, BrowseViewState>()
 
 export function saveBrowseView(prefix: string, view: BrowseViewState): void {
-  views.set(prefix, { ...view, baseModels: [...view.baseModels], tags: [...view.tags] })
+  views.set(prefix, { ...view, baseModels: [...view.baseModels], tags: [...view.tags], modelTypes: [...view.modelTypes] })
 }
 
 export function takeBrowseView(prefix: string): BrowseViewState | null {

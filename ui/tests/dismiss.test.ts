@@ -1,68 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h, nextTick, ref } from 'vue'
 import { mount, type VueWrapper } from '@vue/test-utils'
-import {
-  createBackdropGuard,
-  createLayerStack,
-  isBackdropHit,
-  isOutsideAll,
-  isOutsideRect,
-  type PointerLike,
-} from '@/utils/dismiss'
+import { createLayerStack, isOutsideAll } from '@/utils/dismiss'
 import { dismissStack, useDismissLayer } from '@/composables/useDismiss'
-
-const backdropEl = {} as EventTarget
-const childEl = {} as EventTarget
-const box = { left: 100, top: 100, right: 300, bottom: 300 }
-
-function ev(target: EventTarget, x = 0, y = 0, currentTarget: EventTarget = backdropEl): PointerLike {
-  return { target, currentTarget, clientX: x, clientY: y }
-}
-
-describe('backdrop hit', () => {
-  it('counts only the backdrop element itself', () => {
-    expect(isBackdropHit(ev(backdropEl))).toBe(true)
-    expect(isBackdropHit(ev(childEl))).toBe(false)
-  })
-
-  it('with a dialog box, requires the point to be outside it', () => {
-    expect(isOutsideRect(50, 200, box)).toBe(true)
-    expect(isOutsideRect(200, 200, box)).toBe(false)
-    expect(isBackdropHit(ev(backdropEl, 50, 50), box)).toBe(true)
-    // The dialog's own padding: target is the dialog, but inside its box.
-    expect(isBackdropHit(ev(backdropEl, 110, 110), box)).toBe(false)
-  })
-})
-
-describe('createBackdropGuard', () => {
-  it('closes when pointerdown and click both land on the backdrop', () => {
-    const guard = createBackdropGuard()
-    guard.pointerdown(ev(backdropEl))
-    expect(guard.click(ev(backdropEl))).toBe(true)
-  })
-
-  it('ignores a drag or text selection that started inside the content', () => {
-    const guard = createBackdropGuard()
-    guard.pointerdown(ev(childEl))
-    // The browser may retarget the click to the common ancestor (the backdrop).
-    expect(guard.click(ev(backdropEl))).toBe(false)
-  })
-
-  it('ignores a click on the content and needs a fresh pointerdown each time', () => {
-    const guard = createBackdropGuard()
-    guard.pointerdown(ev(backdropEl))
-    expect(guard.click(ev(childEl))).toBe(false)
-    expect(guard.click(ev(backdropEl))).toBe(false)
-  })
-
-  it('uses the content rect for native dialogs', () => {
-    const guard = createBackdropGuard(() => box)
-    guard.pointerdown(ev(backdropEl, 150, 150))
-    expect(guard.click(ev(backdropEl, 150, 150))).toBe(false)
-    guard.pointerdown(ev(backdropEl, 10, 10))
-    expect(guard.click(ev(backdropEl, 10, 10))).toBe(true)
-  })
-})
 
 describe('isOutsideAll', () => {
   it('checks every root and ignores missing ones', () => {
@@ -82,8 +22,8 @@ describe('createLayerStack', () => {
     const stack = createLayerStack()
     const drawer = vi.fn()
     const lightbox = vi.fn()
-    stack.push({ id: 1, escape: true, close: drawer })
-    stack.push({ id: 2, escape: true, close: lightbox })
+    stack.push({ id: 1, close: drawer })
+    stack.push({ id: 2, close: lightbox })
     expect(stack.isTop(2)).toBe(true)
     expect(stack.escape()).toBe(true)
     expect(lightbox).toHaveBeenCalledWith('escape')
@@ -92,20 +32,11 @@ describe('createLayerStack', () => {
     expect(stack.isTop(1)).toBe(true)
   })
 
-  it('leaves Escape to a native dialog on top (escape: false)', () => {
-    const stack = createLayerStack()
-    const drawer = vi.fn()
-    stack.push({ id: 1, escape: true, close: drawer })
-    stack.push({ id: 2, escape: false, close: vi.fn() })
-    expect(stack.escape()).toBe(false)
-    expect(drawer).not.toHaveBeenCalled()
-  })
-
   it('re-pushing a layer moves it to the top without duplicates', () => {
     const stack = createLayerStack()
-    stack.push({ id: 1, escape: true, close: vi.fn() })
-    stack.push({ id: 2, escape: true, close: vi.fn() })
-    stack.push({ id: 1, escape: true, close: vi.fn() })
+    stack.push({ id: 1, close: vi.fn() })
+    stack.push({ id: 2, close: vi.fn() })
+    stack.push({ id: 1, close: vi.fn() })
     expect(stack.size()).toBe(2)
     expect(stack.isTop(1)).toBe(true)
   })
@@ -121,11 +52,10 @@ describe('useDismissLayer', () => {
   function layer(open: { value: boolean }, close: (reason: string) => void, withOutside = false) {
     const root = document.createElement('div')
     document.body.appendChild(root)
-    let api: ReturnType<typeof useDismissLayer> | undefined
     const wrapper = mount(
       defineComponent({
         setup() {
-          api = useDismissLayer({
+          useDismissLayer({
             active: () => open.value,
             close,
             outside: withOutside ? () => [root] : undefined,
@@ -135,7 +65,7 @@ describe('useDismissLayer', () => {
       }),
     )
     wrappers.push(wrapper)
-    return { root, api: api! }
+    return { root }
   }
 
   function escape(): void {
@@ -175,16 +105,26 @@ describe('useDismissLayer', () => {
     expect(popoverClose).toHaveBeenCalledWith('outside')
   })
 
-  it('backdrop handlers close the topmost layer only', async () => {
-    const lowerClose = vi.fn()
-    const upperClose = vi.fn()
-    const lower = layer(ref(true), lowerClose)
-    layer(ref(true), upperClose)
+  it('stands back while a Reka layer (components/ui/) is open above it', async () => {
+    const drawerClose = vi.fn()
+    layer(ref(true), drawerClose, true)
     await nextTick()
-    const target = document.createElement('div')
-    lower.api.backdrop.pointerdown(ev(target, 0, 0, target))
-    lower.api.backdrop.click(ev(target, 0, 0, target))
-    expect(lowerClose).not.toHaveBeenCalled()
+    // A Reka dialog / popover / menu marks its content with data-state="open" and handles Escape itself.
+    const reka = document.createElement('div')
+    reka.setAttribute('role', 'dialog')
+    reka.setAttribute('data-state', 'open')
+    document.body.appendChild(reka)
+    escape()
+    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true }))
+    expect(drawerClose).not.toHaveBeenCalled()
+    for (const role of ['alertdialog', 'menu']) {
+      reka.setAttribute('role', role)
+      escape()
+      expect(drawerClose).not.toHaveBeenCalled()
+    }
+    reka.setAttribute('data-state', 'closed')
+    escape()
+    expect(drawerClose).toHaveBeenCalledWith('escape')
   })
 
   it('unregisters on unmount', () => {

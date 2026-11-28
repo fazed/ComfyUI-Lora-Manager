@@ -25,7 +25,7 @@ const xPos = (exp: number) => ((exp - chart.value.xMin) / Math.max(1, chart.valu
   <div class="flex flex-col gap-2">
     <ul class="flex flex-wrap gap-3 text-xs text-muted" aria-hidden="true">
       <li v-for="(name, i) in Object.values(names)" :key="name" class="flex items-center gap-1">
-        <span class="size-[10px] rounded-pill" :class="seriesBg(`series-${i + 1}`)"></span>{{ name }}
+        <span class="size-[0.625rem] rounded-pill" :class="seriesBg(`series-${i + 1}`)"></span>{{ name }}
       </li>
     </ul>
     <svg :viewBox="`0 0 ${W} ${H}`" class="h-auto w-full" aria-hidden="true">

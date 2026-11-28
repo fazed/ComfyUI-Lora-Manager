@@ -14,6 +14,7 @@ import {
   positionLabel,
   resolveTab,
   scrollTopToReveal,
+  shouldHandleDeleteKey,
   shouldHandleNavKey,
   type NavKeyContext,
   type NavKeyEvent,
@@ -69,17 +70,34 @@ function key(init: Partial<NavKeyEvent> & { key: string }): NavKeyEvent {
 }
 const open: NavKeyContext = { topmost: true, dialogOpen: false, menuOpen: false }
 
+describe('shouldHandleDeleteKey', () => {
+  it('takes a plain Delete outside text fields only', () => {
+    expect(shouldHandleDeleteKey(key({ key: 'Delete' }), open)).toBe(true)
+    expect(shouldHandleDeleteKey(key({ key: 'Delete', target: { tagName: 'TEXTAREA' } }), open)).toBe(false)
+    expect(shouldHandleDeleteKey(key({ key: 'Delete', shiftKey: true }), open)).toBe(false)
+    expect(shouldHandleDeleteKey(key({ key: 'Backspace' }), open)).toBe(false)
+  })
+
+  it('stays quiet under a menu, a dialog or another layer', () => {
+    expect(shouldHandleDeleteKey(key({ key: 'Delete' }), { ...open, menuOpen: true })).toBe(false)
+    expect(shouldHandleDeleteKey(key({ key: 'Delete' }), { ...open, dialogOpen: true })).toBe(false)
+    expect(shouldHandleDeleteKey(key({ key: 'Delete' }), { ...open, topmost: false })).toBe(false)
+  })
+})
+
 describe('shouldHandleNavKey', () => {
-  it('maps Alt+Arrow and plain j/k', () => {
+  it('maps plain and Alt arrows and plain j/k', () => {
+    expect(shouldHandleNavKey(key({ key: 'ArrowLeft' }), open)).toBe('prev')
+    expect(shouldHandleNavKey(key({ key: 'ArrowRight' }), open)).toBe('next')
     expect(shouldHandleNavKey(key({ key: 'ArrowLeft', altKey: true }), open)).toBe('prev')
     expect(shouldHandleNavKey(key({ key: 'ArrowRight', altKey: true }), open)).toBe('next')
     expect(shouldHandleNavKey(key({ key: 'k' }), open)).toBe('prev')
     expect(shouldHandleNavKey(key({ key: 'j' }), open)).toBe('next')
   })
 
-  it('ignores unrelated keys and a plain arrow (the tab list owns those)', () => {
-    expect(shouldHandleNavKey(key({ key: 'ArrowRight' }), open)).toBeNull()
+  it('ignores unrelated keys and an arrow the tab list already handled', () => {
     expect(shouldHandleNavKey(key({ key: 'a' }), open)).toBeNull()
+    expect(shouldHandleNavKey(key({ key: 'ArrowRight', defaultPrevented: true }), open)).toBeNull()
   })
 
   it('requires exactly the right modifiers', () => {
@@ -95,6 +113,7 @@ describe('shouldHandleNavKey', () => {
     for (const tagName of ['INPUT', 'TEXTAREA', 'SELECT']) {
       expect(shouldHandleNavKey(key({ key: 'j', target: { tagName } }), open)).toBeNull()
       expect(shouldHandleNavKey(key({ key: 'ArrowRight', altKey: true, target: { tagName } }), open)).toBeNull()
+      expect(shouldHandleNavKey(key({ key: 'ArrowRight', target: { tagName } }), open)).toBeNull()
     }
     expect(shouldHandleNavKey(key({ key: 'j', target: { tagName: 'DIV', isContentEditable: true } }), open)).toBeNull()
   })
@@ -120,31 +139,38 @@ describe('shouldHandleNavKey', () => {
 })
 
 describe('tab persistence', () => {
-  it('knows the three tabs', () => {
-    expect([...DRAWER_TABS]).toEqual(['overview', 'description', 'versions'])
+  it('knows the four tabs of the flyout', () => {
+    expect([...DRAWER_TABS]).toEqual(['examples', 'description', 'versions', 'recipes'])
   })
 
-  it('validates the stored value and falls back to Overview', () => {
+  it('validates the stored value and falls back to Examples', () => {
     expect(parseStoredTab('description')).toBe('description')
     expect(parseStoredTab('versions')).toBe('versions')
-    expect(parseStoredTab('examples')).toBe('overview')
-    expect(parseStoredTab('')).toBe('overview')
-    expect(parseStoredTab(null)).toBe('overview')
-    expect(parseStoredTab(undefined)).toBe('overview')
-    expect(parseStoredTab(3)).toBe('overview')
-    expect(parseStoredTab('"versions"')).toBe('overview')
+    expect(parseStoredTab('recipes')).toBe('recipes')
+    expect(parseStoredTab('examples')).toBe('examples')
+    expect(parseStoredTab('')).toBe('examples')
+    expect(parseStoredTab(null)).toBe('examples')
+    expect(parseStoredTab(undefined)).toBe('examples')
+    expect(parseStoredTab(3)).toBe('examples')
+    expect(parseStoredTab('"versions"')).toBe('examples')
   })
 
-  it('offers Versions only for a model with a Civitai model id', () => {
-    expect(availableTabs({ civitai: { modelId: 5 } })).toEqual(['overview', 'description', 'versions'])
-    expect(availableTabs({ civitai: null })).toEqual(['overview', 'description'])
-    expect(availableTabs({})).toEqual(['overview', 'description'])
+  it('maps a stored Overview (the former first tab) to Examples', () => {
+    expect(parseStoredTab('overview')).toBe('examples')
   })
 
-  it('uses the preference when available, else Overview, without touching the preference', () => {
-    expect(resolveTab('versions', ['overview', 'description', 'versions'])).toBe('versions')
-    expect(resolveTab('versions', ['overview', 'description'])).toBe('overview')
-    expect(resolveTab('description', ['overview', 'description'])).toBe('description')
+  it('offers Versions only with a Civitai model id and Recipes only for LoRAs', () => {
+    expect(availableTabs({ civitai: { modelId: 5 } }, true)).toEqual(['examples', 'description', 'versions', 'recipes'])
+    expect(availableTabs({ civitai: { modelId: 5 } })).toEqual(['examples', 'description', 'versions'])
+    expect(availableTabs({ civitai: null }, true)).toEqual(['examples', 'description', 'recipes'])
+    expect(availableTabs({})).toEqual(['examples', 'description'])
+  })
+
+  it('uses the preference when available, else Examples, without touching the preference', () => {
+    expect(resolveTab('versions', ['examples', 'description', 'versions'])).toBe('versions')
+    expect(resolveTab('versions', ['examples', 'description'])).toBe('examples')
+    expect(resolveTab('recipes', ['examples', 'description', 'versions'])).toBe('examples')
+    expect(resolveTab('description', ['examples', 'description'])).toBe('description')
   })
 })
 

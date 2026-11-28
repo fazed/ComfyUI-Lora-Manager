@@ -1,25 +1,31 @@
 <script setup lang="ts">
 /**
- * Recipe card: preview, base model, LoRA availability (all in library /
- * N missing / N unavailable), favorite, "Send to ComfyUI" (Shift = replace)
- * and the action menu. Same interaction model as ModelCard.
+ * Recipe card: the image box (base model, favourite state, the hover action
+ * bar with Favorite, "Send to ComfyUI" (Shift = replace) and the action menu,
+ * the mature-content "Show" overlay) and two fixed lines below it: the title
+ * and the LoRA availability (all in library / N missing / N unavailable).
+ * Same interaction model and text-block height rule as ModelCard
+ * (the page passes `cardTextHeight(2)` to the grid).
  */
 import { computed, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
 import LazyMedia from './LazyMedia.vue'
 import type { RecipeItem } from '@/api/types'
 import { useCardInteractions, type MenuPoint } from '@/composables/useCardInteractions'
+import type { CardFit } from '@/composables/useLibraryFilters'
 import { withMountPrefix } from '@/utils/basePath'
+import { isBlurred } from '@/utils/mature'
 import { availability } from '@/utils/recipes'
 import { t } from '@/i18n'
 
-const props = defineProps<{ item: RecipeItem; selectionMode: boolean; selected: boolean; blurMature: boolean }>()
+const props = defineProps<{ item: RecipeItem; selectionMode: boolean; selected: boolean; blurMature: boolean; fit?: CardFit; revealed?: boolean }>()
 const emit = defineEmits<{
   open: [item: RecipeItem]
   /** shift = Shift+click: select a range from the last toggled card (Ctrl/Cmd+click also toggles outside selection mode). */
   'toggle-select': [item: RecipeItem, shift: boolean]
   'toggle-favorite': [item: RecipeItem]
   send: [item: RecipeItem, replace: boolean]
+  reveal: [item: RecipeItem]
   menu: [item: RecipeItem, point: MenuPoint, opener: HTMLElement | null]
 }>()
 
@@ -27,8 +33,12 @@ const media = ref<InstanceType<typeof LazyMedia> | null>(null)
 const video = computed(() => (media.value?.element instanceof HTMLVideoElement ? media.value.element : null))
 const previewUrl = computed(() => (props.item.file_url ? withMountPrefix(props.item.file_url) : ''))
 const title = computed(() => props.item.title || props.item.id)
-const blurred = computed(() => props.blurMature && (props.item.preview_nsfw_level ?? 0) >= 4)
-const mediaClass = computed(() => ['lm-zoom-media size-full object-cover', blurred.value && 'scale-110 blur-[18px]'])
+const blurred = computed(() => isBlurred(props.item.preview_nsfw_level, props.blurMature) && !props.revealed)
+const mediaClass = computed(() => [
+  'lm-zoom-media size-full',
+  props.fit === 'contain' ? 'object-contain' : 'object-cover',
+  blurred.value && 'scale-110 blur-[18px]',
+])
 const status = computed(() => availability(props.item.loras ?? []))
 const statusLabel = computed(() => {
   const value = status.value
@@ -37,14 +47,11 @@ const statusLabel = computed(() => {
   if (value.deleted) return t('recipes.card.unavailable', { count: value.deleted, total: value.total })
   return t('recipes.loras', { count: value.total })
 })
-const statusClass = computed(() =>
-  status.value.missing ? 'bg-warning text-on-danger' : status.value.deleted ? 'bg-danger text-on-danger' : 'bg-scrim text-on-scrim',
-)
+const statusClass = computed(() => (status.value.missing ? 'text-warning' : status.value.deleted ? 'text-danger' : 'text-muted'))
 
-const pillClass =
-  'inline-flex min-w-0 max-w-[60%] shrink items-center gap-[2px] overflow-hidden rounded-pill px-2 py-px text-xs font-medium text-ellipsis whitespace-nowrap'
-const roundClass = 'inline-grid size-[28px] cursor-pointer place-items-center rounded-pill'
-const revealClass = 'opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100 touch:opacity-100'
+const actionClass =
+  'pointer-events-auto inline-grid size-[1.875rem] cursor-pointer place-items-center rounded-sm text-on-scrim hover:bg-accent hover:text-on-accent'
+const lineClass = 'h-[1.25rem] truncate leading-[1.25rem]'
 
 const root = ref<HTMLElement | null>(null)
 const { activate, openMenuFromButton, openContextMenu } = useCardInteractions<RecipeItem>({
@@ -60,41 +67,74 @@ const { activate, openMenuFromButton, openContextMenu } = useCardInteractions<Re
 <template>
   <article
     ref="root"
-    class="group select-none [-webkit-touch-callout:none] lm-zoom-host relative h-full overflow-hidden rounded-md hairline bg-sunken transition-[box-shadow,border-color]"
-    :class="selected ? 'border-accent ring-selected' : 'border-border shadow-sm hover:shadow-md'"
+    class="group relative flex h-full flex-col select-none [-webkit-touch-callout:none] lm-zoom-host"
     @mouseenter="video?.play().catch(() => undefined)"
     @mouseleave="video?.pause()"
     @contextmenu="openContextMenu"
   >
     <button
       type="button"
-      class="absolute inset-0 z-2 cursor-pointer rounded-[inherit] focus-visible:-outline-offset-3"
+      class="absolute inset-0 z-2 cursor-pointer rounded-md focus-visible:-outline-offset-3"
       :aria-label="selectionMode ? t('card.selectItem', { name: title }) : t('recipes.card.open', { name: title })"
       :aria-pressed="selectionMode ? selected : undefined"
       @click="activate"
     ></button>
-    <LazyMedia ref="media" class="absolute! inset-0" :src="previewUrl" :media-class="mediaClass" loop>
-      <template #fallback>
-        <span class="flex flex-col items-center justify-center gap-2 text-xs">
-          <AppIcon name="book" :size="32" />
-          <span>{{ t('card.noPreview') }}</span>
+    <div
+      class="relative min-h-0 flex-1 overflow-hidden rounded-md hairline bg-sunken transition-[box-shadow,border-color]"
+      :class="selected ? 'border-accent ring-selected' : 'border-border group-hover:border-border-strong'"
+    >
+      <LazyMedia ref="media" class="absolute! inset-0" :src="previewUrl" :media-class="mediaClass" loop>
+        <template #fallback="{ broken }">
+          <span class="flex flex-col items-center justify-center gap-2 px-2 text-center text-xs" :data-preview="broken ? 'broken' : 'none'">
+            <AppIcon :name="broken ? 'alert' : 'book'" :size="32" />
+            <span>{{ broken ? t('card.previewBroken') : t('card.noPreview') }}</span>
+          </span>
+        </template>
+      </LazyMedia>
+      <div v-if="blurred" class="pointer-events-none absolute inset-0 z-3 grid place-content-center justify-items-center gap-2 p-2 text-center text-sm text-on-scrim">
+        <span class="rounded-sm bg-scrim px-2 py-px">{{ t('card.mature') }}</span>
+        <button type="button" class="lm-btn lm-btn--sm pointer-events-auto" :aria-label="`${t('card.show')}: ${title}`" @click.stop="emit('reveal', item)">
+          <AppIcon name="eye" :size="14" />{{ t('card.show') }}
+        </button>
+      </div>
+      <div class="pointer-events-none absolute inset-x-2 top-2 z-3 flex items-start gap-1">
+        <span
+          v-if="selectionMode"
+          class="inline-grid size-[1.375rem] flex-none place-items-center rounded-sm border-2"
+          :class="selected ? 'border-accent bg-accent text-on-accent' : 'border-on-scrim bg-scrim text-on-scrim'"
+          aria-hidden="true"
+        >
+          <AppIcon v-if="selected" name="check" :size="14" />
         </span>
-      </template>
-    </LazyMedia>
-    <div class="pointer-events-none absolute inset-x-2 top-2 z-3 flex items-start gap-1">
-      <span v-if="item.base_model" :class="[pillClass, 'bg-scrim text-on-scrim']">{{ item.base_model }}</span>
-      <span class="flex-1"></span>
-      <span
-        v-if="selectionMode"
-        :class="[roundClass, 'pointer-events-none border-2', selected ? 'border-accent bg-accent text-on-accent' : 'border-on-scrim bg-scrim text-on-scrim']"
-        aria-hidden="true"
+        <span v-if="item.base_model" class="min-w-0 truncate rounded-sm bg-scrim px-2 py-px text-xs font-medium text-on-scrim">{{ item.base_model }}</span>
+        <span
+          v-if="item.favorite"
+          class="inline-grid size-[1.5rem] flex-none place-items-center rounded-sm bg-scrim text-on-scrim"
+          role="img"
+          :aria-label="t('card.favorite')"
+          :title="t('card.favorite')"
+        >
+          <AppIcon name="star" :size="13" filled />
+        </span>
+      </div>
+      <div
+        v-if="!selectionMode"
+        class="pointer-events-none absolute inset-x-0 bottom-0 z-3 flex items-center gap-[0.125rem] bg-scrim p-1 opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100 touch:opacity-100"
       >
-        <AppIcon v-if="selected" name="check" :size="14" />
-      </span>
-      <template v-else>
         <button
           type="button"
-          :class="[roundClass, 'pointer-events-auto bg-scrim text-on-scrim transition-opacity hover:bg-accent hover:text-on-accent phone:hidden', revealClass]"
+          :class="actionClass"
+          :aria-label="t('detail.toggleFavorite')"
+          :title="t('detail.toggleFavorite')"
+          :aria-pressed="!!item.favorite"
+          @click.stop="emit('toggle-favorite', item)"
+        >
+          <AppIcon name="star" :size="16" :filled="!!item.favorite" />
+        </button>
+        <span class="flex-1" aria-hidden="true"></span>
+        <button
+          type="button"
+          :class="[actionClass, 'phone:hidden']"
           :aria-label="t('recipes.send')"
           :title="t('recipes.sendHint')"
           @click.stop="emit('send', item, $event.shiftKey)"
@@ -103,16 +143,7 @@ const { activate, openMenuFromButton, openContextMenu } = useCardInteractions<Re
         </button>
         <button
           type="button"
-          :class="[roundClass, 'pointer-events-auto bg-scrim transition-opacity', item.favorite ? 'text-warning' : ['text-on-scrim', revealClass]]"
-          :aria-label="t('detail.toggleFavorite')"
-          :aria-pressed="!!item.favorite"
-          @click.stop="emit('toggle-favorite', item)"
-        >
-          <AppIcon name="star" :size="16" :filled="!!item.favorite" />
-        </button>
-        <button
-          type="button"
-          :class="[roundClass, 'pointer-events-auto bg-scrim text-on-scrim transition-opacity hover:bg-accent hover:text-on-accent', revealClass]"
+          :class="actionClass"
           :aria-label="t('actions.menu', { name: title })"
           :title="t('actions.menuTitle')"
           aria-haspopup="menu"
@@ -120,15 +151,13 @@ const { activate, openMenuFromButton, openContextMenu } = useCardInteractions<Re
         >
           <AppIcon name="more" :size="16" />
         </button>
-      </template>
-    </div>
-    <div class="pointer-events-none absolute inset-x-0 bottom-0 z-1 bg-scrim-fade px-3 pt-10 pb-3 text-on-scrim">
-      <p class="line-clamp-2 text-sm font-bold" :title="title">{{ title }}</p>
-      <div class="mt-1 flex items-center gap-1">
-        <span :class="[pillClass, 'max-w-full', statusClass]">
-          <AppIcon v-if="status.missing || status.deleted" name="alert" :size="12" />{{ statusLabel }}
-        </span>
       </div>
+    </div>
+    <div class="pointer-events-none flex-none px-[0.125rem] pt-[0.5rem]">
+      <p :class="[lineClass, 'text-sm font-medium']">{{ title }}</p>
+      <p :class="[lineClass, 'flex items-center gap-1 text-xs', statusClass]">
+        <AppIcon v-if="status.missing || status.deleted" name="alert" :size="12" />{{ statusLabel }}
+      </p>
     </div>
   </article>
 </template>

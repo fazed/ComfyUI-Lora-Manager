@@ -6,15 +6,14 @@
  * restore, download missing), generation data, tags and details. File
  * actions (rename, move, delete) are dialogs on the recipes page.
  */
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useEventListener } from '@vueuse/core'
+import { computed, onMounted, ref, watch } from 'vue'
 import AppIcon from './AppIcon.vue'
 import GenerationDetails from './GenerationDetails.vue'
 import LazyMedia from './LazyMedia.vue'
 import RecipeReconnectForm from './RecipeReconnectForm.vue'
+import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet'
 import { recipesApi } from '@/api/recipes'
 import type { RecipeItem } from '@/api/types'
-import { useDismissLayer } from '@/composables/useDismiss'
 import { copyText, useToasts } from '@/composables/useFeedback'
 import type { RecipeActions } from '@/composables/useRecipeActions'
 import { withMountPrefix } from '@/utils/basePath'
@@ -43,7 +42,6 @@ const reconnecting = ref<number | 'checkpoint' | null>(null)
 const busy = ref<string | null>(null)
 const tagsExpanded = ref(false)
 const newTag = ref('')
-const panel = ref<HTMLElement | null>(null)
 const closeButton = ref<HTMLButtonElement | null>(null)
 
 /** List fields win: they carry the latest edits (favorite, title, reconnects); the detail adds the rest. */
@@ -164,54 +162,35 @@ function libraryLink(prefix: 'loras' | 'checkpoints', path: string) {
   return { path: `/${prefix}`, query: { open: path.replace(/\\/g, '/') } }
 }
 
-// Escape / backdrop close only while the drawer is the topmost overlay.
-const { isTopmost, backdrop } = useDismissLayer({ active: () => true, close: () => emit('close') })
-
-function onKey(event: KeyboardEvent): void {
-  if (!isTopmost() || document.querySelector('dialog[open]')) return
-  if (event.key === 'Tab' && panel.value) {
-    const focusable = panel.value.querySelectorAll<HTMLElement>(
-      'a[href], button:not([disabled]), input:not([disabled]), textarea, select, [tabindex]:not([tabindex="-1"])',
-    )
-    if (!focusable.length) return
-    const first = focusable[0]
-    const last = focusable[focusable.length - 1]
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault()
-      last.focus()
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault()
-      first.focus()
-    }
-  }
+// The Reka UI Sheet traps focus, closes on Escape or an outside click and returns focus to the opener.
+function focusClose(event: Event): void {
+  event.preventDefault()
+  closeButton.value?.focus()
 }
 
-let previousFocus: HTMLElement | null = null
-onMounted(async () => {
-  previousFocus = document.activeElement as HTMLElement | null
+onMounted(() => {
   void loadDetail()
   // "Recently opened" sort, like the classic modal (writes the open-stats file only).
   void recipesApi.markOpened(props.item.id).catch(() => undefined)
-  await nextTick()
-  closeButton.value?.focus()
 })
-onBeforeUnmount(() => previousFocus?.focus?.())
-useEventListener(document, 'keydown', onKey)
 </script>
 
 <template>
-  <div class="fixed inset-0 z-60 flex animate-fade-in justify-end bg-overlay" @pointerdown="backdrop.pointerdown" @click="backdrop.click">
-    <aside
-      ref="panel"
-      class="flex h-full w-[min(var(--lm-drawer-width),100vw)] animate-slide-in flex-col hairline-l border-border bg-elevated shadow-lg"
-      role="dialog"
+  <Sheet :open="true" @update:open="(open) => open || emit('close')">
+    <SheetContent
+      side="right"
+      class="w-[min(var(--lm-recipe-drawer-width),100vw)]"
       aria-modal="true"
       aria-labelledby="recipe-drawer-title"
+      :aria-describedby="undefined"
+      @open-auto-focus="focusClose"
     >
       <header class="flex items-start gap-2 px-5 pt-5 pb-3 phone:px-4">
         <div class="min-w-0 flex-1">
           <p class="lm-overline tracking-[0.06em]">{{ t('recipes.detail.title') }}</p>
-          <h2 id="recipe-drawer-title" class="mt-1 mb-2 text-xl wrap-anywhere">{{ title }}</h2>
+          <SheetTitle as-child class="mt-1 mb-2 text-xl wrap-anywhere">
+            <h2 id="recipe-drawer-title">{{ title }}</h2>
+          </SheetTitle>
           <div class="flex flex-wrap gap-1">
             <span v-if="recipe.base_model" class="lm-badge lm-badge--accent">{{ recipe.base_model }}</span>
             <span v-if="status.total" :class="status.missing ? 'lm-badge lm-badge--warning' : status.deleted ? 'lm-badge lm-badge--danger' : 'lm-badge lm-badge--success'">
@@ -233,7 +212,7 @@ useEventListener(document, 'keydown', onKey)
         <button
           type="button"
           class="lm-btn lm-btn--ghost lm-btn--icon"
-          :class="{ 'text-warning': recipe.favorite }"
+          :class="{ 'text-accent': recipe.favorite }"
           :aria-label="t('detail.toggleFavorite')"
           :aria-pressed="!!recipe.favorite"
           @click="actions.toggleFavorite(recipe)"
@@ -340,7 +319,7 @@ useEventListener(document, 'keydown', onKey)
           <p v-if="!loras.length" class="text-sm text-muted">{{ t('recipes.detail.noLoras') }}</p>
           <ul v-else class="flex flex-col gap-2">
             <li v-for="lora in loras" :key="lora.index">
-              <div :class="[rowClass, lora.state === 'library' ? 'border-border' : lora.state === 'missing' ? 'border-warning bg-warning-soft' : lora.state === 'deleted' ? 'border-danger bg-danger-soft' : 'border-border opacity-70']">
+              <div :class="[rowClass, lora.state === 'library' ? 'border-border' : lora.state === 'missing' ? 'border-warning bg-warning-soft' : lora.state === 'deleted' ? 'border-danger bg-danger-soft' : 'border-border text-muted']">
                 <LazyMedia class="size-[48px] flex-none overflow-hidden rounded-sm bg-sunken" media-class="size-full object-cover" :src="lora.previewUrl ? withMountPrefix(lora.previewUrl) : ''" :icon-size="18" />
                 <div class="flex min-w-0 flex-1 flex-col">
                   <span class="line-clamp-2 font-medium wrap-anywhere" :title="lora.name">{{ lora.name }}</span>
@@ -470,6 +449,6 @@ useEventListener(document, 'keydown', onKey)
           </dl>
         </section>
       </div>
-    </aside>
-  </div>
+    </SheetContent>
+  </Sheet>
 </template>

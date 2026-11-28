@@ -275,6 +275,16 @@ async function load(): Promise<void> {
   if (target.fieldKey || target.cardId) await reveal(target.tab, target)
 }
 
+// A deep link while the page is already open (command palette): show its target too.
+watch(
+  () => route.hash,
+  (hash) => {
+    if (!hash || !draft.value) return
+    const target = resolveSettingsLocation(tabs, SETTINGS_SECTIONS, { param: routeTab.value, hash, stored: storedTab.value })
+    if (target.fieldKey || target.cardId) void reveal(target.tab, target)
+  },
+)
+
 onMounted(() => {
   loadRoots()
   // Canonical URL right away (/settings -> /settings/<tab>), keeping a deep-link hash for load().
@@ -305,14 +315,14 @@ const nightly = computed(() => server.value?.update_channel === 'nightly')
         <a :href="classicUrl">{{ t('common.openClassic') }} <AppIcon name="external" :size="12" /></a>
       </template>
       <template #actions>
-        <div class="relative w-[300px] phone:w-auto phone:min-w-0 phone:flex-1">
+        <div class="relative w-[18.75rem] phone:w-auto phone:min-w-0 phone:flex-1">
           <label class="sr-only" for="settings-filter">{{ t('set.searchShortcut') }}</label>
           <AppIcon name="search" :size="16" class="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-muted" />
           <input
             id="settings-filter"
             ref="searchInput"
             v-model="query"
-            class="lm-input pr-[40px] pl-[calc(var(--lm-space-3)*2+16px)] [&::-webkit-search-cancel-button]:appearance-none"
+            class="lm-input pr-[2.5rem] pl-[calc(var(--lm-space-3)*2+16px)] [&::-webkit-search-cancel-button]:appearance-none"
             type="search"
             autocomplete="off"
             :placeholder="t('set.search')"
@@ -325,9 +335,9 @@ const nightly = computed(() => server.value?.update_channel === 'nightly')
         </div>
       </template>
 
-      <div class="grid flex-1 grid-cols-[220px_minmax(0,1fr)] content-start items-start gap-6 tablet:grid-cols-1 tablet:gap-4">
+      <div class="grid flex-1 grid-cols-[13.75rem_minmax(0,1fr)] content-start items-start gap-6 tablet:grid-cols-1 tablet:gap-4">
         <!-- Tabs: sticky vertical list on wide screens, horizontal strip below the tablet breakpoint -->
-        <div class="sticky top-0 z-10 self-start bg-page tablet:-mx-6 tablet:px-6 tablet:py-2 tablet:hairline-b tablet:border-border phone:-mx-4 phone:px-4">
+        <div class="sticky top-0 z-10 self-start hairline-r border-border bg-page pr-3 tablet:-mx-6 tablet:border-r-0 tablet:px-6 tablet:py-2 tablet:hairline-b phone:-mx-4 phone:px-4">
           <SettingsTabList :tabs="tabs" :active="activeId" :orientation="narrow ? 'horizontal' : 'vertical'" :changes="changeCounts" :matches="searching ? search.counts : null" @select="selectTab" />
         </div>
 
@@ -369,7 +379,7 @@ const nightly = computed(() => server.value?.update_channel === 'nightly')
           <div v-else-if="!draft && !loadError" class="flex flex-col gap-4" role="status" aria-busy="true">
             <span class="sr-only">{{ t('set.loadingSettings') }}</span>
             <div v-for="n in 2" :key="n" class="lm-panel flex flex-col gap-4 p-5" aria-hidden="true">
-              <div class="lm-skeleton h-[18px] w-[180px] rounded-sm"></div>
+              <div class="lm-skeleton h-[18px] w-[11.25rem] rounded-sm"></div>
               <div v-for="row in 3" :key="row" class="grid grid-cols-[minmax(0,2fr)_minmax(0,3fr)] gap-6 tablet:grid-cols-1">
                 <div class="lm-skeleton h-[14px] w-3/4 rounded-sm"></div>
                 <div class="lm-skeleton h-control rounded-sm"></div>
@@ -396,7 +406,7 @@ const nightly = computed(() => server.value?.update_channel === 'nightly')
               v-for="card in activeTab.cards"
               :id="cardDomId(card.id)"
               :key="card.id"
-              class="lm-panel scroll-mt-[calc(var(--lm-topbar-height)+var(--lm-space-6))] overflow-hidden shadow-sm transition-colors duration-(--lm-motion-normal)"
+              class="lm-panel scroll-mt-8 tablet:scroll-mt-[calc(var(--lm-control-height)+var(--lm-space-8)*2)] overflow-hidden transition-colors duration-(--lm-motion-normal)"
               :class="[card.tone === 'danger' ? 'border-l-[3px] border-l-danger' : '', highlight === `card:${card.id}` ? 'bg-accent-soft' : '']"
               :aria-labelledby="`${cardDomId(card.id)}-title`"
             >

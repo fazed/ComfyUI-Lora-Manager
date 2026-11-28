@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError, apiUrl, request, setFetch } from '@/api/http'
-import { createModelApi, downloadsApi, modelListParams } from '@/api/endpoints'
+import { createModelApi, DEFAULT_SEARCH_IN, downloadsApi, modelListParams } from '@/api/endpoints'
 import { setBasePathsForTesting } from '@/utils/basePath'
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -25,6 +25,12 @@ describe('http client', () => {
     expect(apiUrl('loras/list', { page: 1, base_model: ['A', 'B'], empty: '' })).toBe(
       '/comfy/api/lm/loras/list?page=1&base_model=A&base_model=B',
     )
+  })
+
+  it('asks the scan endpoint for a full rebuild (Tools > Rebuild cache)', async () => {
+    fetchMock.mockResolvedValue(jsonResponse({ success: true }))
+    await createModelApi('loras').rebuildCache()
+    expect(fetchMock.mock.calls[0][0]).toMatch(/\/api\/lm\/loras\/scan\?full_rebuild=true$/)
   })
 
   it('returns parsed JSON on success', async () => {
@@ -113,9 +119,43 @@ describe('modelListParams', () => {
       recursive: 'true',
       base_model: ['Illustrious'],
       tag_include: ['style'],
+      model_type: [],
       favorites_only: 'true',
       update_available_only: undefined,
     })
+  })
+
+  it('sends the search fields, tag logic, model types, licence flags and letter only when they differ from the backend default', () => {
+    const defaults = modelListParams({ page: 1, pageSize: 20, search: 'x', searchIn: { ...DEFAULT_SEARCH_IN }, tags: ['a', 'b'], tagLogic: 'any' })
+    for (const key of ['search_filename', 'search_modelname', 'search_tags', 'search_creator', 'search_trigger_words', 'tag_logic', 'credit_required', 'allow_selling_generated_content', 'first_letter'] as const) {
+      expect(defaults[key]).toBeUndefined()
+    }
+    const params = modelListParams({
+      page: 1,
+      pageSize: 20,
+      search: 'x',
+      searchIn: { filename: false, modelname: true, tags: true, creator: true, triggerWords: true },
+      tags: ['a', 'b'],
+      tagLogic: 'all',
+      modelTypes: ['LoCon', 'DoRA'],
+      creditRequired: false,
+      allowSelling: true,
+      firstLetter: 'B',
+    })
+    expect(params).toMatchObject({
+      search_filename: 'false',
+      search_tags: 'true',
+      search_creator: 'true',
+      search_trigger_words: 'true',
+      tag_logic: 'all',
+      model_type: ['LoCon', 'DoRA'],
+      credit_required: 'false',
+      allow_selling_generated_content: 'true',
+      first_letter: 'B',
+    })
+    expect(params.search_modelname).toBeUndefined()
+    // Without a search text the search fields are not sent at all.
+    expect(modelListParams({ page: 1, pageSize: 20, searchIn: { ...DEFAULT_SEARCH_IN, creator: true } }).search_creator).toBeUndefined()
   })
 
   it('omits empty filters', () => {

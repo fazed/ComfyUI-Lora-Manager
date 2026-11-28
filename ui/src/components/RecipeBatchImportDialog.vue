@@ -100,7 +100,7 @@ const STATUS_CLASS: Record<string, string> = {
         <label class="flex items-center gap-2 text-sm"><input v-model="skipNoMetadata" class="lm-check" type="checkbox" />{{ t('recipes.batch.skipNoMetadata') }}</label>
         <p class="lm-hint">{{ t('recipes.batch.hint') }}</p>
         <p class="lm-error-text" role="alert">{{ error ?? '' }}</p>
-        <div class="flex justify-end gap-2">
+        <div class="lm-dialog-footer">
           <button type="button" class="lm-btn" @click="emit('close')">{{ t('common.cancel') }}</button>
           <button type="button" class="lm-btn lm-btn--primary" :disabled="!parsed.items.length || starting" @click="start">
             <AppIcon name="download" :size="16" />{{ t('recipes.batch.start', { count: parsed.items.length }) }}
@@ -127,7 +127,7 @@ const STATUS_CLASS: Record<string, string> = {
           </li>
         </ul>
         <p class="lm-error-text" role="alert">{{ error ?? '' }}</p>
-        <div class="flex justify-end gap-2">
+        <div class="lm-dialog-footer">
           <button v-if="running" type="button" class="lm-btn lm-btn--danger" @click="cancel">{{ t('recipes.batch.cancel') }}</button>
           <button type="button" class="lm-btn" @click="emit('close')">{{ running ? t('recipes.batch.hide') : t('common.close') }}</button>
         </div>

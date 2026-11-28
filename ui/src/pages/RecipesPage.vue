@@ -11,7 +11,8 @@ import { useEventListener, useTimeoutFn } from '@vueuse/core'
 import AppIcon from '@/components/AppIcon.vue'
 import BaseModelQuickFilter from '@/components/BaseModelQuickFilter.vue'
 import DownloadDialog from '@/components/DownloadDialog.vue'
-import FolderTree from '@/components/FolderTree.vue'
+import FolderBreadcrumb from '@/components/FolderBreadcrumb.vue'
+import FolderPanel from '@/components/FolderPanel.vue'
 import InputDialog from '@/components/InputDialog.vue'
 import type { MenuEntry } from '@/components/MenuButton.vue'
 import ModelActionMenu, { type ActionMenuItem } from '@/components/ModelActionMenu.vue'
@@ -26,7 +27,7 @@ import LibrarySelectionBar from '@/components/LibrarySelectionBar.vue'
 import LibraryToolbar from '@/components/LibraryToolbar.vue'
 import StateBlock from '@/components/StateBlock.vue'
 import VirtualGrid from '@/components/VirtualGrid.vue'
-import type { VirtualGridExposed } from '@/utils/gridLayout'
+import { cardTextHeight, type VirtualGridExposed } from '@/utils/gridLayout'
 import { recipesApi } from '@/api/recipes'
 import type { CountEntry, FolderTree as FolderTreeData, RecipeItem, TagEntry } from '@/api/types'
 import type { SortOption } from '@/config/libraries'
@@ -41,12 +42,16 @@ import { scanBeforeRefresh } from '@/composables/useLibraryScan'
 import { systemApi } from '@/api/maintenance'
 import { refreshInPlace } from '@/utils/refreshList'
 import { useLibraryFilters } from '@/composables/useLibraryFilters'
+import { usePageActions } from '@/composables/usePageActions'
+import { usePageStatus } from '@/composables/usePageStatus'
+import { SHORTCUTS } from '@/config/shortcuts'
+import { rekaLayerOpen } from '@/utils/dismiss'
 import { recipeTitle, useRecipeActions } from '@/composables/useRecipeActions'
 import { clearBrowseView, RESTORE_MAX_ITEMS, saveBrowseView, takeBrowseView, unfilteredTotal, type BrowseViewState } from '@/utils/browse'
 import { hiddenSelectedCount, invertSelection, pruneSelection, selectRange } from '@/utils/modelActions'
 import { missingLoraTargets, missingLorasInput, parseTagInput } from '@/utils/recipes'
 import type { SuggestOption } from '@/utils/suggest'
-import { t, type MessageKey } from '@/i18n'
+import { t } from '@/i18n'
 
 const PAGE_SIZE = 60
 const SORTS: SortOption[] = [
@@ -71,16 +76,13 @@ const deepLinked = route.query.q !== undefined || route.query.open !== undefined
 if (deepLinked) clearBrowseView('recipes')
 const restored = takeBrowseView('recipes')
 if (restored) {
-  state.search = restored.search
-  state.folder = restored.folder
-  state.baseModels = [...restored.baseModels]
-  state.tags = [...restored.tags]
-  state.favoritesOnly = restored.favoritesOnly
+  filters.restore(restored)
   missingOnly.value = restored.missingOnly
 }
 const folders = useFolderPanel('recipes')
 const showFolders = folders.open
-const foldersPanel = ref<HTMLElement | null>(null)
+const folderPanel = ref<InstanceType<typeof FolderPanel> | null>(null)
+const foldersPanel = () => folderPanel.value?.root ?? null
 const toolbar = ref<InstanceType<typeof LibraryToolbar> | null>(null)
 const foldersToggle = () => toolbar.value?.foldersToggle ?? null
 useDismissLayer({
@@ -89,7 +91,7 @@ useDismissLayer({
     folders.set(false)
     if (reason === 'escape') foldersToggle()?.focus()
   },
-  outside: () => [foldersPanel.value, foldersToggle()],
+  outside: () => [foldersPanel(), foldersToggle()],
 })
 
 const list = useInfiniteList<RecipeItem>((page, signal) =>
@@ -100,6 +102,7 @@ const list = useInfiniteList<RecipeItem>((page, signal) =>
       sortBy: filters.sort.value,
       search: state.search,
       folder: state.folder,
+      recursive: state.recursive,
       baseModels: state.baseModels,
       tags: state.tags,
       favoritesOnly: state.favoritesOnly,
@@ -118,6 +121,18 @@ const openItem = ref<RecipeItem | null>(null)
 const selectionMode = ref(false)
 const selected = ref<Set<string>>(new Set())
 const blurMature = computed(() => !!settings.value?.blur_mature_content)
+/** Recipe cards show two lines under the image (title, LoRA availability). */
+const RECIPE_CARD_EXTRA = cardTextHeight(2)
+const cardAspect = computed(() => (filters.shape.value === 'square' ? 1 : undefined))
+
+/** Mature previews the user revealed on this visit ("Show" on a blurred card). */
+const revealed = ref<Set<string>>(new Set())
+
+function toggleReveal(item: RecipeItem): void {
+  const next = new Set(revealed.value)
+  if (!next.delete(item.id)) next.add(item.id)
+  revealed.value = next
+}
 
 const chips = computed(() => [
   ...filters.chips.value,
@@ -125,12 +140,17 @@ const chips = computed(() => [
 ])
 const panelCount = computed(() => filters.panelCount.value + (missingOnly.value ? 1 : 0))
 const filterGroups = computed<FilterGroup[]>(() => [
-  // The quick-filter row already offers the base models: do not repeat the group.
-  { field: 'tags' as const, title: 'library.tags' as MessageKey, entries: topTags.value.map((entry) => ({ name: entry.tag, count: entry.count })) },
+  { field: 'baseModels', title: 'library.baseModels', entries: baseModels.value },
+  { field: 'tags', title: 'library.tags', entries: topTags.value.map((entry) => ({ name: entry.tag, count: entry.count })) },
 ])
 
 function clearAll(): void {
   filters.clear()
+  missingOnly.value = false
+}
+
+function clearPanel(): void {
+  filters.clearPanel()
   missingOnly.value = false
 }
 
@@ -176,14 +196,11 @@ async function restoreScroll(view: BrowseViewState): Promise<void> {
   grid.value?.scrollTo(view.scrollTop)
 }
 
+usePageStatus(() => ({ count: countText.value, selected: selected.value.size }))
+
 onBeforeUnmount(() => {
   saveBrowseView('recipes', {
-    search: state.search,
-    folder: state.folder,
-    baseModels: state.baseModels,
-    tags: state.tags,
-    favoritesOnly: state.favoritesOnly,
-    updatesOnly: false,
+    ...filters.browseFilters(),
     missingOnly: missingOnly.value,
     scrollTop: grid.value?.scrollOffset() ?? 0,
     loadedCount: list.items.value.length,
@@ -325,11 +342,13 @@ const loadedKeys = () => list.items.value.map((item) => item.id)
 const hiddenSelected = computed(() => hiddenSelectedCount(selected.value, loadedKeys()))
 const selectedItems = computed(() => list.items.value.filter((item) => selected.value.has(item.id)))
 
+// Ctrl/Cmd+A selects every loaded recipe and shows the bulk bar (not inside text fields, menus or dialogs).
 useEventListener(document, 'keydown', (event: KeyboardEvent) => {
-  if (!selectionMode.value || !(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'a') return
+  if (!(event.ctrlKey || event.metaKey) || event.altKey || event.key.toLowerCase() !== 'a' || !list.items.value.length) return
   const target = event.target as HTMLElement | null
-  if (target?.closest('input, textarea, select, [contenteditable="true"], dialog[open]') || openItem.value) return
+  if (target?.closest('input, textarea, select, [contenteditable="true"], dialog[open], [role="dialog"]') || openItem.value || rekaLayerOpen()) return
   event.preventDefault()
+  selectionMode.value = true
   selected.value = new Set(loadedKeys())
 })
 
@@ -351,6 +370,14 @@ function runTool(id: string): void {
   if (id === 'batch') batchOpen.value = true
   else if (id === 'duplicates') duplicatesOpen.value = true
 }
+
+// Command palette: the toolbar's actions on this page.
+usePageActions(() => [
+  { id: 'import', label: t('recipes.import.open'), icon: 'plus', run: () => (importOpen.value = true) },
+  { id: 'select', label: t('library.select'), icon: 'checkSquare', shortcut: SHORTCUTS.select.keys[0], run: () => setSelectionMode(true) },
+  { id: 'folders', label: t('palette.action.toggleFolders'), icon: 'folder', run: () => folders.toggle() },
+  ...toolItems.value.map((item) => ({ id: item.id, label: item.label, icon: item.icon ?? 'wrench', run: () => runTool(item.id) })),
+])
 
 const MENU_ITEMS = computed<ActionMenuItem[]>(() => [
   { action: 'send', label: t('recipes.send'), icon: 'send' },
@@ -415,31 +442,27 @@ function filterByTag(tag: string): void {
 
 <template>
   <div class="flex min-h-0 flex-1">
-    <aside
+    <FolderPanel
       v-show="showFolders"
       id="folders-recipes"
-      ref="foldersPanel"
-      class="w-[240px] flex-none overflow-y-auto hairline-r border-border bg-surface px-3 py-4 narrow:absolute narrow:inset-y-0 narrow:left-0 narrow:z-20 narrow:w-[min(300px,85vw)] narrow:shadow-lg"
-      :aria-label="t('library.folders')"
-    >
-      <div class="mb-2 flex items-center justify-between">
-        <h2 class="lm-overline text-sm">{{ t('library.folders') }}</h2>
-        <button type="button" class="lm-btn lm-btn--ghost lm-btn--icon lm-btn--sm" :aria-label="t('library.hideFolders')" :title="t('library.hideFolders')" @click="folders.set(false)">
-          <AppIcon name="close" :size="14" />
-        </button>
-      </div>
-      <button type="button" class="lm-row flex h-[30px] w-full cursor-pointer items-center gap-2 px-2 text-sm" :class="{ 'is-selected': !state.folder }" @click="state.folder = ''">
-        <AppIcon name="grid" :size="15" />{{ t('library.allFolders') }}
-      </button>
-      <FolderTree :tree="tree" :selected="state.folder" @select="selectFolder" />
-    </aside>
+      ref="folderPanel"
+      v-model:recursive="state.recursive"
+      :tree="tree"
+      :selected="state.folder"
+      @select="selectFolder"
+      @close="folders.set(false)"
+    />
 
-    <section class="flex min-h-0 min-w-0 flex-1 flex-col">
+    <section class="relative flex min-h-0 min-w-0 flex-1 flex-col">
       <LibraryToolbar
         ref="toolbar"
         v-model:search="searchText"
         v-model:sort="filters.sort.value"
         v-model:card-size="filters.cardSize.value"
+        v-model:quick-row="filters.quickRow.value"
+        v-model:shape="filters.shape.value"
+        v-model:fit="filters.fit.value"
+        quick-row-option
         :title="t('recipes.title')"
         :count-text="countText"
         search-id="recipe-search"
@@ -451,7 +474,6 @@ function filterByTag(tag: string): void {
         :sort-options="SORTS"
         folders-id="folders-recipes"
         :folders-open="showFolders"
-        :folder-active="!!state.folder"
         :filter-count="panelCount"
         :chips="chips"
         :selection-mode="selectionMode"
@@ -463,11 +485,15 @@ function filterByTag(tag: string): void {
         @toggle-select="setSelectionMode(!selectionMode)"
         @tool="runTool"
         @clear-filters="clearAll"
+        @clear-panel="clearPanel"
       >
         <template #leading>
           <button type="button" class="lm-btn lm-btn--primary flex-none phone:min-h-touch" @click="importOpen = true">
             <AppIcon name="plus" :size="16" />{{ t('recipes.import.open') }}
           </button>
+        </template>
+        <template #context>
+          <FolderBreadcrumb :section="t('nav.recipes')" :folder="state.folder" :tree="tree" @select="state.folder = $event" />
         </template>
         <template #quick>
           <BaseModelQuickFilter
@@ -484,31 +510,6 @@ function filterByTag(tag: string): void {
             <label><input v-model="state.favoritesOnly" class="accent-accent" type="checkbox" /> {{ t('library.favoritesOnly') }}</label>
             <label><input v-model="missingOnly" class="accent-accent" type="checkbox" /> {{ t('recipes.filter.missingOnly') }}</label>
           </LibraryFilterPanel>
-        </template>
-        <template #selection>
-          <LibrarySelectionBar
-            :count="selected.size"
-            :hidden="hiddenSelected"
-            :has-items="!!list.items.value.length"
-            :hint="`${t('recipes.selection.hint')} ${t('selection.rangeHint')}`"
-            @all="selected = new Set(loadedKeys())"
-            @none="selected = new Set()"
-            @invert="selected = invertSelection(selected, loadedKeys())"
-            @done="setSelectionMode(false)"
-          >
-            <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="moveTargets = selectedItems">
-              <AppIcon name="folderMove" :size="14" />{{ t('selection.move') }}
-            </button>
-            <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="tagTargets = selectedItems">
-              <AppIcon name="tag" :size="14" />{{ t('selection.tags') }}
-            </button>
-            <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="downloadMissing(selectedItems)">
-              <AppIcon name="download" :size="14" />{{ t('recipes.missing.downloadShort') }}
-            </button>
-            <button type="button" class="lm-btn lm-btn--sm lm-btn--danger" :disabled="!selected.size" @click="actions.deleteRecipes(selectedItems)">
-              <AppIcon name="trash" :size="14" />{{ t('selection.delete') }}
-            </button>
-          </LibrarySelectionBar>
         </template>
       </LibraryToolbar>
 
@@ -530,6 +531,9 @@ function filterByTag(tag: string): void {
         :items="list.items.value"
         :item-key="(item: RecipeItem) => item.id"
         :min-item-width="filters.cardSize.value"
+        :class="{ 'pb-[5rem]!': selectionMode }"
+        :aspect="cardAspect"
+        :extra-height="RECIPE_CARD_EXTRA"
         :label="t('recipes.title')"
         @reach-end="list.loadMore()"
       >
@@ -539,7 +543,10 @@ function filterByTag(tag: string): void {
             :selection-mode="selectionMode"
             :selected="selected.has(item.id)"
             :blur-mature="blurMature"
+            :fit="filters.fit.value"
+            :revealed="revealed.has(item.id)"
             @open="openItem = $event"
+            @reveal="toggleReveal"
             @send="(recipe, replace) => actions.sendToComfy(recipe, replace ? 'replace' : 'append')"
             @toggle-select="toggleSelect"
             @toggle-favorite="actions.toggleFavorite"
@@ -557,6 +564,30 @@ function filterByTag(tag: string): void {
           </p>
         </template>
       </VirtualGrid>
+      <LibrarySelectionBar
+        v-if="selectionMode"
+        :count="selected.size"
+        :hidden="hiddenSelected"
+        :has-items="!!list.items.value.length"
+        :hint="`${t('recipes.selection.hint')} ${t('selection.rangeHint')}`"
+        @all="selected = new Set(loadedKeys())"
+        @none="selected = new Set()"
+        @invert="selected = invertSelection(selected, loadedKeys())"
+        @done="setSelectionMode(false)"
+      >
+        <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="moveTargets = selectedItems">
+          <AppIcon name="folderMove" :size="14" />{{ t('selection.move') }}
+        </button>
+        <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="tagTargets = selectedItems">
+          <AppIcon name="tag" :size="14" />{{ t('selection.tags') }}
+        </button>
+        <button type="button" class="lm-btn lm-btn--sm" :disabled="!selected.size" @click="downloadMissing(selectedItems)">
+          <AppIcon name="download" :size="14" />{{ t('recipes.missing.downloadShort') }}
+        </button>
+        <button type="button" class="lm-btn lm-btn--sm lm-btn--danger" :disabled="!selected.size" @click="actions.deleteRecipes(selectedItems)">
+          <AppIcon name="trash" :size="14" />{{ t('selection.delete') }}
+        </button>
+      </LibrarySelectionBar>
     </section>
 
     <RecipeDrawer

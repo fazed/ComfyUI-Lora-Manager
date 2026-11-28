@@ -107,7 +107,7 @@ async function save(): Promise<void> {
       </fieldset>
 
       <p class="lm-error-text" role="alert">{{ error ?? '' }}</p>
-      <div class="flex justify-end gap-2">
+      <div class="lm-dialog-footer">
         <button type="button" class="lm-btn" :disabled="busy" @click="emit('close')">{{ t('common.cancel') }}</button>
         <button type="submit" class="lm-btn lm-btn--primary" :disabled="!canSave">
           <AppIcon :name="mode === 'rating' ? 'shield' : 'image'" :size="16" />

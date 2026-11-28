@@ -129,7 +129,7 @@ async function deleteSelected(): Promise<void> {
           </li>
         </ul>
       </section>
-      <div class="sticky bottom-0 -mx-5 -mb-5 flex items-center justify-end gap-2 hairline-t border-border bg-elevated px-5 py-3">
+      <div class="lm-dialog-footer">
         <span class="text-sm text-muted tabular-nums">{{ t('library.selected', { count: selectedRecipes.length }) }}</span>
         <button type="button" class="lm-btn" :disabled="busy" @click="emit('close')">{{ t('common.close') }}</button>
         <button type="button" class="lm-btn lm-btn--danger" :disabled="busy || !selectedRecipes.length" @click="deleteSelected">

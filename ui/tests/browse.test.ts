@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { effectiveMinWidth, gridColumns } from '@/utils/gridLayout'
 import {
+  altLetter,
   clearBrowseView,
   saveBrowseView,
   shouldHandleShortcut,
@@ -68,6 +69,19 @@ describe('shouldHandleShortcut', () => {
     expect(shouldHandleShortcut({ key: 'f', repeat: true, target: body }, 'f', false)).toBe(false)
     expect(shouldHandleShortcut({ key: 'f', isComposing: true, target: body }, 'f', false)).toBe(false)
   })
+  it('accepts Shift only where it is part of the character (?)', () => {
+    expect(shouldHandleShortcut({ key: '?', shiftKey: true, target: body }, '?', false)).toBe(true)
+    expect(shouldHandleShortcut({ key: '?', shiftKey: true, ctrlKey: true, target: body }, '?', false)).toBe(false)
+    expect(shouldHandleShortcut({ key: 'B', shiftKey: true, target: body }, 'b', false)).toBe(false)
+  })
+  it('reads Alt+letter from the physical key (macOS types a symbol)', () => {
+    expect(altLetter({ key: '∫', code: 'KeyB', altKey: true, target: body }, false)).toBe('B')
+    expect(altLetter({ key: 'b', code: 'KeyB', target: body }, false)).toBeNull()
+    expect(altLetter({ key: 'b', code: 'KeyB', altKey: true, ctrlKey: true, target: body }, false)).toBeNull()
+    expect(altLetter({ key: '1', code: 'Digit1', altKey: true, target: body }, false)).toBeNull()
+    expect(altLetter({ key: 'b', code: 'KeyB', altKey: true, target: field }, false)).toBeNull()
+    expect(altLetter({ key: 'b', code: 'KeyB', altKey: true, target: body }, true)).toBeNull()
+  })
   it('ignores typing targets, containers that own keys and open overlays', () => {
     expect(shouldHandleShortcut({ key: 'f', target: field }, 'f', false)).toBe(false)
     expect(shouldHandleShortcut({ key: 'f', target: body }, 'f', true)).toBe(false)
@@ -79,8 +93,13 @@ describe('browse view store', () => {
   const view: BrowseViewState = {
     search: 'x',
     folder: 'a/b',
+    letter: '',
     baseModels: ['SDXL'],
     tags: ['t'],
+    tagLogic: 'any',
+    modelTypes: [],
+    creditRequired: null,
+    allowSelling: null,
     favoritesOnly: true,
     updatesOnly: false,
     missingOnly: false,

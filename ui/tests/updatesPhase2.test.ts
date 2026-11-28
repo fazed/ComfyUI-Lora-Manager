@@ -7,7 +7,7 @@
  * to the file, classification chip). Every backend call is mocked.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
+import { DOMWrapper, flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { setFetch } from '@/api/http'
 import { createModelApi, updatesApi } from '@/api/endpoints'
@@ -31,9 +31,6 @@ import {
 import { useConfirm, useToasts } from '@/composables/useFeedback'
 import { resetUpdatesSummaryForTesting } from '@/composables/useUpdates'
 import { ALWAYS_KEEP_KEY, resetReplaceChoiceForTesting } from '@/composables/useReplaceChoice'
-import { installDialogStub } from './dialogStub'
-
-installDialogStub()
 import UpdatesPage from '@/pages/UpdatesPage.vue'
 import UpdateRow from '@/components/UpdateRow.vue'
 import ModelDrawer from '@/components/ModelDrawer.vue'
@@ -427,10 +424,13 @@ describe('UpdateRow phase 2', () => {
 
   it('offers Ignore this version / Ignore model in a menu', async () => {
     const row = await mountRow()
-    await button(row, 'Ignore').trigger('click')
-    const items = row.findAll('[role="menuitem"]')
-    expect(items.map((i) => i.text())).toEqual(['Ignore this version', 'Ignore model'])
-    await items[1].trigger('click')
+    // The menu (Reka DropdownMenu) opens from the keyboard or a pointerdown and is teleported to the body.
+    await button(row, 'Ignore').trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    const items = [...document.body.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+    expect(items.map((i) => i.textContent?.trim())).toEqual(['Ignore this version', 'Ignore model'])
+    items[1].click()
+    await flushPromises()
     expect(row.emitted('ignore')).toEqual([['model']])
   })
 })
@@ -594,8 +594,10 @@ describe('ignore and restore on the Updates page', () => {
   })
 
   async function ignoreFirstRow(scope: 'Ignore this version' | 'Ignore model') {
-    await wrapper!.findAll('li')[0].findAll('button').find((b) => b.text().trim() === 'Ignore')!.trigger('click')
-    await wrapper!.findAll('[role="menuitem"]').find((b) => b.text() === scope)!.trigger('click')
+    await wrapper!.findAll('li')[0].findAll('button').find((b) => b.text().trim() === 'Ignore')!.trigger('keydown', { key: 'Enter' })
+    await flushPromises()
+    ;[...document.body.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((b) => b.textContent?.trim() === scope)!.click()
+    await flushPromises()
   }
 
   it('ignores a version optimistically, stores it, reloads and refreshes the badge counts', async () => {
@@ -735,6 +737,9 @@ describe('drawer Versions tab', () => {
     })
   }
 
+  // The flyout is teleported to <body> by the Reka UI Sheet: query the document.
+  const body = () => new DOMWrapper(document.body)
+
   async function mountDrawer() {
     localStorage.setItem('lm-ui.detail.tab', 'versions')
     const router = createRouter({ history: createMemoryHistory(), routes })
@@ -750,7 +755,7 @@ describe('drawer Versions tab', () => {
   it('shows the classification chip from one read-only overview read', async () => {
     const { calls } = drawerBackend()
     const wrapper = await mountDrawer()
-    const chips = wrapper.findAll('[data-testid="update-chip"]').map((c) => c.text())
+    const chips = body().findAll('[data-testid="update-chip"]').map((c) => c.text())
     expect(chips).toEqual(['Possible update', 'Likely update'])
     expect(calls.filter((c) => c.url === '/api/lm/loras/updates/overview')).toHaveLength(1)
     expect(calls.every((c) => c.method === 'GET')).toBe(true)
@@ -765,15 +770,15 @@ describe('drawer Versions tab', () => {
       'GET /api/lm/loras/metadata': () => jsonResponse({ success: true, metadata: null }),
     })
     const wrapper = await mountDrawer()
-    expect(wrapper.text()).toContain('alt')
-    expect(wrapper.find('[data-testid="update-chip"]').exists()).toBe(false)
+    expect(body().text()).toContain('alt')
+    expect(body().find('[data-testid="update-chip"]').exists()).toBe(false)
     wrapper.unmount()
   })
 
   it('queues a version next to the open file (same root and folder)', async () => {
     const { calls } = drawerBackend()
     const wrapper = await mountDrawer()
-    const queueButtons = wrapper.findAll('#panel-versions button').filter((b) => b.text().includes('Queue') || b.text().includes('queue'))
+    const queueButtons = body().findAll('#panel-versions button').filter((b) => b.text().includes('Queue') || b.text().includes('queue'))
     expect(queueButtons.length).toBeGreaterThan(0)
     await queueButtons[0].trigger('click')
     await flushPromises()
@@ -795,7 +800,7 @@ describe('drawer Versions tab', () => {
       'GET /api/lm/loras/metadata': () => jsonResponse({ success: true, metadata: null }),
     })
     const wrapper = await mountDrawer()
-    const queue = wrapper.findAll('#panel-versions button').find((b) => /queue/i.test(b.text()))!
+    const queue = body().findAll('#panel-versions button').find((b) => /queue/i.test(b.text()))!
     await queue.trigger('click')
     await flushPromises()
     const params = new URL(calls.find((c) => c.url.startsWith('/api/lm/downloads/queue/add'))!.url, 'http://x').searchParams

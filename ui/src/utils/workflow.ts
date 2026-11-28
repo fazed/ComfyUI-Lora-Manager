@@ -54,7 +54,8 @@ export interface LoraSyntaxOptions {
   strength?: number | null
 }
 
-function formatStrength(value: number): string {
+/** A strength as shown and sent: at most three decimals, no trailing zeros. */
+export function formatStrength(value: number): string {
   return String(Number(value.toFixed(3)))
 }
 

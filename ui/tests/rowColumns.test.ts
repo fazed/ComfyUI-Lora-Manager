@@ -21,18 +21,25 @@ import {
 import ModelRow from '@/components/ModelRow.vue'
 
 const baseCss = readFileSync(resolve(__dirname, '../src/themes/base.css'), 'utf8')
-const tokenPx = (name: string) => Number.parseFloat(new RegExp(`${name}:\\s*([\\d.]+)px`).exec(baseCss)?.[1] ?? 'NaN')
+// base.css sizes are rem at a 16px root (text size M).
+const tokenPx = (name: string) => Number.parseFloat(new RegExp(`${name}:\\s*([\\d.]+)rem`).exec(baseCss)?.[1] ?? 'NaN') * 16
 
 describe('row column thresholds', () => {
-  it('pins the breakpoints (row width, not viewport)', () => {
-    expect(ROW_COLUMN_MIN_WIDTH).toEqual({ date: 820, tags: 1060 })
-    expect(ROW_COLUMN_HIDE_CLASS).toEqual({ date: '@max-[820px]:hidden', tags: '@max-[1060px]:hidden' })
+  it('pins the breakpoints (row width, not viewport; px at the 16px root)', () => {
+    expect(ROW_COLUMN_MIN_WIDTH).toEqual({ date: 840, tags: 1060 })
+    expect(ROW_COLUMN_HIDE_CLASS).toEqual({ date: '@max-[52.5rem]:hidden', tags: '@max-[66.25rem]:hidden' })
   })
 
-  it('shows the date from 820px and the tags from 1060px of row width', () => {
+  it('writes the container queries in rem, so the columns follow the text size', () => {
+    for (const column of ['date', 'tags'] as const) {
+      expect(ROW_COLUMN_HIDE_CLASS[column]).toBe(`@max-[${ROW_COLUMN_MIN_WIDTH[column] / 16}rem]:hidden`)
+    }
+  })
+
+  it('shows the date from 840px and the tags from 1060px of row width', () => {
     expect(rowColumnsAt(600)).toEqual(['name', 'baseModel', 'size'])
-    expect(rowColumnsAt(819)).toEqual(['name', 'baseModel', 'size'])
-    expect(rowColumnsAt(820)).toEqual(['name', 'baseModel', 'size', 'date'])
+    expect(rowColumnsAt(839)).toEqual(['name', 'baseModel', 'size'])
+    expect(rowColumnsAt(840)).toEqual(['name', 'baseModel', 'size', 'date'])
     expect(rowColumnsAt(1059)).toEqual(['name', 'baseModel', 'size', 'date'])
     expect(rowColumnsAt(1060)).toEqual(['name', 'baseModel', 'size', 'date', 'tags'])
   })
@@ -43,7 +50,7 @@ describe('row column thresholds', () => {
   })
 
   it('leaves the name at least ROW_NAME_MIN_WIDTH when a column appears, in the worst case', () => {
-    // Worst case: selection mode (indicator) and the Send button (LoRAs).
+    // Worst case: selection mode (indicator) and the Send and Copy buttons (LoRAs).
     const worst = { selection: true, send: true }
     expect(rowNameWidth(ROW_COLUMN_MIN_WIDTH.date, worst)).toBeGreaterThanOrEqual(ROW_NAME_MIN_WIDTH)
     expect(rowNameWidth(ROW_COLUMN_MIN_WIDTH.tags, worst)).toBeGreaterThanOrEqual(ROW_NAME_MIN_WIDTH)
@@ -93,6 +100,10 @@ describe('ModelRow truncation', () => {
     expect(cell.classes()).toContain('w-(--lm-row-badge-max-width)')
     expect(cell.classes()).toContain('min-w-0')
     expect(cell.html()).not.toContain('140px')
+    // Fixed cells are sized in rem (they scale with the text size like the container queries).
+    expect(wrapper.get('[data-cell="size"]').classes()).toContain('w-[4.5rem]')
+    expect(wrapper.get('[data-cell="date"]').classes()).toContain('w-[9.375rem]')
+    expect(wrapper.get('[data-cell="tags"]').classes()).toContain('w-[12.5rem]')
     const badge = cell.get('.lm-badge')
     expect(badge.attributes('title')).toBe(LONG_BASE)
     expect(badge.classes()).toEqual(expect.arrayContaining(['max-w-full', 'min-w-0']))

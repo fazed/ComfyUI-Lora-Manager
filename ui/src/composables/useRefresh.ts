@@ -19,6 +19,7 @@ import { computed, onBeforeUnmount, onMounted, readonly, ref, shallowRef, watch 
 import { useDocumentVisibility, useEventListener } from '@vueuse/core'
 import { useToasts } from './useFeedback'
 import { shouldHandleShortcut } from '@/utils/browse'
+import { rekaLayerOpen } from '@/utils/dismiss'
 import { t } from '@/i18n'
 
 /** What a running refresh is doing (button label / tooltip). */
@@ -113,7 +114,7 @@ export function useRefreshHost(): void {
   useEventListener(document, 'keydown', (event: KeyboardEvent) => {
     if (!current.value) return
     // Modal dialogs and open menus own their keys (even when focus sits on the page behind them).
-    const overlay = !!document.querySelector('dialog[open], [role="menu"]')
+    const overlay = rekaLayerOpen() || !!document.querySelector('[role="menu"]')
     if (!shouldHandleShortcut(event, REFRESH_KEY, overlay)) return
     event.preventDefault()
     void runRefresh()

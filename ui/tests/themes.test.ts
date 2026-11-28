@@ -4,6 +4,9 @@ import { describe, expect, it } from 'vitest'
 import {
   BUILTIN_THEMES,
   DENSITY_STORAGE_KEY,
+  HIGHLIGHT_STORAGE_KEY,
+  HIGHLIGHT_VARS_STORAGE_KEY,
+  SCALE_STORAGE_KEY,
   THEME_STORAGE_KEY,
   USER_THEME_STORAGE_KEY,
   resolveThemeId,
@@ -26,8 +29,16 @@ describe('theme registry', () => {
   })
 
   it('keeps an explicit known theme and falls back for unknown ids', () => {
-    expect(resolveThemeId('midnight', false, BUILTIN_THEMES)).toBe('midnight')
+    expect(resolveThemeId('default-dark', false, BUILTIN_THEMES)).toBe('default-dark')
     expect(resolveThemeId('gone', true, BUILTIN_THEMES)).toBe('default-dark')
+  })
+
+  it('ships Light and Dark only; a stored "midnight" (now a user-theme example) falls back to the system default', () => {
+    expect(BUILTIN_THEMES.map((theme) => theme.id)).toEqual(['default-light', 'default-dark'])
+    expect(resolveThemeId('midnight', true, BUILTIN_THEMES)).toBe('default-dark')
+    expect(resolveThemeId('midnight', false, BUILTIN_THEMES)).toBe('default-light')
+    // As a user theme the id is no longer reserved.
+    expect(toUserTheme({ id: 'midnight', href: 'user-themes/midnight.css', scheme: 'dark' })?.id).toBe('midnight')
   })
 
   it('validates user themes from the backend', () => {
@@ -84,8 +95,47 @@ describe('theme registry', () => {
 
   it('the pre-paint bootstrap in index.html uses the registry storage keys', () => {
     const html = readFileSync(resolve(root, 'index.html'), 'utf8')
-    for (const key of [THEME_STORAGE_KEY, USER_THEME_STORAGE_KEY, DENSITY_STORAGE_KEY]) {
+    for (const key of [THEME_STORAGE_KEY, USER_THEME_STORAGE_KEY, DENSITY_STORAGE_KEY, SCALE_STORAGE_KEY, HIGHLIGHT_VARS_STORAGE_KEY]) {
       expect(html).toContain(`'${key}'`)
     }
+    // lm-ui.highlight itself is never read pre-paint: useAppearance resolves it into lm-ui.highlight.vars.
+    expect(HIGHLIGHT_STORAGE_KEY).toBe('lm-ui.highlight')
+    expect(html).toContain('lm-ui.highlight.vars')
+  })
+
+  it('the bootstrap applies a valid stored text size and the pre-resolved highlight on built-in themes only', () => {
+    const html = readFileSync(resolve(root, 'index.html'), 'utf8')
+    const script = /<script>([\s\S]*?)<\/script>/.exec(html)![1]
+    const vars = {
+      dark: { accent: '#7cc7f0', accentHover: '#6aaed3', accentSoft: 'rgba(124, 199, 240, 0.16)', onAccent: '#0b0b0b' },
+      light: { accent: '#1f5d80', accentHover: '#18506e', accentSoft: 'rgba(31, 93, 128, 0.14)', onAccent: '#ffffff' },
+    }
+    const run = (store: Record<string, string>) => {
+      const el = document.documentElement
+      el.removeAttribute('style')
+      el.removeAttribute('data-scale')
+      localStorage.clear()
+      for (const [key, value] of Object.entries(store)) localStorage.setItem(key, value)
+      new Function(script)()
+      return el
+    }
+
+    let el = run({ [SCALE_STORAGE_KEY]: 'xl', [THEME_STORAGE_KEY]: 'default-dark', [HIGHLIGHT_VARS_STORAGE_KEY]: JSON.stringify(vars) })
+    expect(el.getAttribute('data-scale')).toBe('xl')
+    expect(el.style.getPropertyValue('--lm-color-accent')).toBe('#7cc7f0')
+    expect(el.style.getPropertyValue('--lm-color-on-accent')).toBe('#0b0b0b')
+
+    el = run({ [SCALE_STORAGE_KEY]: 'huge', [THEME_STORAGE_KEY]: 'default-light', [HIGHLIGHT_VARS_STORAGE_KEY]: JSON.stringify(vars) })
+    expect(el.getAttribute('data-scale')).toBe('m')
+    expect(el.style.getPropertyValue('--lm-color-accent')).toBe('#1f5d80')
+
+    // A user theme keeps its own accent; a malformed value drops the whole set.
+    el = run({ [THEME_STORAGE_KEY]: 'sunset', [HIGHLIGHT_VARS_STORAGE_KEY]: JSON.stringify(vars) })
+    expect(el.style.getPropertyValue('--lm-color-accent')).toBe('')
+    const bad = { ...vars, dark: { ...vars.dark, accentSoft: 'url(x)' } }
+    el = run({ [THEME_STORAGE_KEY]: 'default-dark', [HIGHLIGHT_VARS_STORAGE_KEY]: JSON.stringify(bad) })
+    expect(el.style.getPropertyValue('--lm-color-accent')).toBe('')
+    el.removeAttribute('style')
+    localStorage.clear()
   })
 })

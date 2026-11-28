@@ -1,7 +1,9 @@
 /**
  * Pointer handling shared by the library cards, list rows and recipe cards:
- * primary click (open, or toggle the selection in selection mode and with
- * Ctrl/Cmd), the "..." menu button, right-click and the touch long press.
+ * primary click (open, or toggle the selection while one exists and with
+ * Ctrl/Cmd or Shift; while the quick view shows, a single click focuses the item and a
+ * double-click or Enter opens it), the "..." menu button, right-click and the
+ * touch long press.
  * Right-click always opens the menu, also in selection mode: the page decides
  * which menu (item or selection) it shows.
  *
@@ -30,6 +32,9 @@ export interface CardInteractionHandlers<T> {
   item: () => T
   selectionMode: () => boolean
   open: (item: T) => void
+  /** The quick view is showing: a single click calls `focus` instead of `open`. */
+  quickView?: () => boolean
+  focus?: (item: T) => void
   /** shift = Shift+click: select a range from the last toggled card. */
   toggle: (item: T, shift: boolean) => void
   menu: (item: T, point: MenuPoint, opener: HTMLElement | null) => void
@@ -43,9 +48,19 @@ export function menuPointFor(element: HTMLElement, alignRight = true): MenuPoint
   return { x: alignRight ? rect.right - 220 : rect.left, y: rect.bottom + 4 }
 }
 
-/** What a primary click on a card does. */
-export function cardActivation(event: Pick<MouseEvent, 'ctrlKey' | 'metaKey'>, selectionMode: boolean): 'open' | 'toggle' {
-  return selectionMode || event.ctrlKey || event.metaKey ? 'toggle' : 'open'
+/**
+ * What a primary click on a card does. Ctrl/Cmd+click and Shift+click select
+ * (no mode switch needed), as does any click while a selection exists. With
+ * the quick view a single click (`detail` 1) focuses; the second click of a
+ * double-click (`detail` 2) and a keyboard click (`detail` 0) open.
+ */
+export function cardActivation(
+  event: Pick<MouseEvent, 'ctrlKey' | 'metaKey' | 'detail'> & { shiftKey?: boolean },
+  selectionMode: boolean,
+  quickView = false,
+): 'open' | 'toggle' | 'focus' {
+  if (selectionMode || event.ctrlKey || event.metaKey || event.shiftKey) return 'toggle'
+  return quickView && event.detail === 1 ? 'focus' : 'open'
 }
 
 export interface PressMenuGuard {
@@ -155,7 +170,9 @@ export function useCardInteractions<T>(handlers: CardInteractionHandlers<T>) {
       event.preventDefault()
       return
     }
-    if (cardActivation(event, handlers.selectionMode()) === 'toggle') handlers.toggle(handlers.item(), event.shiftKey)
+    const action = cardActivation(event, handlers.selectionMode(), handlers.quickView?.() ?? false)
+    if (action === 'toggle') handlers.toggle(handlers.item(), event.shiftKey)
+    else if (action === 'focus') handlers.focus?.(handlers.item())
     else handlers.open(handlers.item())
   }
 

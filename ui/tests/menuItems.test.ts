@@ -6,7 +6,7 @@
  * goes to a mocked object: nothing here touches a real library.
  */
 import { describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { DOMWrapper, flushPromises, mount } from '@vue/test-utils'
 import type { ModelItem } from '@/api/types'
 import { civitaiModelUrl } from '@/utils/civitai'
 import {
@@ -16,6 +16,7 @@ import {
   renamedFolderPath,
   runItemMenuAction,
   runSelectionMenuAction,
+  pageMenu,
   selectionMenu,
   type ItemMenuDeps,
   type SelectionMenuDeps,
@@ -57,22 +58,27 @@ describe('itemMenu', () => {
     const entries = itemMenu(item({ civitai: { modelId: 5, id: 9 } as ModelItem['civitai'] }), loraCtx)
     expect(actionsOf(entries)).toEqual([
       'open',
-      'send',
-      'replace',
+      'sendMenu',
       'copySyntax',
       'favorite',
       'civitai',
       ...MODEL_ITEMS.map((entry) => entry.action),
     ])
+    // Send is a submenu: Append / Replace.
+    const send = entries.find((entry) => entry.action === 'sendMenu')!
+    expect(actionsOf(send.children!)).toEqual(['send', 'replace'])
+    expect(send.children!.map((entry) => entry.label)).toEqual(['Append to the node', 'Replace the LoRAs in the node'])
     const civitai = entries.find((entry) => entry.action === 'civitai')!
     expect(civitai.href).toBe('https://civitai.com/models/5?modelVersionId=9')
     expect(civitai.divider).toBe(true)
-    // The first model action starts a new group.
-    expect(entries.find((entry) => entry.action === 'move')!.divider).toBe(true)
+    // The first model action starts a new, labelled group.
+    const move = entries.find((entry) => entry.action === 'move')!
+    expect(move.divider).toBe(true)
+    expect(move.group).toBe('Manage')
     expect(entries.find((entry) => entry.action === 'delete')!.danger).toBe(true)
   })
 
-  it('leaves out send, replace and copy syntax when the library cannot send, and Civitai without a model id', () => {
+  it('leaves out the send submenu and copy syntax when the library cannot send, and Civitai without a model id', () => {
     const entries = itemMenu(item(), checkpointCtx)
     expect(actionsOf(entries)).toEqual(['open', 'favorite', ...MODEL_ITEMS.map((entry) => entry.action)])
     expect(entries.find((entry) => entry.action === 'move')!.divider).toBe(true)
@@ -86,11 +92,20 @@ describe('itemMenu', () => {
   })
 })
 
+describe('pageMenu', () => {
+  it('offers Download and Select all, then the Tools entries under a line', () => {
+    const entries = pageMenu([{ id: 'organize', label: 'Auto-organize', icon: 'wand' }, { id: 'rebuild', label: 'Rebuild cache' }])
+    expect(actionsOf(entries)).toEqual(['download', 'selectAll', 'organize', 'rebuild'])
+    expect(entries.map((entry) => !!entry.divider)).toEqual([false, false, true, false])
+    expect(entries[3].icon).toBe('wrench')
+  })
+})
+
 describe('selectionMenu', () => {
   it('mirrors the selection bar (send only where sending is possible), delete last and dangerous', () => {
-    expect(actionsOf(selectionMenu(3, { canSend: true }))).toEqual(['move', 'tags', 'template', 'send', 'copyNames', 'delete'])
+    expect(actionsOf(selectionMenu(3, { canSend: true }))).toEqual(['move', 'tags', 'favorite', 'template', 'send', 'copySyntax', 'copyNames', 'delete'])
     const entries = selectionMenu(3, { canSend: false })
-    expect(actionsOf(entries)).toEqual(['move', 'tags', 'template', 'copyNames', 'delete'])
+    expect(actionsOf(entries)).toEqual(['move', 'tags', 'favorite', 'template', 'copyNames', 'delete'])
     expect(entries.at(-1)).toMatchObject({ danger: true, divider: true })
   })
 
@@ -198,8 +213,10 @@ describe('runSelectionMenuAction', () => {
     return {
       move: vi.fn(),
       tags: vi.fn(),
+      favorite: vi.fn(),
       template: vi.fn(),
       send: vi.fn(),
+      copySyntax: vi.fn(),
       copyNames: vi.fn(),
       delete: vi.fn(),
     }
@@ -208,7 +225,7 @@ describe('runSelectionMenuAction', () => {
   it('hands the selected items to the matching bulk handler', () => {
     const handlers = deps()
     const items = [item(), item({ file_path: 'D:/loras/b.safetensors', file_name: 'b' })]
-    for (const action of ['move', 'tags', 'template', 'send', 'copyNames', 'delete']) runSelectionMenuAction(action, items, handlers)
+    for (const action of ['move', 'tags', 'favorite', 'template', 'send', 'copySyntax', 'copyNames', 'delete']) runSelectionMenuAction(action, items, handlers)
     for (const fn of Object.values(handlers)) expect(fn).toHaveBeenCalledWith(items)
   })
 
@@ -308,15 +325,47 @@ describe('ModelActionMenu', () => {
         ],
       },
     })
-    expect(wrapper.get('[role="menu"]').attributes('aria-label')).toBe('Actions for 3 selected models')
-    expect(wrapper.text()).toContain('3 selected')
-    expect(wrapper.text()).toContain('Enter')
-    const entries = wrapper.findAll('[role="menuitem"]')
+    await flushPromises()
+    // The menu is teleported to <body> by the Reka UI DropdownMenu.
+    const body = new DOMWrapper(document.body)
+    expect(body.get('[role="menu"]').attributes('aria-label')).toBe('Actions for 3 selected models')
+    expect(body.text()).toContain('3 selected')
+    expect(body.text()).toContain('Enter')
+    const entries = body.findAll('[role="menuitem"]')
     expect(entries[1].attributes('aria-disabled')).toBe('true')
     await entries[1].trigger('click')
     expect(wrapper.emitted('select')).toBeUndefined()
     await entries[0].trigger('click')
     expect(wrapper.emitted('select')).toEqual([['open']])
+    await flushPromises()
+    expect(wrapper.emitted('close')).toEqual([['select']])
+    wrapper.unmount()
+  })
+
+  it('draws group captions and opens the Send submenu, whose entries select their own action', async () => {
+    const wrapper = mount(ModelActionMenu, {
+      attachTo: document.body,
+      props: { x: 10, y: 10, label: 'Menu', items: itemMenu(item(), loraCtx) },
+    })
+    await flushPromises()
+    const body = new DOMWrapper(document.body)
+    expect(body.text()).toContain('Manage')
+    const trigger = body.findAll('[role="menuitem"]').find((entry) => entry.text().includes('Send to ComfyUI'))!
+    expect(trigger.attributes('aria-haspopup')).toBe('menu')
+    trigger.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
+    await flushPromises()
+    const replace = body.findAll('[role="menuitem"]').find((entry) => entry.text().includes('Replace the LoRAs'))!
+    await replace.trigger('click')
+    expect(wrapper.emitted('select')).toEqual([['replace']])
+    wrapper.unmount()
+  })
+
+  it('reports Escape as the close reason (the caller refocuses the opener)', async () => {
+    const wrapper = mount(ModelActionMenu, { attachTo: document.body, props: { x: 10, y: 10, label: 'Menu' } })
+    await flushPromises()
+    document.body.querySelector('[role="menu"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await flushPromises()
+    expect(wrapper.emitted('close')).toEqual([['escape']])
     wrapper.unmount()
   })
 })

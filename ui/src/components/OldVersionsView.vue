@@ -127,7 +127,7 @@ async function deleteAllOlder(group: OldVersionGroup): Promise<void> {
       <li v-for="group in groups" :key="group.key" class="lm-panel flex flex-col gap-3 p-3" :data-testid="`old-group-${group.key}`">
         <div class="flex items-start gap-3 phone:flex-wrap">
           <LazyMedia
-            class="lm-thumb h-[72px] w-[56px] flex-none"
+            class="lm-thumb h-[4.5rem] w-[3.5rem] flex-none"
             :media-class="['size-full object-cover', isBlurred(thumb(group)?.previewNsfwLevel ?? 0, blurMature) && 'scale-110 blur-[12px]']"
             :src="thumb(group)?.previewUrl ? withMountPrefix(thumb(group)!.previewUrl!) : ''"
             :icon-size="18"

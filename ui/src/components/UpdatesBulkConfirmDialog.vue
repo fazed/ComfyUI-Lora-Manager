@@ -100,7 +100,7 @@ function confirm(): void {
         <p class="text-xs text-muted text-pretty">{{ t('replace.explain') }}</p>
       </section>
 
-      <div class="flex flex-wrap justify-end gap-2 phone:flex-col phone:items-stretch">
+      <div class="lm-dialog-footer phone:flex-col phone:items-stretch">
         <button type="button" class="lm-btn phone:min-h-touch" autofocus @click="emit('cancel')">{{ t('common.cancel') }}</button>
         <button type="submit" class="lm-btn phone:min-h-touch" :class="replaceCount ? 'lm-btn--danger' : 'lm-btn--primary'" data-testid="bulk-confirm-submit">
           {{ t('updates.bulk.confirm', { count: items.length }) }}

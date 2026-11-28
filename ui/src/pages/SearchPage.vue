@@ -102,7 +102,7 @@ onBeforeUnmount(() => controller?.abort())
       <p v-if="section.error" class="lm-error-text">
         {{ t('search.error', { section: t(tabFor(section.scope).label), error: section.error }) }}
       </p>
-      <ul class="grid grid-cols-[repeat(auto-fill,minmax(280px,1fr))] gap-2">
+      <ul class="grid grid-cols-[repeat(auto-fill,minmax(17.5rem,1fr))] gap-2">
         <li v-for="item in section.items" :key="item.key">
           <button
             type="button"

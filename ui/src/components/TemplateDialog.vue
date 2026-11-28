@@ -47,7 +47,7 @@ async function apply(): Promise<void> {
 
 <template>
   <ModalShell :title="t('tools.template.title')" title-id="template-dialog-title" :busy="busy" wide @close="emit('close')">
-    <div class="flex min-h-0 flex-col gap-3 px-5 pb-5">
+    <div class="flex min-h-0 flex-col gap-3 overflow-y-auto px-5 pb-5">
       <p class="text-sm">{{ scopeLabel }}</p>
       <StateBlock v-if="loading" kind="loading" :message="t('tools.template.previewing')" />
       <StateBlock v-else-if="!plan" kind="error" :message="t('tools.template.previewFailed', { error: '' })" @retry="preview" />
@@ -77,7 +77,7 @@ async function apply(): Promise<void> {
           <li v-for="failure in plan.failures.slice(0, 50)" :key="failure.model"><strong>{{ failure.model }}</strong>: {{ failure.message }}</li>
         </ul>
       </template>
-      <div class="flex justify-end gap-2">
+      <div class="lm-dialog-footer">
         <button type="button" class="lm-btn" :disabled="busy" @click="emit('close')">{{ t('common.cancel') }}</button>
         <button type="button" class="lm-btn lm-btn--danger" :disabled="busy || loading || !hasRenames" @click="apply">
           <AppIcon name="pencil" :size="16" />{{ t('tools.template.apply') }}

@@ -12,6 +12,7 @@ import PageShell from '@/components/PageShell.vue'
 import StateBlock from '@/components/StateBlock.vue'
 import { useDoctor } from '@/composables/useMaintenance'
 import { useRefreshHandler } from '@/composables/useRefresh'
+import { SHORTCUTS } from '@/config/shortcuts'
 import { actionKind, type CheckStatus } from '@/utils/maintenance'
 import { withMountPrefix } from '@/utils/basePath'
 import { t, type MessageKey } from '@/i18n'
@@ -65,7 +66,7 @@ useRefreshHandler({
   <PageShell :title="t('doctor.title')">
     <template #description>{{ t('doctor.intro') }}</template>
     <template #actions>
-      <button type="button" class="lm-btn" :disabled="loading || !!busy" aria-keyshortcuts="R" :title="t('doctor.rerunShortcut')" @click="doctor.run()">
+      <button type="button" class="lm-btn" :disabled="loading || !!busy" :aria-keyshortcuts="SHORTCUTS.refresh.aria" :title="t('doctor.rerunShortcut')" @click="doctor.run()">
         <AppIcon name="refresh" :size="16" />{{ loading ? t('doctor.running') : report ? t('doctor.rerun') : t('doctor.run') }}
       </button>
       <button type="button" class="lm-btn" :disabled="!report || !!busy" :title="t('doctor.exportHint')" @click="doctor.exportBundle()">
@@ -78,7 +79,7 @@ useRefreshHandler({
       <template v-else-if="report">
         <section class="lm-panel flex items-center gap-3 p-4" :class="STATUS[report.status].text" aria-live="polite">
           <AppIcon :name="STATUS[report.status].icon" :size="24" />
-          <div class="min-w-[min(100%,260px)] flex-1">
+          <div class="min-w-[min(100%,16.25rem)] flex-1">
             <p class="text-md font-bold">{{ t(`doctor.status.${report.status}` as MessageKey) }}</p>
             <p class="text-sm text-muted">
               {{ report.issueCount ? t('doctor.summary', { count: report.issueCount }) : t('doctor.summaryOk') }}

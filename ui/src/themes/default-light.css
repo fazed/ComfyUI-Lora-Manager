@@ -1,18 +1,24 @@
-/* Default light theme. Also the fallback when no data-theme is set. */
+/*
+ * Default light theme, also the fallback when no data-theme is set. Black /
+ * grey / white with one highlight (accent, near-black by default; the user's
+ * highlight colour overrides the four accent tokens inline, see
+ * themes/highlight.ts). Hue only where it means something: danger, success,
+ * warning, info.
+ */
 :root,
 [data-theme='default-light'] {
   color-scheme: light;
-  --lm-color-bg: #f5f6f8;
+  --lm-color-bg: #f5f5f5;
   --lm-color-surface: #ffffff;
   --lm-color-elevated: #ffffff;
-  --lm-color-sunken: #eceef2;
-  --lm-color-border: #e1e4ea;
-  --lm-color-border-strong: #c9cfd8;
-  --lm-color-text: #14171c;
-  --lm-color-muted: #5b6472;
-  --lm-color-accent: #4f46e5;
-  --lm-color-accent-hover: #4338ca;
-  --lm-color-accent-soft: rgba(79, 70, 229, 0.12);
+  --lm-color-sunken: #ececec;
+  --lm-color-border: #e3e3e3;
+  --lm-color-border-strong: #cdcdcd;
+  --lm-color-text: #111111;
+  --lm-color-muted: #555555;
+  --lm-color-accent: #111111;
+  --lm-color-accent-hover: #353535;
+  --lm-color-accent-soft: rgba(17, 17, 17, 0.14);
   --lm-color-on-accent: #ffffff;
   --lm-color-danger: #c62828;
   --lm-color-danger-soft: rgba(198, 40, 40, 0.1);
@@ -21,19 +27,21 @@
   --lm-color-success-soft: rgba(21, 128, 61, 0.12);
   --lm-color-warning: #9a4507;
   --lm-color-warning-soft: rgba(180, 83, 9, 0.12);
-  --lm-color-focus: #6366f1;
-  --lm-color-overlay: rgba(15, 18, 25, 0.45);
-  --lm-color-scrim: rgba(8, 10, 14, 0.72);
+  --lm-color-info: #1d5fa8;
+  --lm-color-info-soft: rgba(29, 95, 168, 0.12);
+  --lm-color-focus: #111111;
+  --lm-color-overlay: rgba(0, 0, 0, 0.45);
+  --lm-color-scrim: rgba(0, 0, 0, 0.72);
   --lm-color-on-scrim: #ffffff;
-  --lm-color-skeleton: #e6e9ee;
-  /* Chart series (Okabe-Ito based, colorblind-safe order). */
-  --lm-color-series-1: #0072b2;
-  --lm-color-series-2: #e69f00;
-  --lm-color-series-3: #009e73;
-  --lm-color-series-4: #cc79a7;
-  --lm-color-series-5: #56b4e9;
-  --lm-color-series-6: #d55e00;
-  --lm-color-shadow: rgba(16, 24, 40, 0.1);
+  --lm-color-skeleton: #e8e8e8;
+  /* Chart series: the highlight, then a grey ramp (each >= 3:1 on the panel). */
+  --lm-color-series-1: var(--lm-color-accent);
+  --lm-color-series-2: #3d3d3d;
+  --lm-color-series-3: #555555;
+  --lm-color-series-4: #6b6b6b;
+  --lm-color-series-5: #7f7f7f;
+  --lm-color-series-6: #8e8e8e;
+  --lm-color-shadow: rgba(0, 0, 0, 0.1);
 }
 
 /*
@@ -45,9 +53,9 @@
 :root:not([data-theme]),
 [data-theme='default-light'] {
   --lm-color-field: #ffffff;
-  --lm-color-field-hover: #f8f9fb;
-  --lm-color-field-border: #7d8695;
-  --lm-color-field-border-hover: #5f6876;
-  --lm-color-field-disabled: #eef0f3;
-  --lm-color-placeholder: #646d7b;
+  --lm-color-field-hover: #f8f8f8;
+  --lm-color-field-border: #7d7d7d;
+  --lm-color-field-border-hover: #5f5f5f;
+  --lm-color-field-disabled: #efefef;
+  --lm-color-placeholder: #646464;
 }

@@ -16,7 +16,7 @@ in its quick-actions dropdown) opens `/lm-ui/` as well. On page load
 switches the button to the modern UI, so an unbuilt `ui/dist` (503), a backend
 without the route (404), a network error or a click before the probe has
 answered all open the classic `/loras` instead. The classic UI stays reachable
-from the modern UI's "More options" menu.
+from the "Classic UI" link at the bottom of the modern UI's icon rail.
 
 The **deep links from the ComfyUI canvas** use the same cached probe
 (`modelDeepLinkPath` / `recipeDeepLinkPath` in `modern_ui_link.js`), opened
@@ -43,7 +43,7 @@ modern UI has no wildcards page.
 ui/
   index.html              pre-paint theme bootstrap (inline script) + app mount
   src/
-    main.ts, App.vue      app shell (top bar, full-width content, toasts, confirm dialog)
+    main.ts, App.vue      app shell (icon rail, page, status bar, toasts, confirm dialog)
     router.ts             history routes below the app base (/lm-ui/...)
     api/                  typed client: http.ts (fetch wrapper, ApiError),
                           endpoints.ts (model/download/settings/recipe/theme APIs),
@@ -51,15 +51,19 @@ ui/
     composables/          useInfiniteList, usePolling (visibility-aware),
                           useDownloadQueue (shared poller), useTheme,
                           useLibraryFilters, useAppSettings, useFeedback, useSearch,
-                          useFolderPanel, useDismiss (overlay stack: Escape and
-                          outside/backdrop clicks close only the topmost overlay;
-                          a backdrop click needs pointerdown + click on the backdrop),
+                          useFolderPanel, useDismiss (hand-built overlay stack:
+                          Escape and outside clicks close only the topmost layer),
                           useRefresh (page refresh registry, see "Refresh"),
-                          useUpdates (Updates page + top-bar badge count)
-    components/           TopBar, AppMenu/ThemeOptions, SearchCombobox, VirtualGrid,
+                          useUpdates (Updates page + rail badge count),
+                          usePageStatus (count / selection for the status bar)
+    components/           AppRail, AppearancePopover/ThemeOptions, GlobalSearchDialog,
+                          StatusBar, SearchCombobox, VirtualGrid, FolderPanel,
+                          FolderBreadcrumb, AlphabetBar, FilterFlyout, SearchOptions,
+                          ViewPopover,
                           ModelCard, ModelRow (list view), ModelDrawer, ExampleLightbox,
                           BaseModelQuickFilter, NodePickerDialog, FolderTree,
                           ModelActionMenu, ModalShell, InputDialog, MoveDialog,
+                          HelpDialog, NotificationsDialog, SupportDialog,
                           OrganizeDialog, GenerationDetails, Recipe* (card,
                           drawer, reconnect form, import / batch import /
                           move / duplicates dialogs), ...
@@ -72,8 +76,12 @@ ui/
     config/settingsSchema.ts  settings sections and fields (keys, types, defaults, validation)
     config/settingsTabs.ts    presentation: which tab and card each field lives in
     config/libraries.ts   per-type config (loras / checkpoints / embeddings)
-    config/navigation.ts  top-bar tabs, active state, search route targets
+    config/navigation.ts  rail entries, active state, search route targets
     themes/               design tokens + themes + registry.ts + contrast.ts (WCAG helper)
+                          + highlight.ts (highlight colour) + fonts.css (bundled Geist)
+    assets/fonts/         Geist / Geist Mono woff2 + OFL.txt
+    components/ui/        shadcn-vue primitives on Reka UI, adapted to the tokens
+    lib/utils.ts          cn() (clsx + token-aware tailwind-merge)
     styles/main.css       stylesheet entry: Tailwind + tokens.css + app.css
     styles/tokens.css     Tailwind theme mapped onto the design tokens
     styles/app.css        base rules + shared classes (buttons, inputs, chips)
@@ -86,8 +94,42 @@ ui/
 ```
 
 Runtime dependencies: `vue`, `vue-router` and `@vueuse/core` (pinned 13.9.0,
-tree-shaken: only the imported functions end up in the bundle). No UI kit, no
-CDN, no runtime-fetched assets; icons are inline SVG paths using `currentColor`.
+tree-shaken: only the imported functions end up in the bundle), plus the
+primitive layer: `reka-ui` 2.11.0 (MIT; headless dialogs, popovers, menus),
+`class-variance-authority` 0.7.1 (Apache-2.0), `clsx` 2.1.1 (MIT) and
+`tailwind-merge` 3.7.0 (MIT). Reka UI 2.8+ depends on `@vueuse/core` 14, so
+the lockfile holds a second, nested VueUse copy for it (tree-shaken like the
+first). No CDN, no runtime-fetched assets; icons are inline SVG paths using
+`currentColor`; the Geist fonts are bundled files (`src/assets/fonts/`).
+
+**Primitives (shadcn-vue, adapted).** `src/components/ui/<name>/` holds
+shadcn-vue components (`dialog`, `popover`, `tooltip`, `sheet`,
+`alert-dialog`, `dropdown-menu`) copied as source and
+rewritten onto this project's token utilities (`bg-elevated`, `text-muted`,
+`border-border`, `rounded-md`, `z-80`, `animate-fade-in`, ...; no `dark:`, no
+second variable set, no `tw-animate-css`). `components.json` is hand-written
+for the shadcn-vue CLI (`bunx shadcn-vue@latest add <name>`); never run
+`shadcn-vue init` and revert any edit the CLI makes to `src/styles/main.css`.
+`cn()` (`src/lib/utils.ts`) is clsx + a tailwind-merge that knows the token
+colours, font sizes, radii and spacing (`text-fg text-md` keeps both;
+`tests/cn.test.ts`). Tests mount teleported content with
+`attachTo: document.body`; `tests/setup.ts` polyfills what Reka needs in
+jsdom. Built on them: `ModalShell` (Dialog; every action dialog: a header
+with a bottom border, the dialog's own scrolling body and a `lm-dialog-footer`
+button row pinned to the bottom with a top border),
+`ConfirmDialog` (AlertDialog: Escape cancels, an outside click does nothing),
+`BottomSheet` (Sheet), `MenuButton` (DropdownMenu; a Reka trigger opens on
+pointerdown or Enter / Space / ArrowDown, not on a synthetic `click`), the
+rail tooltips, the Appearance / Filters / View / Search-in popovers and the
+global search dialog, the details flyout and the recipe drawer (Sheet), the
+example lightbox and the node picker (Dialog) and the shared `ModelActionMenu`
+(DropdownMenu at a virtual reference point). No native `<dialog>` is left, so
+every overlay the flyout opens stacks on it as a nested Reka layer.
+Reka layers are not on the `useDismiss` stack: while one is open
+(`rekaLayerOpen()` in `utils/dismiss.ts`: `data-state="open"` on a dialog,
+alertdialog or menu) the hand-built layers below ignore Escape and outside
+clicks, and the drawers, shortcuts and `r` stand back. Tabs (Reka Tabs) are
+used only by the new Help and Notifications dialogs.
 Tailwind (`tailwindcss` + `@tailwindcss/vite`, pinned 4.3.5) is a build-time
 dev dependency only: the compiled, purged CSS ends up in `ui/dist`.
 
@@ -96,16 +138,15 @@ dev dependency only: the compiled, purged CSS ends up in `ui/dist`.
 Prefer a VueUse function over hand-rolled listener/timer/observer code; it
 cleans up with the component scope. Currently used:
 
-- `useEventListener` (drawer keys, top-bar `/` and Ctrl/Cmd+K shortcut,
+- `useEventListener` (drawer keys, the global search's `/` and Ctrl/Cmd+K shortcut,
   grid stylesheet loads, `useDismiss` Escape/outside listeners attached only
   while an overlay is open);
 - `useResizeObserver`, `useMutationObserver` (VirtualGrid width and theme/density
   token re-reads);
 - `useTimeoutFn` (search-suggestion debounce, library/recipes search apply,
   LazyMedia placeholder removal);
-- `useLocalStorage` (theme choice, density, remembered toggles such as the
-  drawer specifications, the drawer's last tab; same keys and plain-string values as before, written
-  on change only, blocked storage ignored);
+- `useLocalStorage` (theme choice, density, the flyout's last tab; same keys and
+  plain-string values as before, written on change only, blocked storage ignored);
 - `usePreferredDark` (the "System" theme follows the OS live);
 - `onLongPress` (touch long press opens the item menu on cards, rows and
   recipe cards; see Context menus);
@@ -129,7 +170,7 @@ downloads, recipes). The caller sizes the box (classes on the component), so
 loading never shifts the layout; `media-class` goes on the `<img>`/`<video>`
 (object-fit, `lm-zoom-media`, blur), so the card hover zoom still scales the
 media. States (`utils/mediaLoad.ts`): loading shows a `--lm-color-skeleton`
-placeholder with a subtle shimmer (starts after 250 ms, off for
+placeholder with a subtle pulse (starts after 250 ms, off for
 `prefers-reduced-motion`); loaded fades in over `--lm-fade-duration` after
 `img.decode()`; media that is already complete, or loads within 120 ms (cache,
 e.g. a card scrolled back into the virtual grid), appears at once; error/no
@@ -840,7 +881,10 @@ fails, anywhere in `src/` outside `src/themes/` and `src/styles/tokens.css`, on:
 * Tailwind default-palette utilities (`bg-red-500`, `text-white`,
   `border-slate-200/50`, ...) - they do not even compile, because the default
   palette is reset, but the test keeps them out of the source too;
-* the `dark:` variant: light/dark is a theme (`data-theme`), not a variant.
+* the `dark:` variant: light/dark is a theme (`data-theme`), not a variant;
+* any `linear-`, `radial-` or `conic-gradient` (this check covers `src/themes/`
+  and `tokens.css` too): surfaces are flat. The only allowed ones are the two
+  `radial-gradient` circles that draw the `lm-switch` knob (a shape).
 
 Arbitrary values are fine when they use tokens or plain geometry, e.g.
 `w-[min(var(--lm-drawer-width),100vw)]` or `size-[28px]`.
@@ -881,16 +925,16 @@ Tailwind v4 is configured CSS-first, no `tailwind.config.*`:
 | `text-fg`, `text-muted` | `--lm-color-text` / `--lm-color-muted` |
 | `border-border`, `border-border-strong` (+ `hairline`, `hairline-t/r/b/l` for `--lm-border-width`) | `--lm-color-border` / `-border-strong` |
 | `bg-accent`, `text-accent`, `bg-accent-hover`, `bg-accent-soft`, `text-on-accent`, `accent-accent` | `--lm-color-accent`, `-accent-hover`, `-accent-soft`, `--lm-color-on-accent` |
-| `danger`, `danger-soft`, `on-danger`, `success`, `success-soft`, `warning`, `warning-soft` (with any color utility: `text-`, `bg-`, `border-`, `border-l-`, ...) | the matching `--lm-color-*` token |
+| `danger`, `danger-soft`, `on-danger`, `success`, `success-soft`, `warning`, `warning-soft`, `info`, `info-soft` (with any color utility: `text-`, `bg-`, `border-`, `border-l-`, ...) | the matching `--lm-color-*` token |
 | `bg-field`, `bg-field-hover`, `bg-field-disabled`, `border-field-border`, `border-field-border-hover`, `text-placeholder` | `--lm-color-field`, `-field-hover`, `-field-disabled`, `-field-border`, `-field-border-hover`, `--lm-color-placeholder` (with fallbacks for user themes that do not set them) |
 | `bg-overlay`, `backdrop:bg-overlay`, `bg-scrim`, `text-on-scrim`, `bg-skeleton`, `outline-focus` | `--lm-color-overlay`, `-scrim`, `-on-scrim`, `-skeleton`, `-focus` |
-| `bg-scrim-fade` | gradient from `--lm-color-scrim` to transparent (text over card media) |
 | `font-sans`, `font-mono` | `--lm-font-sans` / `--lm-font-mono` |
 | `text-xs` ... `text-2xl` (also `text-md`) | `--lm-font-size-xs` ... `-2xl` |
 | `font-regular`, `font-medium`, `font-bold` | `--lm-font-weight-*` |
 | `leading-normal`, `leading-tight` | `--lm-line-height`, `--lm-line-height-tight` |
 | `p-1` ... `p-6`, `p-8` (also `m-`, `gap-`, `inset-`, `w-`, `h-`, ...) | `--lm-space-1` ... `--lm-space-8` (density aware) |
-| `h-control`, `min-h-control`, `w-control`, `*-control-sm`, `h-topbar` | `--lm-control-height` (`-8px` for `-sm`), `--lm-topbar-height` |
+| `h-control`, `min-h-control`, `w-control`, `*-control-sm` | `--lm-control-height` (`-8px` for `-sm`) |
+| `w-rail`, `w-folders` | `--lm-rail-width` (4rem), `--lm-folders-width` (18.5rem) |
 | `size-touch`, `min-h-touch`, `w-touch`, `min-w-touch` | `--lm-touch-target` (44px hit area, used with `phone:` / `touch:` in the drawer) |
 | `gap-card`, `aspect-card` | `--lm-card-gap`, `--lm-card-aspect` |
 | `rounded-sm`, `rounded-md`, `rounded-lg`, `rounded-pill` | `--lm-radius-*` |
@@ -916,28 +960,72 @@ than the spacing tokens; there is deliberately no `dark:` variant.
 * Each theme is one CSS file that sets tokens on `[data-theme='<id>']`
   (`default-light.css` also targets `:root` as the fallback).
 * `src/themes/registry.ts` lists the built-in themes (`id`, `label`,
-  `scheme: 'light' | 'dark'`, `description`). The picker in the top-bar "More options" menu and on
+  `scheme: 'light' | 'dark'`, `description`). The picker in the rail's Appearance popover and on
   the Settings page lists every registered theme plus **System** (follows
   `prefers-color-scheme`, mapping to `default-light` / `default-dark`).
 * The choice is stored in `localStorage` (`lm-ui.theme`, `lm-ui.theme.user`,
-  `lm-ui.density`; failures are ignored) and applied by a tiny inline script in
-  `index.html` before the first paint, so there is no flash.
+  `lm-ui.density`, `lm-ui.scale`, `lm-ui.highlight`, `lm-ui.highlight.vars`;
+  failures are ignored) and applied by a tiny inline script in `index.html`
+  before the first paint, so there is no flash.
 
-Built-in themes: **Light**, **Dark**, **Midnight** (navy + amber with
-rounder corners).
+Built-in themes: **Light** and **Dark**, both monochrome: black / grey /
+white surfaces, one highlight colour (the accent: white on Dark, `#111111` on
+Light), 6px corners (`--lm-radius-md`), no gradients. Hue appears only where
+it means something: `danger` (the one red), `success`, `warning` (warnings,
+paused queue, rate limits, early access) and `info` (info toasts). The
+favourite star uses the accent (on card media: `on-scrim`, filled). Chart
+series 1 is the accent, 2-6 a grey ramp (each >= 3:1 on the panel, adjacent
+steps >= 1.2:1). The former built-in **Midnight** theme is now a user-theme
+example (see "User themes"); a stored `midnight` choice falls back to the
+System default.
+
+**Appearance settings** (rail Appearance popover and Settings > Appearance, both
+`ThemeOptions.vue`; state in `composables/useAppearance.ts`):
+
+* **Text size** S / M / L / XL sets `data-scale` on `<html>`; `base.css`
+  scales the root font size (`html { font-size: calc(16px * var(--lm-text-scale)) }`,
+  0.875 / 1 / 1.125 / 1.25). Spacing, control, drawer, page, card, row and
+  radius tokens are in rem, so text, controls, cards and panels scale
+  together; at M they equal the former px values. Border and focus-ring
+  widths and `--lm-touch-target` stay px. `VirtualGrid` converts the rem
+  tokens with the root font size, scales the card-size slider width with it
+  and re-measures on `data-scale`. Hard-coded `[Npx]` arbitrary values in
+  components do not scale yet.
+* **Highlight colour**: Mono (default) or a preset (Ice, Mint, Rose, Sand,
+  Steel, Coral, Lime) or a custom colour. `themes/highlight.ts`
+  (`resolveHighlight`) turns it into `--lm-color-accent`, `-accent-hover`,
+  `-accent-soft` and `--lm-color-on-accent` per scheme, clamping a custom
+  colour (8% steps toward the text colour) until it reaches 4.5:1 on the
+  panel and on its own soft tint; `on-accent` is `#0b0b0b` or `#ffffff`,
+  whichever contrasts more. The values are set inline on `<html>` only while
+  a built-in theme is active (a user theme keeps its own accent) and are
+  stored for both schemes in `lm-ui.highlight.vars`, so the pre-paint script
+  needs no colour maths. The focus ring never follows the highlight
+  (`--lm-color-focus`). `tests/highlight.test.ts` checks every preset and
+  hostile customs (`#000000`, `#101010`, `#ffffff`, `#f5f5f5`, `#808080`).
+
+**Fonts.** Geist and Geist Mono (variable, Latin subset, from
+`@fontsource-variable/geist` / `geist-mono` 5.3.0, SIL OFL 1.1) live in
+`src/assets/fonts/` (`Geist-Variable.woff2`, `GeistMono-Variable.woff2`,
+`OFL.txt`) and are declared in `src/themes/fonts.css` (`font-display: swap`);
+the system stacks stay as fallback in `--lm-font-sans` / `--lm-font-mono`.
+`tests/fonts.test.ts` checks that every `url()` exists and that no stylesheet
+or `index.html` references `http(s)://`. The backend serves `.woff2` through
+`web.FileResponse`, whose MIME guess for `.woff2` is
+`application/octet-stream` on the Python 3.13 in use; browsers load fonts
+regardless (no `nosniff` on these routes).
 
 **Rule: themes are colors and appearance; layout is shared.** Built-in theme
 files may only set `color-scheme`, `--lm-color-*`, `--lm-radius-*` and
 `--lm-shadow-*` (radii and shadows never change a box's size). All structural
-tokens - spacing, control/top-bar/drawer sizes, card aspect, card gap, border
+tokens - spacing, control/rail/folder-panel/drawer sizes, card aspect, card gap, border
 and focus-ring widths, fonts, font sizes/weights, line heights, motion - live
 only in `base.css` (plus the compact density block), so cards and controls
 have the same geometry in every theme. `tests/themes.test.ts` fails when a
 built-in theme sets anything else; a deliberate exception must be added to
 the explicit allow-list there (`THEME_LAYOUT_OPT_IN`, empty today) and
-documented here. (Midnight used to widen `--lm-card-gap` to 18px, which made
-its cards about 3px narrower than in the other themes.) User themes may
-still override any token - that is their own choice.
+documented here. User themes may still override any token - that is their
+own choice.
 
 To add a built-in theme: create `src/themes/<id>.css`, import it in
 `src/themes/index.ts`, add an entry to `BUILTIN_THEMES`, rebuild. The theme
@@ -952,13 +1040,14 @@ on field (and field hover) >= 4.5:1, field border (and its hover) against
 panel, dialog and page >= 3:1, focus ring against page, panel, dialog and
 field >= 3:1, accent >= 3:1 (checked switch) and >= 4.5:1 (links), danger
 text, text on accent/danger buttons and every badge (accent, success,
-warning, danger text on its soft tint) >= 4.5:1, and a field background
+warning, danger, info text on its soft tint) >= 4.5:1, info on panel >=
+4.5:1, chart series 2-6 on panel >= 3:1, and a field background
 that differs from the page. When a pair fails, tune the theme; never lower
-a threshold. Current values (Light / Dark / Midnight): muted on panel
-5.98 / 6.85 / 6.32, placeholder on field 5.23 / 5.76 / 6.20, field border on
-panel 3.67 / 3.75 / 4.08 (on dialogs 3.67 / 3.43 / 3.70), focus ring on field
-4.47 / 7.47 / 9.39. Light success and warning were darkened (`#116b33`,
-`#9a4507`) so their badges reach 4.5:1.
+a threshold. Current values (Light / Dark): muted on panel 7.46 / 7.13,
+placeholder on field 5.92 / 6.06, field border on panel 4.12 / 3.72 (on
+dialogs 4.12 / 3.48), focus ring on field 18.88 / 14.56, info on panel
+6.45 / 8.77, danger on panel 5.62 / 6.66. Light success and warning were
+darkened (`#116b33`, `#9a4507`) so their badges reach 4.5:1.
 
 Fields have their own surface: page < panel < field, with an outline that
 alone meets 3:1 (in Light the field is white on a white panel, so the
@@ -1004,6 +1093,63 @@ back to the default light values.
 }
 ```
 
+Example: the former built-in **Midnight** theme (navy + amber, rounder
+corners), shipped until the monochrome redesign. Save it as
+`ui-themes/midnight.css`:
+
+```css
+/* @lm-theme {"id": "midnight", "label": "Midnight", "scheme": "dark", "description": "Navy surfaces with an amber accent"} */
+:root[data-theme='midnight'],
+[data-theme='midnight'] {
+  color-scheme: dark;
+  --lm-color-bg: #0a0f1f;
+  --lm-color-surface: #10172d;
+  --lm-color-elevated: #16203c;
+  --lm-color-sunken: #070b17;
+  --lm-color-border: #1f2b4d;
+  --lm-color-border-strong: #2d3c66;
+  --lm-color-text: #e7eaf6;
+  --lm-color-muted: #8f99bf;
+  --lm-color-accent: #f5a524;
+  --lm-color-accent-hover: #ffbb4d;
+  --lm-color-accent-soft: rgba(245, 165, 36, 0.16);
+  --lm-color-on-accent: #1b1204;
+  --lm-color-danger: #ff7a85;
+  --lm-color-danger-soft: rgba(255, 122, 133, 0.15);
+  --lm-color-on-danger: #1d0a0c;
+  --lm-color-success: #5eead4;
+  --lm-color-success-soft: rgba(94, 234, 212, 0.14);
+  --lm-color-warning: #fcd34d;
+  --lm-color-warning-soft: rgba(252, 211, 77, 0.14);
+  --lm-color-info: #6cc4f0;
+  --lm-color-info-soft: rgba(108, 196, 240, 0.14);
+  --lm-color-focus: #ffbb4d;
+  --lm-color-field: #18213f;
+  --lm-color-field-hover: #1e2848;
+  --lm-color-field-border: #6878a6;
+  --lm-color-field-border-hover: #8592bd;
+  --lm-color-field-disabled: #121a33;
+  --lm-color-placeholder: #97a1c6;
+  --lm-color-overlay: rgba(3, 6, 15, 0.65);
+  --lm-color-scrim: rgba(5, 8, 20, 0.78);
+  --lm-color-on-scrim: #ffffff;
+  --lm-color-skeleton: #18223f;
+  --lm-color-series-1: #6cc4f0;
+  --lm-color-series-2: #f5a524;
+  --lm-color-series-3: #3ccfa4;
+  --lm-color-series-4: #e8a8d0;
+  --lm-color-series-5: #f0e442;
+  --lm-color-series-6: #ff8a57;
+  --lm-color-shadow: rgba(0, 0, 0, 0.5);
+  --lm-radius-sm: 0.5rem;
+  --lm-radius-md: 0.875rem;
+  --lm-radius-lg: 1.25rem;
+}
+```
+
+The highlight colour setting does not apply to user themes; their own accent
+tokens are used.
+
 ### Token reference
 
 Colors (set by every theme):
@@ -1011,43 +1157,47 @@ Colors (set by every theme):
 | Token | Used for |
 | --- | --- |
 | `--lm-color-bg` | page background |
-| `--lm-color-surface` | top bar, folder panel, panels, inputs |
+| `--lm-color-surface` | icon rail, status bar, folder panel, panels, inputs |
 | `--lm-color-elevated` | drawer, menus, dialogs, toasts |
 | `--lm-color-sunken` | wells, hover backgrounds, image placeholders |
 | `--lm-color-border` / `--lm-color-border-strong` | hairlines / emphasised borders |
 | `--lm-color-text` / `--lm-color-muted` | primary / secondary text |
-| `--lm-color-accent`, `-accent-hover`, `-accent-soft` | primary actions, selection, active tab |
+| `--lm-color-accent`, `-accent-hover`, `-accent-soft` | the highlight: primary actions, selection, active tab, favourite star (overridden inline by the highlight setting on built-in themes) |
 | `--lm-color-on-accent` | text/icons on accent backgrounds |
-| `--lm-color-danger`, `-danger-soft`, `--lm-color-on-danger` | destructive actions, errors |
+| `--lm-color-danger`, `-danger-soft`, `--lm-color-on-danger` | destructive actions, errors (the only red) |
 | `--lm-color-success`, `-success-soft` | success states |
-| `--lm-color-warning`, `-warning-soft` | warnings, paused queue, favorites star |
+| `--lm-color-warning`, `-warning-soft` | warnings, paused queue, rate limits, early access |
+| `--lm-color-info`, `-info-soft` | info toasts and notes (optional for user themes: falls back to the accent) |
 | `--lm-color-focus` | keyboard focus ring (also the solid ring of focused fields) |
 | `--lm-color-field` / `-field-hover` / `-field-disabled` | background of inputs, selects, textareas, switch tracks |
 | `--lm-color-field-border` / `-field-border-hover` | field outline (>= 3:1 on panel, dialog and page) |
 | `--lm-color-placeholder` | placeholder text (>= 4.5:1 on the field) |
 | `--lm-color-overlay` | modal/drawer backdrop |
-| `--lm-color-scrim`, `--lm-color-on-scrim` | gradient + text over card media |
+| `--lm-color-scrim`, `--lm-color-on-scrim` | flat strip + text over card media |
 | `--lm-color-skeleton` | loading placeholders |
 | `--lm-color-shadow` | color part of the shadow tokens |
-| `--lm-color-series-1` ... `-6` | chart series (statistics), colorblind-safe order |
+| `--lm-color-series-1` ... `-6` | chart series (statistics): 1 = the accent, 2-6 a grey ramp |
 
-Non-color tokens (defaults in `base.css`, any theme may override):
+Non-color tokens (defaults in `base.css`, any theme may override; sizes in
+rem at a 16px root, so the px values below are the text size M values):
 
 | Group | Tokens |
 | --- | --- |
-| Typography | `--lm-font-sans`, `--lm-font-mono`, `--lm-font-size-xs/sm/md/lg/xl/2xl`, `--lm-font-weight-regular/medium/bold`, `--lm-line-height`, `--lm-line-height-tight` |
-| Radii | `--lm-radius-sm/md/lg/pill` |
+| Typography | `--lm-font-sans`, `--lm-font-mono` (Geist / Geist Mono, then the system stack), `--lm-font-size-xs/sm/md/lg/xl/2xl` (13 / 14 / 15 / 17 / 20 / 24px), `--lm-font-weight-regular/medium/bold`, `--lm-line-height`, `--lm-line-height-tight` |
+| Text size | `--lm-text-scale` (set by `data-scale`: 0.875 / 1 / 1.125 / 1.25) |
+| Radii | `--lm-radius-sm/md/lg/pill` (4 / 6 / 8px, pill) |
 | Spacing | `--lm-space-1/2/3/4/5/6/8` (compact density shrinks them) |
 | Shadows | `--lm-shadow-sm/md/lg` |
-| Motion | `--lm-motion-fast`, `--lm-motion-normal`, `--lm-fade-duration` (media fade-in), `--lm-ease` (durations zeroed for `prefers-reduced-motion`) |
-| Layout | `--lm-topbar-height`, `--lm-drawer-width`, `--lm-control-height`, `--lm-touch-target` (44px minimum hit area on phone / touch layouts), `--lm-border-width`, `--lm-focus-ring-width` |
+| Motion | `--lm-motion-fast`, `--lm-motion-normal`, `--lm-fade-duration` (media fade-in), `--lm-ease` (durations zeroed for `prefers-reduced-motion`, where `base.css` also stops every other animation and transition; spinners keep turning) |
+| Layout | `--lm-rail-width`, `--lm-folders-width`, `--lm-drawer-width` (details flyout), `--lm-recipe-drawer-width`, `--lm-control-height`, `--lm-touch-target` (44px minimum hit area on phone / touch layouts), `--lm-border-width`, `--lm-focus-ring-width` |
 | Page | `--lm-page-max-width` (outer width of the centered content pages, default `1180px`, mapped to `max-w-page`) |
 | Cards | `--lm-card-aspect` (e.g. `2 / 3`), `--lm-card-gap` (card width comes from the per-library size slider), `--lm-card-zoom` (hover/focus zoom of card media, default `1.05`, `1` = off; forced to `1` for `prefers-reduced-motion`) |
 | List rows | `--lm-row-height` (56px, compact 46px; never below `--lm-touch-target`), `--lm-row-thumb` (thumbnail, 40px / 34px), `--lm-row-gap` (6px / 4px), `--lm-row-badge-max-width` (base-model column, 140px; longer names end in an ellipsis) |
 
 The virtualised grid reads `--lm-card-aspect`, `--lm-card-gap`,
-`--lm-row-height` and `--lm-row-gap` at runtime, so a theme or density
-switch re-lays out the grid and the list. The row tokens are layout tokens:
+`--lm-row-height` and `--lm-row-gap` at runtime (rem converted with the root
+font size), so a theme, density or text-size switch re-lays out the grid and
+the list. The row tokens are layout tokens:
 they live in `base.css` (and the compact block) only, never in a theme file.
 The grid wrapper no longer sets a permanent `will-change: transform` (it is
 re-positioned only when the rendered row window changes, not animated).
@@ -1062,47 +1212,79 @@ It is drawn on a 12x12 pixel grid so it stays crisp at 16, 32 and 48 px; the
 32x32 viewBox holds the glyph at 2..30. This UI uses it in two places:
 
 * `public/favicon.svg` - the app tile: the mark in `#ffffff` filling 24 of 32
-  units (75%, glyph at 4..28) on a `#4f46e5` square with `rx="6"` (the
-  default-light `--lm-color-accent`, `--lm-color-on-accent` and
-  `--lm-radius-sm`). A favicon cannot read CSS tokens, so it is a static
-  asset; the indigo tile reads on light and dark tab strips.
-* `src/components/BrandMark.vue` - the header brand tile in `TopBar.vue`
-  (a 28px mark in the 32px `bg-accent text-on-accent` tile: the glyph is
-  24.5px, about 75% like the favicon, with a whole-pixel 2px inset).
+  units (75%, glyph at 4..28) on a `#111111` square with `rx="6"` (the
+  default-light `--lm-color-accent` and `--lm-color-on-accent`). A favicon
+  cannot read CSS tokens, so it is a static asset; the near-black tile reads
+  on light and dark tab strips.
+* `src/components/BrandMark.vue` - the home link at the top of the icon rail
+  (`AppRail.vue`): a 26px mark in the text colour, no tile.
 
 Rule: the mark stays a single monochrome `currentColor` glyph (no fill or
 stroke colours of its own, `fill-rule="evenodd"`, decorative, `aria-hidden`),
-so every theme's accent / on-accent colours it. `tests/branding.test.ts` pins the path in
+so the surrounding element colours it. `tests/branding.test.ts` pins the path in
 `BrandMark.vue` and the favicon to the extension's source. The `layers`
 icon (the former brand glyph) stays in the icon set: it still means LoRAs,
 "send / replace" and duplicates elsewhere.
 
 ## Navigation and layout
 
-There is no sidebar: the content area uses the full width.
-
-* **Top bar** (`components/TopBar.vue`): logo (links to LoRAs), the library
-  tabs LoRAs / Checkpoints / Embeddings / Recipes (`<nav aria-label="Libraries">`
-  with links; the active one is highlighted and has `aria-current="page"`;
-  `isNavActive` in `config/navigation.ts` also matches sub-paths), the global
-  search, and on the right the **Updates** link (badge = likely model
-  updates, see "Updates (phase 1)"), the Downloads indicator (live `active/total`
-  badge, links to the Downloads page), Settings, and a **More options** menu
-  (`components/AppMenu.vue`) with the theme and density pickers and the
-  **Statistics** / **Diagnostics** links and the **Classic UI** link.
-  Theme/density are also on the Settings page.
-* Responsive: one row on desktop; at the `tablet:` breakpoint the search moves
-  to a second full-width row; on `phone:` the tabs become a full-width
-  segmented strip on the second row (scrolls horizontally if it ever does not
-  fit) and the search sits next to the logo. No hamburger menu.
-* **Folders**: the folder tree of a library page is hidden by default. The
-  **Folders** toolbar button (`aria-expanded`, `aria-controls`) shows/hides it;
-  the state is remembered **per library** in `localStorage`
+* **Icon rail** (`components/AppRail.vue`, `<nav aria-label="Main navigation">`):
+  the brand mark (home, links to LoRAs), LoRAs / Checkpoints / Embeddings /
+  Recipes, **Updates** (badge = likely model updates, see "Updates (phase 1)"),
+  **Downloads** (badge `active/total`, a pause icon while the queue is paused,
+  `!` while rate limited), **Statistics**; at the bottom **Search** (opens the
+  global search dialog), **Appearance** (popover with `ThemeOptions`),
+  **Settings**, **Diagnostics**, **Help**, **Notifications**, **Support** and
+  the **Classic UI** link. Every entry is an
+  icon button with an `aria-label` and a tooltip (hover and focus, Reka
+  Tooltip); the active page has `aria-current="page"` (`isNavActive` in
+  `config/navigation.ts` also matches sub-paths). There are no entries for
+  pages the modern UI does not have (other models, workflows, wildcards).
+* **Help / Notifications / Support** (`HelpDialog`, `NotificationsDialog`,
+  `SupportDialog`, mounted by the rail while open). Help lists the keyboard
+  shortcuts from `config/shortcuts.ts` (the same list feeds every
+  `aria-keyshortcuts`, so Help never names a key that does nothing) and links
+  the wiki guides. Notifications shows the installed version with the
+  user-started update check (`settings/VersionCheck.vue`, shared with
+  Settings > About) and this tab's toast history (memory only, 50 kept).
+  Support is a list of external links. All external links open in a new tab
+  with `rel="noopener noreferrer"`; nothing is fetched on open.
+* **Toasts** (`ToastHost.vue`, `useToasts()`): bottom centre above the status
+  bar, inverted (text colour on the page colour) with the kind as the icon;
+  five kept. Hovering the stack or moving focus into it (Tab to Undo) pauses
+  every auto-dismiss timer, which resume with the time that was left
+  (`hold` / `release`), so an Undo toast always gets its full
+  `UNDO_TOAST_MS` while unattended. Alt+T moves the focus to the newest toast
+  (its Undo first); acting on it or closing it returns the focus.
+* **Connection banner** (`ConnectionBanner.vue`, above every page): shows while
+  the browser is offline or the download worker is in its Civitai rate-limit
+  cooldown (`worker.rate_limited` / `retry_after` of the polled queue); Retry
+  re-reads the queue. No request of its own.
+* **Phones** (`phone:`): the rail is a bottom bar with the four libraries and
+  **More**, a bottom sheet with the other pages, Search, the Classic UI link
+  and the appearance options inline.
+* **Status bar** (`components/StatusBar.vue`, hidden on phones): refresh /
+  scan state, the browse page's result count (polite live region, published
+  through `composables/usePageStatus.ts`) and selection size, and the download
+  queue summary (links to Downloads). No "last sync": there is no data source.
+* **Folders**: the folder panel of a browse page (`components/FolderPanel.vue`,
+  `--lm-folders-width`) is hidden by default. The folder button at the left of
+  the toolbar (`aria-expanded`, `aria-controls`) shows/hides it; the state is
+  remembered **per library** in `localStorage`
   (`lm-ui.library.<prefix>.folders`, `composables/useFolderPanel.ts`, storage
   errors ignored). At the `narrow:` breakpoint the panel overlays the grid, so
-  it always starts closed there and toggling it is not remembered. An active
-  folder filter is always shown as a "Folder: x" chip (plus a dot on the
-  button while the panel is hidden).
+  it always starts closed there and toggling it is not remembered. Header:
+  **New folder** (model libraries), **Collapse all**, **View options** (Tree /
+  List view, remembered in `lm-ui.folders.view`; Include subfolders; the folder
+  actions of the selected folder) and Hide. "Find a folder" narrows the tree to
+  matching full paths; the tree scrolls on its own. The tree
+  (`FolderTree.vue`, expansion lifted to the panel) is one tab stop with a
+  roving tabindex: Up / Down / Home / End move, Right opens or steps in, Left
+  closes or steps out, Enter / Space select, right-click / context-menu key /
+  Shift+F10 open the folder menu. No folder counts and no "show empty
+  folders": the tree endpoint returns neither. An active folder filter is
+  always shown as a "Folder: x" chip (plus a dot on the button while the panel
+  is hidden).
 * **Card hover**: cards never move or resize on hover. Only the image/video
   inside zooms slightly (`lm-zoom-host` / `lm-zoom-media` in `app.css`, factor
   `--lm-card-zoom`), on hover only under `@media (hover: hover)` and on
@@ -1135,7 +1317,7 @@ Every routed page declares a **layout kind** in its route meta
 `content` page does not use `PageShell` (or brings back `lm-page` /
 page-level `max-w-[...]` containers), or when the grid allow-list drifts from
 the routes. On a route-name change `App.vue` moves focus to `<main
-id="main-content">` when it was on the top bar or nowhere (skip-link target;
+id="main-content">` when it was in the rail or nowhere (skip-link target;
 tab/query changes inside a page do not move focus).
 
 Measured (1920/1440/1024/768/375px, Light/Dark/Midnight): all content pages
@@ -1168,12 +1350,21 @@ read-only endpoints (`api/suggestSource.ts`):
 | recipe hits | `GET /api/lm/recipes?search=...&page_size=N` (title, tags, LoRA names, prompt) |
 | tags | `GET /api/lm/{prefix}/search-tags?q=...&limit=N`, `GET /api/lm/recipes/search-tags?q=...` |
 
-* **Global search** (top bar, every page, "Search everything...", `/` or
-  Ctrl/Cmd+K focuses it): one lookup fires the list requests of all four
+* **Command palette / global search** (a dialog opened by the rail's Search
+  button, `/` outside text fields or Ctrl/Cmd+K; `components/GlobalSearchDialog.vue`
+  on the Command primitives in `components/ui/command/`, a Reka listbox:
+  Up/Down/Home/End move the highlight, Enter or a click runs it, Escape closes
+  and returns focus). One lookup fires the list requests of all four
   libraries plus the LoRA `search-tags` in parallel (the previous lookup is
   aborted). Sections LoRAs, Checkpoints, Embeddings, Recipes (top 4 each, type
-  icon, base-model badge, "See all N results in ...") and Tags, then "Search
-  all for ...". A model hit opens `/<library>?open=<file_path>` (the drawer;
+  icon, base-model badge, "See all N results in ...") and Tags, then the local
+  groups ranked by `utils/palette.ts`: Folders (the three model libraries'
+  `unified-folder-tree`, read on open; a pick opens `/<library>?folder=<path>`),
+  Pages, Actions (the current page's Download / Select / folder panel / Tools
+  via `usePageActions`, plus refresh, theme, text size, density, Help,
+  Notifications, Support) and Settings (tabs and cards with their keywords;
+  a card opens `/settings/<tab>#card-<id>`). Before typing it lists Pages and
+  Actions. "Search everywhere for ..." is the last row. A model hit opens `/<library>?open=<file_path>` (the drawer;
   the parameter stays in sync with the drawer, so reloads and shared links
   work), a recipe hit searches the recipes page for its title, "See all" opens
   `/<library>?q=<text>` (prefills the local search), a tag opens
@@ -1185,9 +1376,12 @@ read-only endpoints (`api/suggestSource.ts`):
   part of the library filter state (chip "Search: x", cleared by "Clear
   all"). Its autocomplete is scoped to that library (Models/Recipes + Tags +
   "Search for ..."): a model opens the drawer, a tag adds the tag filter
-  (recipes: searches for the tag). The list endpoint's extra search fields
-  (`search_tags`, `search_creator`, `search_trigger_words`, `fuzzy_search`) are
-  not exposed yet.
+  (recipes: searches for the tag). On the model libraries **Search in**
+  (`components/SearchOptions.vue`) chooses the fields: file name and model
+  name (on by default), tags, creator, trigger words (`search_<field>`, sent
+  only when they differ from the backend default and a search is set), plus
+  Include subfolders; both are remembered per library. `fuzzy_search` is not
+  exposed.
 
 ## Browse pages: toolbar, filters, selection (LoRAs, Checkpoints, Embeddings, Recipes)
 
@@ -1195,21 +1389,52 @@ All four browse pages share their chrome (`components/LibraryToolbar.vue`,
 `LibraryFilterPanel.vue`, `LibrarySelectionBar.vue`, `BottomSheet.vue`); the
 pages only supply data, tool entries and bulk actions through props and slots.
 
-* **Toolbar layout.** One fixed 68px row from 901px up: title and count on the
-  left, then (Recipes: the primary **Import** button), search (320px, shrinks
-  instead of wrapping and gives up space before the title), Sort, **Filters**
-  (badge = panel filters, search and folder excluded), the **Grid / List view**
-  switch (model libraries only), the card-size slider (all desktop widths;
-  72px wide below 1280px; hidden in list view), Folders, Select and one
-  **Tools** menu that holds *Organize...* and the page's tools. Below 1280px
-  the Folders and Select labels become icon-only with a tooltip; a truncated
-  count shows in full as a tooltip. At 900px and below the search takes its
-  own second row (documented 2-row layout, about 112px). Title and count never
-  move to their own row when the folder panel opens.
-* **Grid / List view** (LoRAs, Checkpoints, Embeddings; not Recipes). A
-  segmented control (`role="group"` "View", two 36px buttons with
-  `aria-pressed` and the tooltips "Grid view" / "List view") sits left of the
-  card-size slider and is always visible; the choice is stored per library
+* **Rows above the grid** (at most three): the toolbar; the context row
+  (`FolderBreadcrumb.vue`: "All <library>" and one button per folder segment,
+  a chevron lists that folder's siblings from the loaded tree; on LoRAs the
+  `AlphabetBar.vue`); the **active-view strip** (reserved height): the result
+  count, every active scope and filter (folder, "without subfolders", search,
+  letter, base models, tags plus "All tags must match", model types, both
+  states of each licence filter, favourites, updates) as a removable chip, and
+  one **Clear all** (`filters.clear()`). It is the only "view is filtered"
+  indicator: the breadcrumb has no count and the folder button no dot. The
+  optional base-model chip row is a View option (off by default).
+* **Toolbar layout** (one row from 721px up, the search shrinks instead of
+  wrapping): folder button, search with **Search in** (model libraries),
+  **Filters** (badge = flyout filters; search, folder and letter excluded),
+  then View, Sort, Quick view (model libraries), Select, Refresh, **Tools** (*Organize...* and the page's
+  tools) and the page's primary action (**Download...** on model libraries,
+  **Import** on recipes). The `h1` is screen-reader only: the visible page
+  name is the breadcrumb root. **Sort** is a menu with a check on the current
+  entry; besides name, date, size and most used it offers newest / oldest on
+  Civitai (`published:*`), least used (`usage:asc`) and Random (`random`, a
+  seeded shuffle that stays stable across pages). Below 1280px the View, Sort,
+  Select and Download labels become icon-only.
+* **Filters flyout** (`FilterFlyout.vue`, a non-modal Popover labelled
+  "Filters", `f` toggles it): Presets (name + Save current, apply, delete with an Undo toast;
+  `lm-ui.fpresets.<prefix>` as `{ name, filters }[]`, validated on read), Base
+  model, Tags with an Any / All choice (`tag_logic`, sent with two or more
+  tags), Model type (`GET /api/lm/{prefix}/model-types`, repeated
+  `model_type`), Licence (Credit required, Selling generated images allowed:
+  each Any / Yes / No, `credit_required` / `allow_selling_generated_content`),
+  Favourites only, Updates only. Every option is a native checkbox or radio.
+  Its "Clear all" clears these groups only; the strip's "Clear all" also
+  clears search, folder and letter. Recipes: base model, tags, favourites,
+  missing LoRAs (the recipe endpoint has no tag logic, model type or licence).
+* **Alphabet bar** (LoRAs only: only the LoRA routes parse `first_letter`):
+  collapsed to one "A-Z" button (`lm-ui.alpha.open`); `#` digits, A-Z, `@`
+  other characters and the CJK bucket, toggle buttons with `aria-pressed`.
+  All letters stay enabled (`/letter-counts` counts the whole library, not
+  the current filter).
+* **Grid / List view** (LoRAs, Checkpoints, Embeddings; not Recipes). The
+  **View** popover (`ViewPopover.vue`) holds the layout (two native radios),
+  for the grid the card size, **Shape** (Portrait = `--lm-card-aspect`,
+  Square), **Image** (Fill = `object-cover`, Whole image = `object-contain`)
+  and **Show on cards** (name, base model, size and usage, favourite, version
+  row, tags; model libraries only), the base-model row option and Reset view
+  (stored as `shape`, `fit`, `show` next to `view`, validated on read; recipes
+  get Shape and Image). No "Original" shape or "Group by" (D5). The
+  choice is stored per library
   with sort and card size (`view` in `lm-ui.library.<prefix>`, `VIEW_MODES`,
   validated on read, default grid). List view renders `components/ModelRow.vue`
   in the same `VirtualGrid` (`layout="list"`: one column, `--lm-row-height`
@@ -1227,21 +1452,26 @@ pages only supply data, tool entries and bulk actions through props and slots.
   (`aria-label` / `aria-pressed` like the card), a `--lm-row-thumb` thumbnail
   (mature blur, `--lm-card-zoom` hover zoom, no lift), name and folder, base
   model badge, size, modified date, up to three tags and always-visible Send
-  (LoRAs) / Favorite / More actions buttons; a checkbox-style indicator on
-  the left in selection mode. Date and tags drop out when the row is narrow
+  and Copy LoRA syntax (LoRAs) / Favorite / More actions buttons; a
+  checkbox-style indicator on the left in selection mode. A **column
+  header** (`ListHeader.vue`, same cells and widths, hidden on phones) sorts
+  by Name, Size and Date through the existing sort values (`aria-sort`; a
+  second click reverses). Date and tags drop out when the row is narrow
   (container queries on the row's own content width, so an open folder panel
   never squeezes the name). **Column breakpoints** (`utils/rowColumns.ts`,
-  pinned by `tests/rowColumns.test.ts`): the date shows from **820px** and
-  the tags from **1060px** of row width. They are derived from the column
-  widths (thumbnail `--lm-row-thumb` 40, base model `--lm-row-badge-max-width`
-  140, size 72, date 150, tags 200, three 32px buttons, 12px gaps): a column
-  appears only once the name keeps at least `ROW_NAME_MIN_WIDTH` (200px, about
-  28 characters) in the worst case, selection indicator plus Send button
-  (222px at 820, 250px at 1060), and the test also checks they are not set
-  needlessly high. Below 820px only name, base model and size remain. The
-  Tailwind classes (`@max-[820px]:hidden`, `@max-[1060px]:hidden`) are literal
-  strings in the same module (Tailwind cannot see computed class names) and a
-  test checks they match the numbers. **Truncation**: name, folder, base
+  pinned by `tests/rowColumns.test.ts`): the date shows from **840px** and
+  the tags from **1060px** of row width (px at text size M). They are derived
+  from the column widths (thumbnail `--lm-row-thumb` 40, base model
+  `--lm-row-badge-max-width` 140, size 72, date 150, tags 200, four 32px
+  buttons, 12px gaps): a column appears only once the name keeps at least
+  `ROW_NAME_MIN_WIDTH` (200px, about 28 characters) in the worst case,
+  selection indicator plus Send and Copy (206px at 840, 214px at 1060), and
+  the test also checks they are not set needlessly high. Below 840px only
+  name, base model and size remain. Cell widths and the container queries
+  are written in rem (`@max-[52.5rem]:hidden`, `@max-[66.25rem]:hidden`), so
+  the columns follow the text size; the classes are literal strings in the
+  same module (Tailwind cannot see computed class names) and a test checks
+  they match the numbers. **Truncation**: name, folder, base
   model, size, date and tags truncate with an ellipsis and carry their full
   text in `title`; the base-model badge keeps its text in an inner truncating
   span (an `inline-flex` badge cannot ellipsise its own text), and the cell
@@ -1257,34 +1487,73 @@ pages only supply data, tool entries and bulk actions through props and slots.
   base model + size on a second line, with 44px buttons (Send stays in the
   menu). Switching views keeps the first visible item at the top; scroll
   restore, drawer prev/next (`scrollToIndex`) and Shift+click ranges work the
-  same in both layouts. There is no trigger-words column (not in the list
-  payload) and no sortable header.
+  same in both layouts. There is no trigger-words column.
 * **Phone (<= 720px).** One row: search plus a single **Filters** button
   (accessible name "Filters and sort", badge = active count) that opens a bottom
-  sheet (native modal `<dialog>`, focus trap, Escape and backdrop close, on the
-  dismiss stack) with sort, the Grid / List view buttons and the card-size
+  sheet (`BottomSheet.vue` on the Reka Sheet: focus trap, Escape and outside
+  tap close) with sort, the Grid / List view buttons and the card-size
   slider (grid view only), show/hide folders, Select, the tool entries as
   labelled rows, the filter groups and a **Done** button. The page title is
-  screen-reader only (the tabs above name the page); while filtered the count
-  shows in the chips row. Controls here are `min-h-touch` (44px).
+  screen-reader only (the bottom bar names the page); while filtered the count
+  shows in the active-view strip. Controls here are `min-h-touch` (44px).
 * **Filters.** The base-model group is left out of the panel wherever the quick
   filter row exists (all pages except Embeddings); the tag group gets a text
-  filter once it has 8 or more tags. The chips row has reserved height on
+  filter once it has 8 or more tags. The active-view strip has reserved height on
   desktop, so adding a filter does not move the grid (on phones it appears
   only while filtering). While filtered the count reads "85 of 1,041 models",
-  using the total seen the last time nothing was filtered. The empty state has a
-  **Clear filters** button.
-* **Selection.** The selection bar replaces the toolbar row at the same height
-  (the grid does not jump). Shift+click selects a range from the last toggled
+  using the total seen the last time nothing was filtered. The empty state
+  follows the active-view chips (`emptyStateKind`): an empty library offers
+  Library folders (Settings > Library), Scan for models and Download; an empty
+  folder offers Show all folders; zero favourites explains the star and turns
+  the filter off; anything else is "No models match" with **Clear all**. While a
+  scan runs on an empty library the skeleton shows ("Scanning the library...").
+  A preview that fails to load reads "Preview could not be loaded" (no preview:
+  "No preview").
+* **Selection.** One selection (a `Set` of keys, patched in place): Ctrl/Cmd+click,
+  Shift+click and Space on a focused card select without a mode switch, and
+  while anything is selected a plain click toggles too. The bar shows while
+  something is selected or after Select / `b` (an empty selection, "None"
+  keeps it open); Done and Escape clear it. The selection bar
+  (`LibrarySelectionBar.vue`) floats at the
+  bottom of the grid section while the toolbar stays usable (Select shows as
+  pressed); the grid gets extra bottom padding so the last row stays
+  reachable. Inline: Move, Add tags, Send (LoRAs), a "More" menu with the
+  remaining `selectionMenu` entries (Mark as favorite: one metadata save per
+  model, four at a time, no bulk endpoint; Filename template; Copy LoRA syntax
+  (LoRAs); Copy names), Delete;
+  recipes: Move, Add tags, Download missing, Delete. Shift+click selects a range from the last toggled
   card (`selectRange` in `utils/modelActions.ts`), the bar shows how many
-  selected items are not in view ("3 selected (2 not in view)"), Escape leaves
-  selection mode when no drawer, dialog or menu is above it (dismiss stack).
-  Ctrl+A, delete/undo and the other bulk flows are unchanged.
-* **Shortcuts.** Bare `f` toggles Filters (the sheet on phones), `s` toggles
-  selection mode and `r` refreshes the page (every page, see Refresh). They are ignored with a modifier, while typing in a field,
-  inside a dialog, menu or listbox, and while a drawer is open
-  (`shouldHandleShortcut` in `utils/browse.ts`). The toolbars have
-  `role="toolbar"` and an `aria-label`; the buttons carry `aria-keyshortcuts`.
+  selected items are not in view ("3 selected (2 not in view)"), Escape clears
+  the selection when no drawer, dialog or menu is above it (those close first).
+  Ctrl/Cmd+A (outside text fields, menus and dialogs) selects every loaded
+  item and shows the bar, also when nothing was selected yet. Delete/undo and
+  the other bulk flows are unchanged.
+* **Keyboard grid** (model libraries; `composables/useGridKeyboard.ts`). The
+  grid is one tab stop: only the active item's main button
+  (`data-grid-primary`) has `tabindex="0"`, the other items' buttons are
+  `-1`, and the active item's own buttons follow it in the tab order. Arrows
+  move by one item / one row (`gridStep`, column count from `gridMetrics`),
+  Home / End to the first / last loaded item, PageUp / PageDown by a
+  viewport of rows; the move scrolls the row in (`scrollToIndex`) and focuses
+  it once the window has rendered it. The active item is a key
+  (`v-model:active-key` on `VirtualGrid`, the page's `focusedKey`), so it
+  survives row recycling, and the quick view follows it; when it is scrolled
+  out of the window the first item in view takes the tab stop. On a focused
+  card: Space selects (Shift: range), Enter opens the details, `s` sends
+  (Shift+S replaces), `c` copies the LoRA syntax, `f` toggles the favourite,
+  Delete deletes after the confirm; `s` and Delete act on the whole selection
+  when the card is part of it. Recipes keep one tab stop per card.
+* **Shortcuts** (`config/shortcuts.ts`, listed in Help). Bare `f` toggles
+  Filters (the sheet on phones), `b` the selection bar, `d` opens the download
+  dialog (model libraries), Alt+A to Alt+Z pick the alphabet letter (LoRAs;
+  read from the physical key), Ctrl/Cmd+F focuses the library search, `?`
+  opens Help and `r` refreshes the page (every page, see Refresh). Bare keys
+  are ignored with a modifier (Shift only where it is part of the character,
+  as in `?`), while typing in a field, inside a dialog, menu or listbox, and
+  while a drawer is open (`shouldHandleShortcut` / `altLetter` in
+  `utils/browse.ts`); a key handled on a focused card (`f`) does not reach the
+  toolbar. The toolbars have `role="toolbar"` and an `aria-label`; the
+  buttons carry `aria-keyshortcuts`.
 * **State across tabs.** Filters, search, folder, the recipes "missing only"
   toggle, the unfiltered total and the scroll position are kept per library in a
   module-level store (`utils/browse.ts`, saved on unmount) and restored when you
@@ -1296,21 +1565,27 @@ pages only supply data, tool entries and bulk actions through props and slots.
   placeholder cells with the real columns, gap and aspect (`utils/gridLayout.ts`
   is shared with the grid maths) and `aria-busy`; when everything is loaded the
   grid footer says "You've reached the end: N models".
-* **Context menus** (`components/ModelActionMenu.vue`, one shared WAI-ARIA
-  menu; entries built by the pure `utils/menuItems.ts`, tests in
+* **Context menus** (`components/ModelActionMenu.vue`, one shared menu on the
+  Reka UI DropdownMenu, opened at the pointer through a zero-size virtual
+  reference; entries built by the pure `utils/menuItems.ts`, tests in
   `tests/menuItems.test.ts`, written first). An entry may be `disabled`
-  (`aria-disabled`, still reachable with the arrow keys, ignored on click)
-  and carry display-only `shortcut` text; the menu takes an optional
-  `heading` caption. Three menus on the library pages:
-  * **Item** (right-click a card or its "..." button): Open details, Send to
-    ComfyUI and Replace in ComfyUI (only where sending works, i.e. LoRAs),
+  (`aria-disabled`, skipped by the arrow keys, ignored on click)
+  and carry display-only `shortcut` text, a `group` caption drawn above it,
+  or `children` (a submenu; its entries emit their own action). The menu
+  takes an optional `heading` caption and scrolls within the viewport height
+  instead of clipping. Three menus on the library pages:
+  * **Item** (right-click a card or its "..." button): Open details, a Send to
+    ComfyUI submenu with Append / Replace (only where sending works, i.e. LoRAs),
     Copy LoRA syntax (LoRAs), Add to / Remove from favorites, View on Civitai
     (new tab, only with a Civitai model id; URL from `civitaiModelUrl` in
-    `utils/civitai.ts`, shared with the drawer), then the model actions above.
-    No "Copy trigger words": the list payload has no trigger words.
+    `utils/civitai.ts`, shared with the drawer), then the model actions above
+    under a "Manage" caption.
+    No "Copy trigger words": a trigger word is copied by clicking its chip
+    (quick view, drawer), the copy icon always copies the LoRA syntax.
   * **Selection**: in selection mode, right-clicking a **selected** card
     shows the bulk actions of the selection bar (Move..., Add tags...,
-    Filename template..., Send to ComfyUI, Copy names, Delete...) under a
+    Mark as favorite, Filename template..., Send to ComfyUI, Copy LoRA
+    syntax, Copy names, Delete...) under a
     "3 selected" heading. Right-clicking an **unselected** card in selection
     mode shows that card's own item menu and leaves the selection alone
     (changing a carefully built selection on a right-click was judged more
@@ -1318,9 +1593,9 @@ pages only supply data, tool entries and bulk actions through props and slots.
     (their item menu; recipes have no selection menu yet).
   * **Folder** (right-click a row of the folder tree, or the context-menu
     key): New subfolder..., Rename folder..., Apply filename template...,
-    Delete folder... for the **pointed** folder; the folder panel's "..."
-    header menu shows the same entries for the selected folder (or New
-    folder... at the root). Both run `createFolderActions` in
+    Delete folder... for the **pointed** folder; the folder panel's View
+    options menu shows the same entries for the selected folder (or New
+    folder... at the root), and its New folder button runs the first one. Both run `createFolderActions` in
     `utils/folderActions.ts`, which takes the folder path as an argument:
     delete still resolves the folder, refuses one present in several roots
     and runs the dry-run probe + danger confirm in `tools.deleteFolder`;
@@ -1349,9 +1624,36 @@ pages only supply data, tool entries and bulk actions through props and slots.
 * **Ctrl/Cmd+click** on a card toggles it in the selection (and turns
   selection mode on when it is off); Shift+click in selection mode still
   selects a range.
-* **Cards.** Tags are one ellipsised line (no dangling separator), the scrim
-  behind titles is taller, card titles are paragraphs (no heading flood) and the
-  recipe card's send button is hidden on phones (it stays in the menu).
+* **Cards** (`ModelCard.vue`, `RecipeCard.vue`). The image box (border,
+  `--lm-radius-md`) carries the base-model badge, state icons (favourite,
+  skipped in metadata refresh, excluded) and the update flag on top, and a
+  hover / focus-within action bar at the bottom on a flat `bg-scrim`
+  (Favourite, View on Civitai with a Civitai id, Send and Copy LoRA syntax on
+  LoRAs, More; always visible on touch). Below the image: name, size and
+  usage, the version row (Civitai version name, `quantization`, HIGH / LOW
+  from `auto_tags`, "N versions" when `version_count` > 1), tags, as chosen in
+  "Show on cards"; recipes show title and LoRA availability. Each line has a
+  fixed height, and `gridMetrics` adds `cardTextHeight(lines)` to the cell
+  (`VirtualGrid` `extraHeight`, scaled with the text size like the card
+  size), so nothing is measured per card. A blurred mature preview has a
+  **Show** button that reveals that card only for the visit (a `Set` in the
+  page, also used by the list row and the quick view; an eye button blurs it
+  again). Selection, focus and reveal are props read by the rendered cells
+  only; the list is never reset for them.
+* **Quick view** (`ModelInspector.vue`, model libraries): a 26rem panel
+  (`--lm-inspector-width`) right of the grid, toggled from the toolbar and
+  stored in `lm-ui.inspector` (default on), shown only from 1280px on devices
+  with a mouse. While it shows, a single click focuses a card or row (outline,
+  `aria-current`) and the panel follows; a double-click or Enter opens the
+  drawer (`cardActivation` reads `MouseEvent.detail`); it also follows the
+  keyboard cursor of the grid. Hidden, a click opens
+  the drawer as before. It shows the preview, name, file name, a **Strength**
+  stepper (starts at the usage-tip strength, reset per model) with Send to
+  ComfyUI (the button shows the strength) / Copy LoRA syntax using it, Open
+  full details, base model, folder, size, usage, the
+  update flag, trigger words (`civitai.trainedWords` of the list payload, so
+  focusing never sends a request; a chip copies its word) and tags (click
+  filters).
 
 ## Refresh
 
@@ -1414,8 +1716,8 @@ outside LoRA Manager, ...).
   text, e.g. the backend-not-reachable message) and the page keeps what it
   showed.
 * **Shortcut `r`**: bare key only (no Ctrl/Meta/Alt/Shift), ignored while
-  typing in a field, inside a dialog, menu or listbox, while a modal
-  `<dialog>` or menu is open (`shouldHandleShortcut`), and for key repeats.
+  typing in a field, inside a dialog, menu or listbox, while a Reka dialog
+  or menu is open (`shouldHandleShortcut`), and for key repeats.
   No clash with `f`, `s`, `j`, `k`, `/`. With a drawer open focus is inside
   it, so `r` does nothing there; close the drawer, or rely on the tab-return
   refresh, which also updates the open drawer.
@@ -1532,8 +1834,10 @@ code only.
 
 ## Library quick filter, detail drawer and "Send to ComfyUI"
 
-* **Base-model quick filter** (`components/BaseModelQuickFilter.vue`): a
-  horizontally scrolling chip row under the library toolbar, built from
+* **Base-model quick filter** (`components/BaseModelQuickFilter.vue`): an
+  optional, horizontally scrolling chip row under the library toolbar (View >
+  "Base model row", off by default; the Filters flyout always has the Base
+  model group), built from
   `GET /api/lm/{prefix}/base-models` (count desc, `utils/baseModelChips.ts`).
   "All" clears the base-model filter; the top N chips (per library:
   `quickBaseModels` in `config/libraries.ts`, 8 for LoRAs and checkpoints, 0 =
@@ -1542,104 +1846,85 @@ code only.
   same `state.baseModels` of `useLibraryFilters` as the filter panel and the
   active-filter chips, so there is one source of truth and nothing extra is
   persisted. A selected base model from "More" joins the visible row.
-* **Detail drawer** (`ModelDrawer.vue`). Header: title (two lines on a phone,
-  full name in the tooltip and under Specifications > File name), base-model /
-  Update / version badges (the Update badge is a button that opens the Versions
-  tab; on a phone only the base model is shown), **Favorite**, **More actions**
-  (`aria-haspopup="menu"`, the same `ModelActionMenu` as the card with the same
-  nine actions in the same order, preceded by **View on Civitai** and **Open in
-  classic UI**, both new-tab links with `rel="noopener noreferrer"`) and
-  **Close**. The menu renders next to the drawer panel (z-70 over the drawer's
-  z-60); the actions still emit `action` with the same `ModelAction` values and
-  run through `LibraryPage.runAction`. Tabs: Overview, Description, Versions
-  (the Examples tab is gone), a WAI-ARIA tablist with a label, roving tabindex
-  and ArrowLeft/Right/Home/End (`nextTab` in `utils/drawer.ts`); all three panels
-  stay in the DOM (`v-show`) so `aria-controls` is always valid, the Versions
-  data still loads the first time its tab is shown, and a tab switch scrolls the
-  body back to the top.
-  **Overview order** (LoRAs): Send block (strength, Send to ComfyUI, Replace in
-  ComfyUI, Copy LoRA syntax as an icon button; below it the model's
-  `usage_tips` as read-only chips such as "strength 0.8" / "clip 1", a click on
-  the strength chip fills the field; `usageTipEntries` in `utils/workflow.ts`),
-  Trigger words (empty text only for LoRAs, the section is hidden for empty
-  checkpoints/embeddings), Examples (cover plus thumbnails, with **Manage
-  example images...** in the heading row), Tags, Notes, Specifications.
-  Checkpoints and embeddings start at Trigger words / Examples. There is no
-  other Send button (the header Send icon is gone).
-  The cover shows beside the example thumbnails when the drawer is wide
-  (container query at 460px) and the thumbnails form a horizontal strip under it when narrow. Thumbnails open `ExampleLightbox.vue` (modal `<dialog>`,
-  arrow keys, Escape, focus returns to the thumbnail) with the generation data
-  of Civitai `images[].meta` normalised by `utils/generation.ts`: prompt and
-  negative prompt with copy buttons, parameter chips (model, sampler,
-  scheduler, steps, CFG, seed, size, clip skip, denoise, VAE) and resources;
-  "No generation data" when the image has none. Thumbnails with a prompt get a
-  small text badge and the prompt as tooltip.
+* **Details flyout** (`ModelDrawer.vue`): a Reka UI Sheet on the right,
+  `--lm-drawer-width` (76rem, capped at the viewport). Opens from a card or row
+  (click, or double-click / Enter while the quick view is on), the quick view's
+  **Open full details**, a global-search pick and `?open=<file_path>` (kept in
+  sync; Back leaves the flyout). Modal and labelled by the title; focus starts
+  on Close, Tab stays inside, focus returns to the opener on close. Escape, an
+  outside click or Close leave (an inline edit swallows the first Escape; toast
+  actions such as Undo stay clickable).
+  **Header**: name (pencil = inline edit, saved as `model_name`), position
+  ("3 of 120") with Previous / Next, Close; then **Send to ComfyUI** (LoRAs, with
+  the strength from the info column shown on the button), **View on Civitai**, the Civitai creator,
+  the Update pill (opens Versions), licence chips (Credit / Sell images / Sell
+  model, struck through when not allowed; only when the metadata carries
+  `allowNoCredit` / `allowCommercialUse`), **Favorite**, **More actions** (the
+  card's `ModelActionMenu` entries plus View on Civitai / Open in classic UI)
+  and **Delete** (the page's confirm + Undo flow); then the tags (click =
+  filter the library and close, x = remove, "+N more" after 12, add field).
+  **Info column** (26rem, own scroll; one column below the `tablet:` width):
+  strength + Send to ComfyUI, replacing + Copy LoRA syntax (LoRAs); Info (version,
+  file name with rename, location with **Show in file manager**
+  `POST /api/lm/open-file-location` and copy path, base model with inline
+  edit, type, size, modified, times used); Hashes and IDs (short SHA256, Civitai
+  model / version id, each with copy; without a hash **Calculate hash**
+  `POST /api/lm/{prefix}/calculate-hash`); Usage tips (LoRAs: a strength chip
+  fills the strength, x removes, a preset + value adds; saved as `usage_tips`
+  JSON, `withUsageTip` in `utils/drawer.ts`); Trigger words (click copies,
+  Copy all, add one: saved as `civitai.trainedWords` like the classic modal);
+  Notes; About this version (the version description when the model has its
+  own description). Every edit goes through `save-metadata`, which stores the
+  given keys as they are.
+  **Right pane**: tabs Examples, Description, Versions, Recipes (LoRAs), a
+  WAI-ARIA tablist with roving tabindex (`nextTab`). All panels stay mounted
+  (`v-show`): a tab or thumbnail change touches only this pane (it scrolls to
+  the top on a tab change); the header and info column keep their DOM and
+  scroll (`tests/drawer.test.ts`). Examples: one large image (click = lightbox),
+  thumbnails select it, the generation data of the shown image below (prompt,
+  negative prompt, parameters, resources; `utils/generation.ts`), **Manage
+  example images...**; the cover shows when there are no examples. Versions:
+  update tracking state with **Ignore updates** / **Track updates**
+  (`POST updates/ignore`), then per version Current, In library, Newer, Early
+  access, Paid, Free now (`versionFlags`) and the Updates classification chip;
+  **Queue download** / **Download...** or **Delete this version…** (see
+  [Version management](#version-management)). Recipes: `GET
+  /api/lm/recipes/for-lora?hash=<sha256>` the first time the tab shows; a
+  recipe opens `/recipes?open=<id>`. Versions and Recipes data load lazily.
 * **Mature content** follows the library card: with the `blur_mature_content`
   setting on (default), a preview or example with NSFW level >= 4 is blurred
-  (`isBlurred` in `utils/mature.ts`, used by the card, the drawer cover by
-  `preview_nsfw_level`, the thumbnails by `image.nsfwLevel`). In the lightbox
-  the image stays blurred behind a **Show** button that reveals that image
-  only (not persisted).
+  (`isBlurred` in `utils/mature.ts`). In the lightbox the image stays blurred
+  behind a **Show** button that reveals that image only (not persisted).
 * **Unsaved notes**: notes are never auto-saved. While they differ from the
-  saved text the Save button is enabled and "Unsaved changes" shows next to it;
-  leaving through Escape, the backdrop, Close or a tag click opens the confirm
-  dialog "Discard unsaved notes?" (Discard / Keep editing, focus returns to the
-  notes field; `shouldConfirmClose` in `utils/drawer.ts`). A clean drawer closes
-  immediately. Opening another model through the `item` prop resets the draft.
-* **Versions tab**: the row of the file you own (`currentVersionId`: the item's
-  Civitai version, else the loaded metadata) has a **Current** badge and an
-  accent border. Each row has one **Queue download** button and a ghost icon
-  button **Download...** (opens the download dialog for the version) in a
-  fixed-width column, so rows line up; a version that is already in the library
-  shows the "In library" badge, its local file(s) and **Delete this version…**
-  in that column instead (see [Version management](#version-management)).
-* **Touch and phone layout**: inside the drawer every control reaches
-  `--lm-touch-target` (44px) with the `phone:` and `touch:` variants (tabs,
-  header icons, chips, send buttons, versions actions, menu rows; tag chips keep
-  their 24px look and get the 44px hit area through the button box plus a
-  negative margin). `lm-btn` itself is unchanged. On a phone the pinned header
-  plus tabs take about 130px.
-* **Prev/next and the remembered tab** (`utils/drawerNav.ts`, tests in
-  `tests/drawerNav.test.ts`, written first). The header has a **Previous model** and
-  **Next model** icon button around a position label ("3 of 120"; just the ordinal
-  when the total is unknown). They step through the list as it is currently displayed
-  (filters, sort and search applied); `LibraryPage` owns the list and the open item,
-  passes `nav` (`computeNav`) plus the neighbours' preview URLs to the drawer and
-  handles its `navigate` event. Buttons are disabled at both ends (no wrapping);
-  at the last loaded item Next stays enabled while more pages exist: the page loads
-  the next page and continues. Each step replaces `?open=` (Back leaves the
-  drawer instead of walking through models), keeps the tab, scrolls the drawer body
-  and the grid (`VirtualGrid.scrollToIndex`) so the card is in view, and announces
-  "Showing <name>, <position>" in a polite live region. When the notes are dirty the
-  same "Discard unsaved notes?" confirm appears first. Rapid presses are queued by
-  the page; metadata/versions are fetched only after a 150 ms pause (a held key
-  requests nothing per step), stale responses are dropped and in-flight requests are
-  aborted (`createRequestGuard`); only the neighbours' preview images are warmed.
-  When the focused button becomes disabled at an end, focus moves to the other one.
-  **Shortcuts** (`shouldHandleNavKey`): Alt+ArrowLeft / Alt+ArrowRight, and plain
-  `k` (previous) / `j` (next); only while the drawer is the topmost layer (`useDismiss`
-  stack) with no dialog (lightbox, confirm, example images) or its More actions menu
-  open, never while typing in an input, textarea, select or contenteditable (Alt+Arrow
-  is word movement on macOS), and no Ctrl/Meta/Shift. The tab list ignores Alt+Arrow.
-  On a phone the navigation sits on a second header row (left of the base-model
-  badge); its 44px hit areas overlap the row's padding so header + tabs stay at about
-  129px at 375px wide. The recipe drawer does not have prev/next yet.
-  **Last tab**: the selected tab is stored in `localStorage` (`lm-ui.detail.tab`,
-  validated against Overview / Description / Versions, default Overview) and applied
-  to every model you open; a model that lacks the tab (Versions needs a Civitai model
-  id) shows Overview without overwriting the preference.
-* Drawer tests: `tests/drawer.test.ts` (mature-blur rule, usage-tip chips,
-  `nextTab`, `shouldConfirmClose`, `currentVersionId`), written before the UI.
-* **Tags** are uniform pills (click = filter the library by that tag and close
-  the drawer, x = remove), collapsed after 12 with "+N more"
-  (`utils/tags.ts`). **Specifications** (file name, path, folder, base model,
-  type, file type, size, dates, hash; copy path/hash) are a collapsible
-  section, closed by default, remembered in `localStorage`
-  (`lm-ui.detail.specsOpen`, `composables/usePersistentToggle.ts`).
+  saved text "Unsaved changes" shows next to Save; leaving (Escape, outside
+  click, Close, a tag click, a recipe, Previous / Next) asks "Discard unsaved
+  notes?" first (`shouldConfirmClose`). Opening another model through the
+  `item` prop resets the draft.
+* **Touch and phone layout**: inside the flyout every control reaches
+  `--lm-touch-target` (44px) with the `phone:` and `touch:` variants.
+* **Prev/next and the remembered tab** (`utils/drawerNav.ts`,
+  `tests/drawerNav.test.ts`). Previous / Next step through the list as
+  displayed (filters, sort, search); `LibraryPage` owns the list (`computeNav`,
+  `navigateDrawer`), passes the neighbours' preview URLs for warming, disables
+  the buttons at both ends and loads the next page at the last loaded item.
+  Each step replaces `?open=`, keeps the tab, scrolls the grid to the card and
+  announces "Showing <name>, <position>". Metadata / versions load after a
+  150 ms pause, stale responses are dropped (`createRequestGuard`).
+  **Shortcuts** (`shouldHandleNavKey`): ArrowLeft / ArrowRight (plain or with
+  Alt) and `k` / `j`, from anywhere inside the flyout except text fields and
+  the tab list (which uses the arrows itself); layers above the flyout are
+  portaled, so their keys never reach it. The recipe drawer has no prev/next.
+  **Last tab**: stored in `lm-ui.detail.tab` (Examples / Description /
+  Versions / Recipes; a stored `overview` from the old drawer maps to
+  Examples) and applied to every model; a model without that tab shows
+  Examples without overwriting the preference.
+* Flyout tests: `tests/drawer.test.ts` (helpers; the mounted flyout: tab and
+  thumbnail changes keep header and info column, Recipes tab, arrow keys and
+  buttons, unsaved notes, focus in / trap / return, inline edits, `?open=`).
 * **Send to ComfyUI** (LoRAs, `config.sendToComfy`): a button on every card
   (shown on hover/focus, always on touch devices; Shift+click replaces), and
-  Send / Replace / Copy LoRA syntax with a strength field at the top of the
-  drawer overview. Same flow as the classic UI
+  Send (flyout header) / Replace / Copy LoRA syntax with a strength field in
+  the flyout's info column. Same flow as the classic UI
   (`utils/workflow.ts`, `composables/useSendToWorkflow.ts`):
   `GET /api/lm/get-registry` lists the nodes of the open ComfyUI tabs, enabled
   LoRA-capable nodes not excluded by `send_to_workflow_exclusions` are kept,
@@ -1647,8 +1932,12 @@ code only.
   `{lora_code, mode: append|replace, node_ids: [{node_id, graph_id}]}` makes
   the backend push `lora_code_update` over the PromptServer websocket. The
   syntax follows `lora_syntax_format` (legacy = bare file name) and the usage
-  tips strength; copying adds trigger words when `include_trigger_words` is
-  on. Without an open workflow, in standalone mode or when no LoRA node is
+  tips strength (cards, rows, the `s` key and the bulk send: each model's
+  own; the quick view and the flyout: their strength field, which starts
+  there; no literal strength anywhere, `tests/features.test.ts`); copying adds
+  trigger words when `include_trigger_words` is on (the toast then says
+  "LoRA syntax and trigger words copied"). One verb, "Send to ComfyUI", in
+  every label, menu, toast and aria label. Without an open workflow, in standalone mode or when no LoRA node is
   found, a warning toast offers "Copy syntax" instead. Checkpoint/embedding
   "send to workflow" is still classic-UI only.
 
@@ -1666,7 +1955,7 @@ helpers) and the typed calls in `api/endpoints.ts`.
   menu: arrow keys, Home/End, Escape returns focus to the button). The
   **drawer** has the same model actions in its More actions menu.
 * **Selection mode** toolbar: count, Select all loaded (also Ctrl/Cmd+A while
-  selection mode is on and focus is not in a field), Select none, Invert, then
+  focus is not in a field), Select none, Invert, then
   Move..., Add tags..., Send to ComfyUI (LoRAs; all selected LoRAs as one
   `, `-joined code, Shift+click replaces), Copy names and Delete... .
 * **Organize...** (library toolbar) opens the auto-organize dialog.
@@ -1786,9 +2075,18 @@ see "Phase B1 discovery" at the end of this file.
   it on (`use_default_paths` + a chosen root = `use_save_dir_as_root`). Rows
   without a destination behave exactly as before. Tests:
   `tests/routes/test_download_queue_destination.py`.
-* **Tools menu** (library toolbar): Download..., Find duplicates...,
+* **Tools menu** (library toolbar): Auto-organize..., Find duplicates...,
   Excluded models..., Fetch missing Civitai metadata... (confirm; the request
-  runs until done, then a summary toast).
+  runs until done, then a summary toast) and Rebuild cache (full rescan)...
+  (confirm; `GET /api/lm/{prefix}/scan?full_rebuild=true`, skipped while
+  another scan runs, then the list reloads). A right-click on the grid
+  background opens the same entries after Download and Select all
+  (`pageMenu` in `utils/menuItems.ts`); the recipes page publishes Import,
+  Select, the folder panel and its Tools to the command palette too.
+* **Details flyout extras**: the Info block shows the full file path again
+  (with Copy path), every row of the Versions tab links to that version on
+  Civitai, and `Delete` outside a text field runs the header's Delete (confirm
+  + Undo; `shouldHandleDeleteKey` in `utils/drawerNav.ts`).
 * **Duplicates** (`DuplicatesDialog.vue`): hash groups side by side (preview,
   path, size, modified, base model, Civitai version), **Verify hashes** per
   group (files that differ are marked and cannot be selected), selection with
@@ -1811,7 +2109,7 @@ see "Phase B1 discovery" at the end of this file.
   run does not report it).
 * **Move dialog**: "Use the default path template" sends the root with
   `use_default_paths: true`; the backend appends each model's template folder.
-* **Folder panel** ("..." in its header): New folder... (inside the selected
+* **Folder panel** (New folder button and View options in its header): New folder... (inside the selected
   folder or a chosen root), Rename folder..., Apply filename template...,
   Delete folder.... Delete always runs the dry run first: a folder with models
   is refused with the count; otherwise the confirm says whether it is empty or
@@ -1854,7 +2152,7 @@ Backend semantics: "Phase B2a discovery" at the end of this file.
   (recipe subfolders; remembered under `lm-ui.library.recipes.folders`), sort
   (newest/oldest, name, most LoRAs, recently opened), filters (base models,
   top tags, favorites only, **missing LoRAs only** = `lora_availability=missing`)
-  with chips, the base-model quick filter (the synthetic "Unknown" bucket is
+  with chips, the optional base-model row (the synthetic "Unknown" bucket is
   left out), card size, **Tools** (Batch import..., Find duplicates...) and
   selection mode: Select all loaded (Ctrl/Cmd+A) / none / invert, Move...,
   Add tags... (one update per recipe, no bulk endpoint), Download missing
@@ -1968,7 +2266,7 @@ flows `composables/{useSettingsForm,useExampleImages,useMaintenance}.ts`,
 strings `i18n/b2bMessages.ts`. Backend semantics: "Phase B2b discovery" at
 the end of this file.
 
-* **Statistics** (`/stats`, top-bar More menu): seven metric tiles and five
+* **Statistics** (`/stats`, icon rail): seven metric tiles and five
   tabs (Overview: collection donut, base models as stacked bars, 30-day usage
   line chart; Usage: top 10 across libraries plus paged "most used" lists
   per library; Collection: tag cloud (click = LoRAs with that tag), model
@@ -2079,7 +2377,9 @@ unchanged.
   card, focus it and highlight it briefly; `#set-<section>` maps the old
   section ids to their card. Scroll position is remembered per tab (a tab
   not seen yet opens at the top).
-* **Layout**: cards with a heading and short description; field rows in two
+* **Layout**: a left tab list (divider on its right, the selected tab filled
+  with the highlight colour like the rail; a horizontal strip below
+  `tablet:`), then cards with a heading and short description; field rows in two
   columns on wide screens (label, chips and help text left, control right)
   and one column below `tablet:`; toggles are switches; danger cards
   (settings file, recipe storage) have a danger edge and icon; a changed row
@@ -2359,7 +2659,7 @@ Illustrious version is "1.0" and whose next Illustrious upload is
   its 24 h TTL.
 * **Refresh** (`r` / the header button) re-reads the overview only: no scan
   and no Civitai request.
-* **Top bar**: an Updates link left of Downloads with a badge of likely
+* **Icon rail**: an Updates entry above Downloads with a badge of likely
   updates over **all** types (LoRAs + checkpoints + embeddings), so it can be
   higher than the page's Likely chip, which counts the active type only. The
   link's name and tooltip list the split ("Updates: 4 likely updates (LoRAs
@@ -2393,7 +2693,7 @@ client, helpers including destinations, every backend code has a message,
 the row, the page against a mocked backend: tiers, type switch, Update with
 the right params and fallback, duplicates and errors, queue states and
 completion, Check now confirm / cancel / 429 / 503 / error, refresh
-registry, empty / never-checked / error states, the top-bar badge with its
+registry, empty / never-checked / error states, the rail badge with its
 split, the type-button counts, the refresh triggers with fake timers:
 mount, Check now, a finished update, visibility, no double read, GET only,
 silent failure) and `ui/tests/updateFlag.test.ts` (the library flag's

@@ -38,10 +38,11 @@ export interface GridMetrics {
 
 /**
  * Cell geometry of the virtual grid and its skeleton. `grid`: columns from the
- * card-size slider, height from the card aspect. `list`: one full-width column
- * of fixed-height rows (the slider does not apply).
+ * card-size slider, height from the card aspect plus `extraHeight` px for the
+ * text below the image. `list`: one full-width column of fixed-height rows
+ * (the slider and `extraHeight` do not apply).
  */
-export function gridMetrics(layout: GridLayout, width: number, minItemWidth: number, tokens: LayoutTokens): GridMetrics {
+export function gridMetrics(layout: GridLayout, width: number, minItemWidth: number, tokens: LayoutTokens, extraHeight = 0): GridMetrics {
   const safeWidth = Math.max(0, width)
   if (layout === 'list') {
     return { columns: 1, gap: Math.max(0, tokens.rowGap), itemWidth: safeWidth, itemHeight: Math.max(1, tokens.rowHeight) }
@@ -49,7 +50,15 @@ export function gridMetrics(layout: GridLayout, width: number, minItemWidth: num
   const gap = Math.max(0, tokens.cardGap)
   const columns = gridColumns(safeWidth, gap, minItemWidth)
   const itemWidth = (safeWidth - gap * (columns - 1)) / columns
-  return { columns, gap, itemWidth, itemHeight: Math.max(40, itemWidth / tokens.aspect) }
+  return { columns, gap, itemWidth, itemHeight: Math.max(40, itemWidth / tokens.aspect) + Math.max(0, extraHeight) }
+}
+
+/** Text block under a card image, in px at the 16px root: `pt-[0.5rem]` plus one `h-[1.25rem]` line per shown row. */
+export const CARD_TEXT_PADDING = 8
+export const CARD_TEXT_LINE = 20
+
+export function cardTextHeight(lines: number): number {
+  return lines > 0 ? CARD_TEXT_PADDING + lines * CARD_TEXT_LINE : 0
 }
 
 /** Top offset of the row that holds item `index`. */
@@ -57,10 +66,11 @@ export function rowTop(index: number, metrics: GridMetrics): number {
   return Math.floor(index / metrics.columns) * (metrics.itemHeight + metrics.gap)
 }
 
-/** A px token value ("56px", "40") as a number, or `fallback`. */
-export function parseLength(value: string, fallback: number): number {
+/** A token length ("56px", "40", "3.5rem") in px, or `fallback`; `rem` uses the root font size `remPx`. */
+export function parseLength(value: string, fallback: number, remPx = 16): number {
   const parsed = Number.parseFloat(value)
-  return Number.isFinite(parsed) ? parsed : fallback
+  if (!Number.isFinite(parsed)) return fallback
+  return value.trim().endsWith('rem') ? parsed * remPx : parsed
 }
 
 /**

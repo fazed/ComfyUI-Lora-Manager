@@ -76,7 +76,7 @@ watch(
 </script>
 
 <template>
-  <div v-if="row.visible.length || row.overflow.length" class="flex items-center gap-2 px-6 pb-3 phone:px-3">
+  <div v-if="row.visible.length || row.overflow.length" class="flex items-center gap-2 px-4 pb-2 phone:px-3">
     <div
       ref="scroller"
       class="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto py-[2px] [scrollbar-width:thin]"

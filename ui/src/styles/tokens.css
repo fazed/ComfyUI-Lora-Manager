@@ -36,6 +36,9 @@
   --color-success-soft: var(--lm-color-success-soft);
   --color-warning: var(--lm-color-warning);
   --color-warning-soft: var(--lm-color-warning-soft);
+  /* Info: fallbacks keep user themes without these tokens on their accent. */
+  --color-info: var(--lm-color-info, var(--lm-color-accent));
+  --color-info-soft: var(--lm-color-info-soft, var(--lm-color-accent-soft));
   --color-focus: var(--lm-color-focus);
   /* Form fields; the fallbacks keep user themes without these tokens readable. */
   --color-field: var(--lm-color-field, var(--lm-color-surface));
@@ -91,7 +94,8 @@
   --spacing-control: var(--lm-control-height);
   --spacing-touch: var(--lm-touch-target);
   --spacing-control-sm: calc(var(--lm-control-height) - 8px);
-  --spacing-topbar: var(--lm-topbar-height);
+  --spacing-rail: var(--lm-rail-width);
+  --spacing-folders: var(--lm-folders-width);
   --spacing-drawer: var(--lm-drawer-width);
   --spacing-card: var(--lm-card-gap);
   --aspect-card: var(--lm-card-aspect);
@@ -180,11 +184,6 @@
 @utility focus-ring {
   outline: var(--lm-focus-ring-width) solid var(--lm-color-focus);
 }
-/* Legibility gradient behind text on card media. */
-@utility bg-scrim-fade {
-  background-image: linear-gradient(to top, var(--lm-color-scrim), transparent);
-}
-
 /* Borders follow --lm-border-width (preflight already sets `border: 0 solid`). */
 @utility hairline {
   border-width: var(--lm-border-width);

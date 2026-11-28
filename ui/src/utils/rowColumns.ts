@@ -5,28 +5,31 @@
  * the rule follows the row's own width (an open folder panel narrows the row,
  * not the viewport). The thresholds are derived from the column widths below:
  * a column appears only once the name keeps at least `ROW_NAME_MIN_WIDTH` in
- * the worst case (selection indicator + Send button). `tests/rowColumns.test.ts`
- * pins the numbers and checks that reasoning.
+ * the worst case (selection indicator + Send and Copy buttons).
+ * `tests/rowColumns.test.ts` pins the numbers and checks that reasoning. All
+ * widths are px at the 16px root (text size M); the row and the container
+ * queries use the same values in rem, so the columns follow the text size.
  */
 import type { ModelItem } from '@/api/types'
 
 export type RowColumn = 'name' | 'baseModel' | 'size' | 'date' | 'tags'
 
-/** Row content width (px, container query) from which a column is shown. */
-export const ROW_COLUMN_MIN_WIDTH = { date: 820, tags: 1060 } as const
+/** Row content width (px at the 16px root, container query) from which a column is shown. */
+export const ROW_COLUMN_MIN_WIDTH = { date: 840, tags: 1060 } as const
 
 /**
- * The matching Tailwind classes ModelRow puts on the cells. Literal strings on
- * purpose: Tailwind generates classes it finds in the source, it cannot see
- * values computed from ROW_COLUMN_MIN_WIDTH. Tested to stay in sync.
+ * The matching Tailwind classes (in rem) ModelRow and the list header put on
+ * the cells. Literal strings on purpose: Tailwind generates classes it finds
+ * in the source, it cannot see values computed from ROW_COLUMN_MIN_WIDTH.
+ * Tested to stay in sync.
  */
-export const ROW_COLUMN_HIDE_CLASS = { date: '@max-[820px]:hidden', tags: '@max-[1060px]:hidden' } as const
+export const ROW_COLUMN_HIDE_CLASS = { date: '@max-[52.5rem]:hidden', tags: '@max-[66.25rem]:hidden' } as const
 
 /**
- * Fixed widths in px at the default density. `thumb` is `--lm-row-thumb` and
- * `baseModel` is `--lm-row-badge-max-width` (both in themes/base.css, checked
- * by the test); `gap` is `gap-3` (`--lm-space-3`) between the cells,
- * `actionGap` is `gap-1` between the 32px icon buttons.
+ * Fixed widths in px at the default density and text size. `thumb` is
+ * `--lm-row-thumb` and `baseModel` is `--lm-row-badge-max-width` (both in
+ * themes/base.css, checked by the test); `gap` is `gap-3` (`--lm-space-3`)
+ * between the cells, `actionGap` is `gap-1` between the 2rem icon buttons.
  */
 export const ROW_FIXED_WIDTHS = {
   selection: 20,
@@ -54,7 +57,7 @@ export function rowColumnsAt(width: number): RowColumn[] {
 export interface RowNameWidthOptions {
   /** Selection mode: the checkbox-style indicator is shown. */
   selection?: boolean
-  /** The Send button is shown (LoRAs). */
+  /** The Send and Copy buttons are shown (LoRAs). */
   send?: boolean
   /** Override the visible columns (default: `rowColumnsAt(width)`). */
   columns?: RowColumn[]
@@ -64,7 +67,7 @@ export interface RowNameWidthOptions {
 export function rowNameWidth(width: number, options: RowNameWidthOptions = {}): number {
   const w = ROW_FIXED_WIDTHS
   const columns = options.columns ?? rowColumnsAt(width)
-  const buttons = options.send ? 3 : 2
+  const buttons = options.send ? 4 : 2
   const fixed: number[] = [w.thumb, buttons * w.button + (buttons - 1) * w.actionGap]
   if (options.selection) fixed.push(w.selection)
   if (columns.includes('baseModel')) fixed.push(w.baseModel)

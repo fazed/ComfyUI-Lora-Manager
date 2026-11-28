@@ -1,3 +1,5 @@
+import { readFileSync, readdirSync, statSync } from 'node:fs'
+import { join, resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 import { setFetch } from '@/api/http'
@@ -5,7 +7,7 @@ import { LIBRARIES } from '@/config/libraries'
 import { useAppSettings } from '@/composables/useAppSettings'
 import { useToasts } from '@/composables/useFeedback'
 import { useLibraryFilters } from '@/composables/useLibraryFilters'
-import { readToggle, usePersistentToggle } from '@/composables/usePersistentToggle'
+import { readToggle } from '@/composables/usePersistentToggle'
 import { useNodePicker, useSendToWorkflow } from '@/composables/useSendToWorkflow'
 import { buildBaseModelChips, sortBaseModels } from '@/utils/baseModelChips'
 import { promptHint, toGenerationView } from '@/utils/generation'
@@ -171,33 +173,25 @@ describe('tag collapse', () => {
   })
 })
 
-describe('usePersistentToggle', () => {
+describe('readToggle', () => {
   afterEach(() => {
     vi.restoreAllMocks()
     window.localStorage.clear()
   })
 
-  it('defaults, persists and reads back', async () => {
+  it('reads a stored true / false and falls back otherwise', () => {
     expect(readToggle('lm-ui.test.toggle', false)).toBe(false)
-    const open = usePersistentToggle('lm-ui.test.toggle', false)
-    open.value = true
-    await nextTick()
-    expect(window.localStorage.getItem('lm-ui.test.toggle')).toBe('true')
-    expect(usePersistentToggle('lm-ui.test.toggle', false).value).toBe(true)
+    window.localStorage.setItem('lm-ui.test.toggle', 'true')
+    expect(readToggle('lm-ui.test.toggle', false)).toBe(true)
+    window.localStorage.setItem('lm-ui.test.toggle', 'nope')
+    expect(readToggle('lm-ui.test.toggle', true)).toBe(true)
   })
 
-  it('survives blocked storage', async () => {
+  it('survives blocked storage', () => {
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
       throw new Error('blocked')
     })
-    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
-      throw new Error('blocked')
-    })
-    const open = usePersistentToggle('lm-ui.test.blocked', false)
-    expect(open.value).toBe(false)
-    open.value = true
-    await nextTick()
-    expect(open.value).toBe(true)
+    expect(readToggle('lm-ui.test.blocked', false)).toBe(false)
   })
 })
 
@@ -217,6 +211,21 @@ describe('LoRA syntax', () => {
     expect(buildLoraSyntax({ ...LORA, usage_tips: '{"clip_strength": 0.5}' })).toBe('<lora:Anima-2.5D Style-V1:1:0.5>')
     expect(buildLoraSyntax({ ...LORA, usage_tips: '{"strength": 0.8}' }, { strength: 0.65 })).toBe('<lora:Anima-2.5D Style-V1:0.65>')
     expect(buildLoraSyntax(LORA, { strength: Number.NaN })).toBe('<lora:Anima-2.5D Style-V1:1>')
+  })
+
+  it('never hard-codes a strength: every send and copy path takes it from the usage tips or the strength field', () => {
+    const walk = (dir: string): string[] =>
+      readdirSync(dir).flatMap((name) => {
+        const path = join(dir, name)
+        return statSync(path).isDirectory() ? walk(path) : /\.(vue|ts)$/.test(name) ? [path] : []
+      })
+    // Message texts may show an example syntax (a placeholder); code may not build one with a fixed strength.
+    const files = walk(resolve(__dirname, '../src')).filter((path) => !path.includes(join('src', 'i18n')))
+    const offenders = files.filter((path) => {
+      const code = readFileSync(path, 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/.*$|<!--[\s\S]*?-->/gm, '')
+      return /<lora:[^>]*:\d/.test(code) || /(sendLora|sendLoras|copyLora|syntaxFor|buildLoraSyntax)\([^)]*strength:\s*-?\d/.test(code)
+    })
+    expect(offenders).toEqual([])
   })
 
   it('adds trigger words for copying like the classic UI', () => {

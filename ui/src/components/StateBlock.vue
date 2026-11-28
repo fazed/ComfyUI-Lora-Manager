@@ -23,7 +23,7 @@ defineEmits<{ retry: [] }>()
   >
     <div
       v-if="kind === 'loading'"
-      class="size-[28px] animate-spinner rounded-pill border-[3px] border-border border-t-accent"
+      class="size-[1.75rem] animate-spinner rounded-pill border-[3px] border-border border-t-accent"
       aria-hidden="true"
     ></div>
     <AppIcon v-else :name="kind === 'error' ? 'alert' : icon" :size="28" />

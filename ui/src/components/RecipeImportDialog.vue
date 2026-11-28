@@ -276,7 +276,7 @@ const dropClass =
 
         <p class="lm-hint">{{ t('recipes.import.saveHint') }}</p>
         <p class="lm-error-text" role="alert">{{ error ?? '' }}</p>
-        <div class="sticky bottom-0 -mx-5 -mb-5 flex justify-end gap-2 hairline-t border-border bg-elevated px-5 py-3">
+        <div class="lm-dialog-footer">
           <button type="button" class="lm-btn" :disabled="busy" @click="back">
             <AppIcon name="chevronLeft" :size="16" />{{ t('recipes.import.back') }}
           </button>
@@ -293,7 +293,7 @@ const dropClass =
           <p class="text-lg font-medium">{{ t('recipes.import.done', { name }) }}</p>
           <p v-if="view?.missing" class="text-sm text-muted">{{ t('recipes.import.doneMissing', { count: view.missing }) }}</p>
         </div>
-        <div class="flex flex-wrap justify-end gap-2">
+        <div class="lm-dialog-footer">
           <button v-if="view?.downloadInput" type="button" class="lm-btn" @click="emit('download', view.downloadInput)">
             <AppIcon name="download" :size="16" />{{ t('recipes.missing.download', { count: view.missing }) }}
           </button>

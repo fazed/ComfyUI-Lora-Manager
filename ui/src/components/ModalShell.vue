@@ -1,13 +1,13 @@
 <script setup lang="ts">
 /**
- * Native modal <dialog> shell for the action dialogs (rename, add tags, move,
- * organize). The parent mounts it while open (v-if); it opens itself, and
- * Escape / a backdrop click / the close button emit `close` - except while
- * `busy` (a request is running), when the dialog stays put.
+ * Modal shell for the action dialogs (rename, add tags, move, organize, ...)
+ * on the Reka UI Dialog (components/ui/dialog): focus trap, focus return and
+ * the inert background come from the primitive. The parent mounts it while
+ * open (v-if); Escape, an outside click or the close button emit `close` -
+ * except while `busy` (a request is running), when the dialog stays put.
  */
-import { onBeforeUnmount, onMounted, ref } from 'vue'
 import AppIcon from './AppIcon.vue'
-import { useDismissLayer } from '@/composables/useDismiss'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { t } from '@/i18n'
 
 const props = withDefaults(defineProps<{ title: string; titleId: string; busy?: boolean; wide?: boolean }>(), {
@@ -15,39 +15,26 @@ const props = withDefaults(defineProps<{ title: string; titleId: string; busy?: 
   wide: false,
 })
 const emit = defineEmits<{ close: [] }>()
-const dialog = ref<HTMLDialogElement | null>(null)
-let previousFocus: HTMLElement | null = null
 
 function requestClose(): void {
   if (!props.busy) emit('close')
 }
-
-const { backdrop } = useDismissLayer({ active: () => true, close: requestClose, escape: false, backdrop: 'dialog' })
-
-onMounted(() => {
-  previousFocus = document.activeElement as HTMLElement | null
-  dialog.value?.showModal()
-})
-onBeforeUnmount(() => {
-  if (dialog.value?.open) dialog.value.close()
-  previousFocus?.focus?.()
-})
 </script>
 
 <template>
-  <dialog
-    ref="dialog"
-    class="max-h-[calc(100vh-var(--lm-space-8))] overflow-hidden rounded-lg hairline border-border bg-elevated p-0 text-fg shadow-lg backdrop:bg-overlay"
-    :class="wide ? 'w-[min(760px,calc(100vw-var(--lm-space-8)))]' : 'w-[min(480px,calc(100vw-var(--lm-space-8)))]'"
-    :aria-labelledby="titleId"
-    :aria-busy="busy || undefined"
-    @cancel.prevent="requestClose"
-    @pointerdown="backdrop.pointerdown"
-    @click="backdrop.click"
-  >
-    <div class="flex max-h-[calc(100vh-var(--lm-space-8))] flex-col">
-      <header class="flex items-start gap-2 px-5 pt-5 pb-3">
-        <h2 :id="titleId" class="min-w-0 flex-1 text-lg wrap-anywhere">{{ title }}</h2>
+  <Dialog :open="true" @update:open="(open) => open || requestClose()">
+    <DialogContent
+      :show-close-button="false"
+      class="flex max-h-[calc(100vh-var(--lm-space-8))] max-w-none flex-col gap-0 overflow-hidden p-0"
+      :class="wide ? 'w-[min(47.5rem,calc(100vw-var(--lm-space-8)))]' : 'w-[min(30rem,calc(100vw-var(--lm-space-8)))]'"
+      :aria-labelledby="titleId"
+      :aria-describedby="undefined"
+      :aria-busy="busy || undefined"
+    >
+      <header class="mb-4 flex flex-none items-center gap-2 hairline-b border-border py-3 pr-3 pl-5">
+        <DialogTitle as-child>
+          <h2 :id="titleId" class="min-w-0 flex-1 text-lg font-bold wrap-anywhere">{{ title }}</h2>
+        </DialogTitle>
         <button
           type="button"
           class="lm-btn lm-btn--ghost lm-btn--icon lm-btn--sm flex-none"
@@ -59,6 +46,6 @@ onBeforeUnmount(() => {
         </button>
       </header>
       <slot />
-    </div>
-  </dialog>
+    </DialogContent>
+  </Dialog>
 </template>

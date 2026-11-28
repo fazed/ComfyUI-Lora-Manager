@@ -62,7 +62,7 @@ async function submit(): Promise<void> {
     :busy="busy"
     @close="emit('close')"
   >
-    <form class="flex flex-col gap-4 px-5 pb-5" novalidate @submit.prevent="submit">
+    <form class="flex min-h-0 flex-col gap-4 overflow-y-auto px-5 pb-5" novalidate @submit.prevent="submit">
       <div class="flex flex-col gap-1">
         <label class="lm-label" for="folder-location">{{ mode === 'create' ? t('folders.createIn') : t('folders.location') }}</label>
         <select v-if="locations.length > 1" id="folder-location" v-model="location" class="lm-select" :disabled="busy">
@@ -87,7 +87,7 @@ async function submit(): Promise<void> {
         <p v-if="mode === 'rename'" id="folder-name-hint" class="lm-hint">{{ t('folders.renameHint') }}</p>
         <p id="folder-name-error" class="lm-error-text" role="alert">{{ shownError ?? '' }}</p>
       </div>
-      <div class="flex justify-end gap-2">
+      <div class="lm-dialog-footer">
         <button type="button" class="lm-btn" :disabled="busy" @click="emit('close')">{{ t('common.cancel') }}</button>
         <button type="submit" class="lm-btn lm-btn--primary" :disabled="busy || !!localError">
           {{ mode === 'create' ? t('folders.createConfirm') : t('folders.renameConfirm') }}

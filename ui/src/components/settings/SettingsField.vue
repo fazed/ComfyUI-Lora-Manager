@@ -93,7 +93,7 @@ function toggleCheck(value: string, checked: boolean): void {
 <template>
   <div
     :id="id + '-row'"
-    class="relative grid scroll-mt-[calc(var(--lm-topbar-height)+var(--lm-space-8))] grid-cols-[minmax(0,2fr)_minmax(0,3fr)] items-start gap-x-6 gap-y-2 px-5 py-4 transition-colors duration-(--lm-motion-normal) tablet:grid-cols-1 phone:px-4"
+    class="relative grid scroll-mt-8 tablet:scroll-mt-[calc(var(--lm-control-height)+var(--lm-space-8)*2)] grid-cols-[minmax(0,2fr)_minmax(0,3fr)] items-start gap-x-6 gap-y-2 px-5 py-4 transition-colors duration-(--lm-motion-normal) tablet:grid-cols-1 phone:px-4"
     :class="highlighted ? 'bg-accent-soft' : ''"
     :data-key="field.key"
   >
@@ -142,7 +142,7 @@ function toggleCheck(value: string, checked: boolean): void {
         <input
           v-else-if="field.type === 'number'"
           :id="id"
-          class="lm-input max-w-[200px] tabular-nums"
+          class="lm-input max-w-[12.5rem] tabular-nums"
           type="number"
           inputmode="decimal"
           :min="field.min"
@@ -158,7 +158,7 @@ function toggleCheck(value: string, checked: boolean): void {
         <textarea
           v-else-if="multiline"
           :id="id"
-          class="lm-textarea min-h-[96px] font-mono text-xs"
+          class="lm-textarea min-h-[6rem] font-mono text-xs"
           :rows="field.type === 'textarea' ? 3 : 4"
           spellcheck="false"
           :value="text"
@@ -190,11 +190,11 @@ function toggleCheck(value: string, checked: boolean): void {
               <button type="button" class="lm-btn lm-btn--sm lm-btn--ghost" @click="setSecret({ mode: 'keep', value: '' })">{{ t('set.secret.cancel') }}</button>
             </template>
           </div>
-          <div v-if="secret.mode === 'set'" class="relative flex max-w-[480px] items-center">
+          <div v-if="secret.mode === 'set'" class="relative flex max-w-[30rem] items-center">
             <input
               :id="id"
               ref="secretInput"
-              class="lm-input min-w-0 flex-1 pr-[44px] font-mono text-xs"
+              class="lm-input min-w-0 flex-1 pr-[2.75rem] font-mono text-xs"
               :type="reveal ? 'text' : 'password'"
               autocomplete="new-password"
               spellcheck="false"
@@ -249,7 +249,7 @@ function toggleCheck(value: string, checked: boolean): void {
       </div>
 
       <!-- Below the tablet breakpoint the slot only takes space when Reset shows (controls get the full width). -->
-      <div class="flex min-h-control w-[68px] flex-none items-center justify-end tablet:w-auto">
+      <div class="flex min-h-control w-[4.25rem] flex-none items-center justify-end tablet:w-auto">
         <button
           v-if="showReset"
           type="button"

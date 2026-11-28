@@ -40,7 +40,7 @@
   /*
    * `revert-layer` inside the base layer rolls back to the browser defaults
    * that preflight removes: placeholder color, legend padding, the native
-   * look of checkboxes/radios/sliders and the centering of modal dialogs.
+   * look of checkboxes/radios/sliders.
    */
   ::placeholder {
     color: revert-layer;
@@ -54,10 +54,6 @@
   input:where([type='checkbox'], [type='radio'], [type='range']) {
     margin: revert-layer;
     background-color: revert-layer;
-  }
-
-  dialog {
-    margin: revert-layer;
   }
 
   :focus-visible {
@@ -79,8 +75,10 @@
     @apply border-border-strong bg-sunken;
   }
 
-  .lm-btn:disabled {
-    @apply cursor-not-allowed opacity-55;
+  /* Disabled: muted colours instead of opacity, so the label keeps text contrast (no sub-4.5:1 text). */
+  .lm-btn:disabled,
+  .lm-btn[aria-disabled='true'] {
+    @apply cursor-not-allowed border-border bg-field-disabled text-muted;
   }
 
   .lm-btn--primary {
@@ -192,7 +190,8 @@
   /*
    * On/off switch: <input type="checkbox" role="switch" class="lm-switch">.
    * Track in the field tokens (outline >= 3:1), the knob is a radial
-   * gradient that slides across; accent track when on.
+   * gradient that slides across (a shape, allow-listed in
+   * tests/styleTokens.test.ts); accent track when on.
    */
   .lm-switch {
     @apply relative inline-block h-[22px] w-[40px] flex-none cursor-pointer appearance-none rounded-pill hairline border-field-border bg-field;
@@ -217,7 +216,11 @@
   }
 
   .lm-switch:disabled {
-    @apply cursor-not-allowed opacity-55;
+    @apply cursor-not-allowed border-border-strong bg-field-disabled;
+  }
+
+  .lm-switch:checked:disabled {
+    @apply border-muted bg-muted;
   }
 
   .lm-label {
@@ -275,6 +278,15 @@
     @apply rounded-md hairline border-border bg-surface;
   }
 
+  /*
+   * Button row of a ModalShell dialog: the last child of the dialog's
+   * scrolling body (px-5 pb-5), pinned to its bottom edge with a top border so
+   * the actions stay visible while a long body scrolls.
+   */
+  .lm-dialog-footer {
+    @apply sticky bottom-0 mt-auto -mx-5 -mb-5 flex flex-none flex-wrap items-center justify-end gap-2 hairline-t border-border bg-elevated px-5 py-3;
+  }
+
   .lm-skeleton {
     @apply animate-skeleton bg-skeleton;
   }
@@ -309,8 +321,8 @@
 
   /*
    * LazyMedia (components/LazyMedia.vue): skeleton under the media while it
-   * loads, then the media fades in. The shimmer starts after a short delay (no
-   * flash for fast loads) and is off for prefers-reduced-motion. The fade keeps
+   * loads, then the media fades in. The skeleton pulse starts after a short
+   * delay (no flash for fast loads) and is off for prefers-reduced-motion. The fade keeps
    * the zoom transition of .lm-zoom-media in the same declaration.
    */
   .lm-media-placeholder {
@@ -318,15 +330,8 @@
   }
 
   .lm-media-placeholder.is-loading {
-    background-image: linear-gradient(
-      100deg,
-      transparent 30%,
-      color-mix(in srgb, var(--lm-color-surface) 35%, transparent) 50%,
-      transparent 70%
-    );
-    background-size: 250% 100%;
-    background-repeat: no-repeat;
-    animation: lm-shimmer 1.6s var(--lm-ease) 0.25s infinite;
+    @apply animate-skeleton;
+    animation-delay: 0.25s;
   }
 
   .lm-fade {
@@ -347,16 +352,6 @@
   @media (prefers-reduced-motion: reduce) {
     .lm-media-placeholder.is-loading {
       animation: none;
-      background-image: none;
-    }
-  }
-
-  @keyframes lm-shimmer {
-    from {
-      background-position: 100% 0;
-    }
-    to {
-      background-position: 0 0;
     }
   }
 
@@ -382,19 +377,6 @@
 
   .lm-row.is-selected {
     @apply bg-accent-soft text-accent;
-  }
-
-  /* Toolbar above a card grid (library pages, recipes). */
-  .lm-toolbar {
-    @apply flex flex-wrap items-center justify-between gap-3 px-6 pt-5 phone:px-3 phone:pt-4;
-  }
-
-  .lm-toolbar-title {
-    @apply flex items-baseline gap-3;
-  }
-
-  .lm-toolbar-title h1 {
-    @apply text-2xl;
   }
 
   .lm-muted {

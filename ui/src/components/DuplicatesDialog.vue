@@ -165,7 +165,7 @@ function folderOf(model: ModelItem): string {
                 v-for="model in group.models"
                 :key="model.file_path"
                 class="flex min-w-0 flex-col gap-1 rounded-md hairline border-border bg-surface p-2 text-xs"
-                :class="{ 'ring-selected': selected.has(model.file_path), 'opacity-50': mismatched.has(model.file_path) }"
+                :class="{ 'ring-selected': selected.has(model.file_path), 'bg-field-disabled text-muted': mismatched.has(model.file_path) }"
               >
                 <label class="flex items-center gap-2 text-sm">
                   <input

@@ -193,8 +193,10 @@ describe('refresh host: r shortcut and tab visibility', () => {
     const input = document.createElement('input')
     document.body.appendChild(input)
     press('r', {}, input)
-    const dialog = document.createElement('dialog')
-    dialog.setAttribute('open', '')
+    // An open Reka dialog (components/ui/) marks its content like this.
+    const dialog = document.createElement('div')
+    dialog.setAttribute('role', 'dialog')
+    dialog.setAttribute('data-state', 'open')
     const inside = document.createElement('button')
     dialog.appendChild(inside)
     document.body.appendChild(dialog)
@@ -471,7 +473,6 @@ describe('RefreshButton and the page header', () => {
         sortOptions: [{ value: 'name:asc', label: 'library.sort.nameAsc' as const }],
         foldersId: 'folders-loras',
         foldersOpen: false,
-        folderActive: false,
         filterCount: 0,
         chips: [],
         selectionMode: false,
@@ -714,8 +715,13 @@ describe('library page refresh', () => {
     saveBrowseView('loras', {
       search: '',
       folder: 'characters',
+      letter: '',
       baseModels: ['SDXL'],
       tags: ['anime'],
+      tagLogic: 'any',
+      modelTypes: [],
+      creditRequired: null,
+      allowSelling: null,
       favoritesOnly: true,
       updatesOnly: false,
       missingOnly: false,
@@ -726,8 +732,8 @@ describe('library page refresh', () => {
     const { wrapper } = await mountRoute('loras', '/loras')
     // Mounting never scans.
     expect(calls.some((call) => pathOf(call.url).endsWith('/scan'))).toBe(false)
-    // Selection mode on (bare s).
-    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 's', bubbles: true }))
+    // Bulk bar on (bare b).
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', bubbles: true }))
     await flushPromises()
     expect(wrapper.text()).toContain('selected')
 

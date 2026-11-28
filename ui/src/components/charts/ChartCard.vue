@@ -34,7 +34,7 @@ void props
     <div role="img" :aria-label="summary || t('stats.chartOf', { title })" class="min-w-0">
       <slot />
     </div>
-    <div v-if="table && showTable" :id="`${id}-table`" class="max-h-[320px] overflow-auto">
+    <div v-if="table && showTable" :id="`${id}-table`" class="max-h-[20rem] overflow-auto">
       <slot name="table" />
     </div>
   </section>
